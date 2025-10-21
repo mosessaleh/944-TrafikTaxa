@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum RideStatus {
+  PENDING
+  CONFIRMED
+  DISPATCHED
+  ONGOING
+  COMPLETED
+  CANCELED
+}
+
+model User {
+  id                   Int       @id @default(autoincrement())
+  email                String    @unique
+  pendingEmail         String?   @unique
+  pendingEmailCode     String?
+  pendingEmailExpires  DateTime?
+  hashedPassword       String
+  firstName            String
+  lastName             String
+  phone                String
+  street               String
+  houseNumber          String
+  postalCode           String
+  city                 String
+  role                 Role      @default(USER)
+  emailVerified        Boolean   @default(false)
+  emailVerifyCode      String?
+  emailVerifyExpires   DateTime?
+  resetToken           String?
+  resetExpires         DateTime?
+  createdAt            DateTime  @default(now())
+  rides                Ride[]
+}
+
+model Ride {
+  id             Int        @id @default(autoincrement())
+  userId         Int
+  user           User       @relation(fields: [userId], references: [id])
+  riderName      String
+  passengers     Int
+  pickupAddress  String
+  dropoffAddress String
+  scheduled      Boolean    @default(false)
+  pickupTime     DateTime
+  distanceKm     Decimal?   @db.Decimal(8, 2)
+  durationMin    Int?
+  price          Decimal    @db.Decimal(10, 2)
+  status         RideStatus @default(PENDING)
+  paid           Boolean    @default(false)
+  createdAt      DateTime   @default(now())
+}
+
+model Settings {
+  id            Int      @id @default(autoincrement())
+  // Pricing (day 06:00–18:00, night/holidays otherwise)
+  dayBase       Decimal  @db.Decimal(10, 2)
+  dayPerKm      Decimal  @db.Decimal(10, 2)
+  dayPerMin     Decimal  @db.Decimal(10, 2)
+  nightBase     Decimal  @db.Decimal(10, 2)
+  nightPerKm    Decimal  @db.Decimal(10, 2)
+  nightPerMin   Decimal  @db.Decimal(10, 2)
+  workStart     String
+  workEnd       String
+  // Company info (editable by admin)
+  companyName   String?   @default("944 Trafik")
+  contactEmail  String?   @default("trafik@944.dk")
+  contactPhone  String?   @default("26444944")
+  addressCity   String?   @default("Frederikssund")
+  updatedAt     DateTime  @updatedAt
+}

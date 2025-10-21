@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base layout colors similar to before */
+html,body{height:100%}
+body{background:#f8fafc;color:#0f172a}
+.container{max-width:72rem;margin:0 auto;padding:0 1rem}

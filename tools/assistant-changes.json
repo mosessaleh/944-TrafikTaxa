@@ -1,0 +1,9 @@
+{
+  "description": "Add top margin between navbar and body (layout tweak).",
+  "files": [
+    {
+      "path": "app/layout.tsx",
+      "content": "import './globals.css'\nimport Navbar from '@/components/navbar'\nimport type { ReactNode } from 'react'\n\nexport const metadata = {\n  title: '944 Trafik',\n  description: 'Taxi booking for 944 Trafik',\n}\n\nexport default function RootLayout({ children }: { children: ReactNode }){\n  return (\n    <html lang=\"en\">\n      <body>\n        <header className=\"border-b bg-white shadow-sm\">\n          <Navbar />\n        </header>\n        <main className=\"container py-6 mt-6\">{children}</main>\n      </body>\n    </html>\n  )\n}\n"
+    }
+  ]
+}

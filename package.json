@@ -1,0 +1,40 @@
+{
+  "name": "944-trafik",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint || echo 'no lint'",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "db:seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.cjs"
+  },
+  "dependencies": {
+    "@prisma/client": "5.22.0",
+    "bcrypt": "^5.1.1",
+    "jsonwebtoken": "^9.0.2",
+    "next": "14.2.33",
+    "nodemailer": "^6.9.14",
+    "prisma": "5.22.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "swr": "^2.3.6",
+    "tailwindcss": "3.4.14",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node": "^20.11.19",
+    "@types/react": "19.2.2",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.47",
+    "typescript": "^5.4.0"
+  }
+}
