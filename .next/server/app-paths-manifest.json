@@ -1,12 +1,8 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/login/page": "app/login/page.js",
-  "/page": "app/page.js",
-  "/api/admin/bookings/route": "app/api/admin/bookings/route.js",
-  "/api/auth/me/route": "app/api/auth/me/route.js",
-  "/api/admin/bookings/update/route": "app/api/admin/bookings/update/route.js",
-  "/admin/page": "app/admin/page.js",
-  "/admin/bookings/page": "app/admin/bookings/page.js",
-  "/admin/settings/page": "app/admin/settings/page.js",
-  "/admin/users/page": "app/admin/users/page.js"
+  "/api/dev/seed-vehicle-types/route": "app/api/dev/seed-vehicle-types/route.js",
+  "/book/page": "app/book/page.js",
+  "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
+  "/api/vehicle-types/route": "app/api/vehicle-types/route.js",
+  "/api/favorites/route": "app/api/favorites/route.js",
+  "/api/auth/me/route": "app/api/auth/me/route.js"
 }

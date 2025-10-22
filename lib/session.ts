@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { verify } from 'jsonwebtoken';
 import { prisma } from '@/lib/db';
 
-const SECRET = process.env.SECRET || 'dev_secret_change_me';
+const SECRET = process.env.SECRET || 'change_me_dev_secret';
 
 export type CurrentUser = {
   id: number;

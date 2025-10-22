@@ -1,4 +1,4 @@
-// File: C:\Users\moses\Projects\Websites\944 Trafik\app\api\auth\me\route.ts
+// File: C:\Users\moses\Projects\Websites\944-TrafikTaxa\app\api\auth\me\route.ts
 import * as entry from '../../../../../../app/api/auth/me/route.js'
 import type { NextRequest } from 'next/server.js'
 

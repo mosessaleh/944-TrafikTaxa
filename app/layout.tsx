@@ -11,10 +11,10 @@ export default function RootLayout({ children }: { children: ReactNode }){
   return (
     <html lang="en">
       <body>
-        <header className="border-b bg-white shadow-sm">
-          <Navbar />
-        </header>
-        <main className="container py-6 mt-6">{children}</main>
+        {/* Navbar with inner padding handled inside component */}
+        <Navbar />
+        {/* Bigger top margin + vertical padding for page content */}
+        <main className="container py-8 mt-8">{children}</main>
       </body>
     </html>
   )

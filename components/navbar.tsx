@@ -1,17 +1,20 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { NavLinks, AuthButtons } from '@/components/nav-auth-client';
 
 export default function Navbar(){
   return (
-    <header className="border-b bg-white">
-      <div className="container py-3 flex items-center justify-between">
-        {/* Left: logo + links */}
-        <div className="flex items-center gap-6">
-          <Link href="/" className="font-bold text-lg">944 Trafik</Link>
-          <NavLinks />
+    <header className="bg-white/90 backdrop-blur border-b mb-[10px] p-[5px]">
+      <div className="container flex items-center justify-between">
+        <div className="flex items-center gap-5">
+          <Link href="/" className="flex items-center gap-2">
+            <Image src="/logo.svg" alt="944 Trafik" width={180} height={40} priority className="h-10 w-auto"/>
+          </Link>
+          <nav className="hidden md:block"><NavLinks /></nav>
         </div>
-        {/* Right: auth buttons */}
-        <AuthButtons />
+        <div className="flex items-center gap-3">
+          <AuthButtons />
+        </div>
       </div>
     </header>
   );

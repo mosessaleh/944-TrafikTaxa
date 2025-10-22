@@ -1,36 +1,33 @@
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 
-function decodeRole(token: string | null): 'ADMIN' | 'USER' | null {
-  if (!token) return null;
-  const parts = token.split('.');
-  if (parts.length < 2) return null;
-  try {
-    // Base64URL decode payload (no verification in middleware)
-    const payload = JSON.parse(Buffer.from(parts[1].replace(/-/g,'+').replace(/_/g,'/'), 'base64').toString('utf8'));
-    return payload?.role === 'ADMIN' ? 'ADMIN' : 'USER';
-  } catch { return null; }
+export function middleware(_req: NextRequest) {
+  const res = NextResponse.next();
+
+  // Core security headers
+  res.headers.set('X-Frame-Options', 'DENY');
+  res.headers.set('X-Content-Type-Options', 'nosniff');
+  res.headers.set('Referrer-Policy', 'same-origin');
+  res.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+
+  // CSP — relaxed for Next dev (inline/eval + ws for HMR). You can tighten later with nonce.
+  const csp = [
+    "default-src 'self'",
+    "img-src 'self' data: https://*.tile.openstreetmap.org",
+    "style-src 'self' 'unsafe-inline'",
+    // Allow inline/eval for Next dev tooling; includes ws: for HMR
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org ws:",
+    "font-src 'self' data:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'"
+  ].join('; ');
+  res.headers.set('Content-Security-Policy', csp);
+
+  return res;
 }
 
-export function middleware(req: NextRequest){
-  const { pathname } = req.nextUrl;
-  const protectedPaths = ['/book','/bookings','/profile','/admin'];
-  const needsAuth = protectedPaths.some(p => pathname.startsWith(p));
-  if (!needsAuth) return NextResponse.next();
-
-  const token = req.cookies.get('session')?.value || null;
-  if (!token) {
-    const url = new URL('/login', req.url);
-    url.searchParams.set('next', pathname);
-    return NextResponse.redirect(url);
-  }
-
-  // role-gate for admin
-  if (pathname.startsWith('/admin')){
-    const role = decodeRole(token);
-    if (role !== 'ADMIN') return NextResponse.redirect(new URL('/', req.url));
-  }
-
-  return NextResponse.next();
-}
-
-export const config = { matcher: ['/book/:path*','/bookings/:path*','/profile/:path*','/admin/:path*'] };
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/dev/.*).*)']
+};

@@ -1,4 +1,4 @@
-// File: C:\Users\moses\Projects\Websites\944 Trafik\app\layout.tsx
+// File: C:\Users\moses\Projects\Websites\944-TrafikTaxa\app\layout.tsx
 import * as entry from '../../../app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 
