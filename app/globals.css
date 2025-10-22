@@ -2,7 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Base layout colors similar to before */
-html,body{height:100%}
-body{background:#f8fafc;color:#0f172a}
-.container{max-width:72rem;margin:0 auto;padding:0 1rem}
+/* ===== Design Tokens ===== */
+:root{
+  --brand: #111827; /* near-black for brand */
+  --brand-acc: #0ea5e9; /* sky-500 */
+  --surface: 255 255 255; /* white */
+  --muted: 249 250 251; /* gray-50 */
+  --ring: 14 165 233; /* sky-500 */
+}
+
+/* Smooth rendering */
+html{ scroll-behavior:smooth; }
+body{ @apply antialiased; }
+
+/* ===== Base tweaks ===== */
+@layer base{
+  h1{ @apply text-3xl md:text-4xl font-bold tracking-tight; }
+  h2{ @apply text-2xl md:text-3xl font-semibold; }
+}
+
+/* ===== Components layer ===== */
+@layer components{
+  /* Container helper (keeps pages neat) */
+  .container-page{ @apply mx-auto max-w-6xl px-4; }
+
+  /* Buttons */
+  .btn{ @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-2xl text-sm font-medium transition; }
+  .btn-primary{ @apply btn bg-black text-white hover:bg-gray-900 active:scale-[.98] focus:outline-none focus:ring-2 focus:ring-sky-500/50; }
+  .btn-ghost{ @apply btn border hover:bg-gray-100; }
+  .btn-danger{ @apply btn bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400/50; }
+  .btn-muted{ @apply btn bg-gray-100 text-gray-800 hover:bg-gray-200; }
+
+  /* Inputs */
+  .input{ @apply w-full px-3 py-2 rounded-xl border bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500/40; }
+  .select{ @apply input pr-8; }
+  .label{ @apply text-sm text-gray-700; }
+
+  /* Cards */
+  .card{ @apply bg-white border rounded-2xl shadow-sm; }
+  .card-body{ @apply p-4 md:p-5; }
+
+  /* Head strip */
+  .strip{ @apply text-xs uppercase tracking-wide text-gray-500; }
+
+  /* Tables */
+  .table{ @apply w-full text-sm; }
+  .thead{ @apply bg-gray-50 text-left; }
+  .th{ @apply p-3 font-medium text-gray-700; }
+  .td{ @apply p-3; }
+  .tr{ @apply border-t; }
+
+  /* Modal shell */
+  .modal-wrap{ @apply fixed inset-0 z-50; }
+  .modal-overlay{ @apply absolute inset-0 bg-black/30; }
+  .modal-box{ @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[92vw] max-w-md rounded-2xl bg-white border shadow-xl; }
+  .modal-head{ @apply flex items-center justify-between mb-2; }
+}

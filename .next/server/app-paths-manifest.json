@@ -1,11 +1,17 @@
 {
+  "/_not-found/page": "app/_not-found/page.js",
   "/account/page": "app/account/page.js",
   "/page": "app/page.js",
   "/book/page": "app/book/page.js",
+  "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
   "/api/profile/route": "app/api/profile/route.js",
   "/api/favorites/route": "app/api/favorites/route.js",
   "/api/bookings/route": "app/api/bookings/route.js",
+  "/api/admin/settings/route": "app/api/admin/settings/route.js",
+  "/api/admin/vehicle-types/route": "app/api/admin/vehicle-types/route.js",
   "/api/admin/bookings/route": "app/api/admin/bookings/route.js",
   "/admin/page": "app/admin/page.js",
-  "/admin/bookings/page": "app/admin/bookings/page.js"
+  "/admin/bookings/page": "app/admin/bookings/page.js",
+  "/admin/settings/page": "app/admin/settings/page.js",
+  "/admin/users/page": "app/admin/users/page.js"
 }
