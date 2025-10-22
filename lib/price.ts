@@ -7,11 +7,22 @@ function isHoliday(at: Date){
 }
 
 export async function computeBase(distanceKm:number, durationMin:number, at: Date){
+  // اقرأ من Settings إن وُجد، وإلا استخدم القيم الافتراضية
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } }).catch(()=>null);
   const hour = at.getHours();
-  const isNight = (hour < 6 || hour >= 18) || isHoliday(at);
-  const start = isNight ? 60 : 40;
-  const perKm = isNight ? 16 : 12.75;
-  const perMin = isNight ? 7 : 5.75;
+  const nightOrHoliday = (hour < 6 || hour >= 18) || isHoliday(at);
+
+  const dayBase = settings?.dayBase ?? 40;
+  const dayKm   = settings?.dayPerKm ?? 12.75;
+  const dayMin  = settings?.dayPerMin ?? 5.75;
+  const ngBase  = settings?.nightBase ?? 60;
+  const ngKm    = settings?.nightPerKm ?? 16;
+  const ngMin   = settings?.nightPerMin ?? 7;
+
+  const start  = nightOrHoliday ? ngBase : dayBase;
+  const perKm  = nightOrHoliday ? ngKm   : dayKm;
+  const perMin = nightOrHoliday ? ngMin  : dayMin;
+
   const price = Math.max(0, start + perKm * distanceKm + perMin * durationMin);
   return Math.round(price);
 }
