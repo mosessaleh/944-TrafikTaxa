@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint || echo 'no lint'",
+    "lint": "next lint",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "format": "prettier --write .",
+    "db:migrate": "prisma migrate dev -n crypto-payments"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"
@@ -23,12 +25,12 @@
     "jsonwebtoken": "^9.0.2",
     "lru-cache": "10",
     "next": "14.2.33",
-    "nodemailer": "^6.9.14",
+    "nodemailer": "^6.9.13",
     "prisma": "5.22.0",
     "rate-limiter-flexible": "^8.1.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "swr": "^2.3.6",
+    "swr": "^2.2.5",
     "tailwindcss": "3.4.14",
     "zod": "^3.23.8"
   },
@@ -39,6 +41,9 @@
     "@types/react": "19.2.2",
     "autoprefixer": "10.4.20",
     "postcss": "8.4.47",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "eslint": "^9.11.0",
+    "eslint-config-next": "^14.2.5",
+    "prettier": "^3.3.3"
   }
 }

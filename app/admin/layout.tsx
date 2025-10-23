@@ -8,11 +8,12 @@ export default async function AdminLayout({ children }:{ children: React.ReactNo
   return (
     <div className="grid gap-6">
       {isAdmin && (
-        <div className="flex items-center gap-4 text-sm">
+        <div className="flex gap-2">
           <Link href="/admin" className="px-3 py-1.5 rounded-xl border">Dashboard</Link>
           <Link href="/admin/bookings" className="px-3 py-1.5 rounded-xl border">Bookings</Link>
           <Link href="/admin/users" className="px-3 py-1.5 rounded-xl border">Users</Link>
           <Link href="/admin/settings" className="px-3 py-1.5 rounded-xl border">Settings</Link>
+          <Link href="/admin/pi" className="px-3 py-1.5 rounded-xl border">Pi</Link>
         </div>
       )}
       {children}

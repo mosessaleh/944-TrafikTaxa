@@ -131,3 +131,30 @@ model Ride {
   @@index([userId])
   @@index([vehicleTypeId])
 }
+
+
+// === Added by assistant (crypto payments) ===
+model CryptoWallet {
+  id        String   @id @default(cuid())
+  symbol    String   // 'usdt' | 'usdc' | 'btc' | 'pi'
+  network   String   // e.g., TRC20, ERC20, BTC
+  address   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([symbol, isActive])
+}
+
+model CryptoPayment {
+  id         String   @id @default(cuid())
+  userId     String?
+  symbol     String
+  network    String
+  addressId  String?
+  address    String
+  amountDkk  Float
+  amountCoin Float
+  status     String   @default("pending") // pending, confirmed, rejected
+  createdAt  DateTime @default(now())
+}
