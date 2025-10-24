@@ -866,6 +866,9 @@ video {
   align-items: center;
   justify-content: space-between;
 }
+.static {
+  position: static;
+}
 .fixed {
   position: fixed;
 }

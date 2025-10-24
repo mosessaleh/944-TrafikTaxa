@@ -1,10 +1,16 @@
 {
-  "/_not-found/page": "app/_not-found/page.js",
-  "/book/page": "app/book/page.js",
   "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
-  "/api/profile/route": "app/api/profile/route.js",
-  "/api/favorites/route": "app/api/favorites/route.js",
   "/api/vehicle-types/route": "app/api/vehicle-types/route.js",
+  "/book/page": "app/book/page.js",
+  "/api/favorites/route": "app/api/favorites/route.js",
+  "/api/profile/route": "app/api/profile/route.js",
+  "/api/crypto/available/route": "app/api/crypto/available/route.js",
   "/api/addresses/route": "app/api/addresses/route.js",
-  "/api/quote/route": "app/api/quote/route.js"
+  "/api/quote/route": "app/api/quote/route.js",
+  "/api/crypto/tickers/route": "app/api/crypto/tickers/route.js",
+  "/api/payments/wallets/route": "app/api/payments/wallets/route.js",
+  "/api/payments/crypto/confirm/route": "app/api/payments/crypto/confirm/route.js",
+  "/pay/page": "app/pay/page.js",
+  "/api/bookings/route": "app/api/bookings/route.js",
+  "/account/page": "app/account/page.js"
 }
