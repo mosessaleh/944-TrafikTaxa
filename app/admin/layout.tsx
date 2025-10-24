@@ -13,7 +13,7 @@ export default async function AdminLayout({ children }:{ children: React.ReactNo
           <Link href="/admin/bookings" className="px-3 py-1.5 rounded-xl border">Bookings</Link>
           <Link href="/admin/users" className="px-3 py-1.5 rounded-xl border">Users</Link>
           <Link href="/admin/settings" className="px-3 py-1.5 rounded-xl border">Settings</Link>
-          <Link href="/admin/pi" className="px-3 py-1.5 rounded-xl border">Pi</Link>
+          <Link href="/admin/crypto" className="px-3 py-1.5 rounded-xl border">Crypto</Link>
         </div>
       )}
       {children}

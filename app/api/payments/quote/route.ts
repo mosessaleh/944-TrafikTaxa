@@ -5,6 +5,9 @@ const mapSymbolToId: Record<string, string> = {
   usdc: "usd-coin",
   btc: "bitcoin",
   pi: "pi-network",
+  eth: "ethereum",
+  bnb: "binancecoin",
+  xrp: "ripple",
 };
 
 export const revalidate = 30;

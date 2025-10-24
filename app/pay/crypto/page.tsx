@@ -1,14 +1,8 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { SYMBOLS, getNetworks } from "@/lib/crypto";
 
 type Wallet = { id: string; symbol: string; network: string; address: string; isActive: boolean };
-
-const symbols = [
-  { id: "usdt", label: "USDT" },
-  { id: "usdc", label: "USDC" },
-  { id: "btc",  label: "BTC"  },
-  { id: "pi",   label: "PI"   },
-];
 
 export default function PayWithCrypto(){
   const [amountDkk, setAmountDkk] = useState<string>("");
@@ -40,6 +34,13 @@ export default function PayWithCrypto(){
       setQuote(null);
     }
   }, [symbol, amountDkk]);
+
+  useEffect(()=>{
+    // Prefill amount from URL if present
+    const sp = new URLSearchParams(window.location.search);
+    const a = sp.get("amount_dkk");
+    if (a) setAmountDkk(a);
+  }, []);
 
   async function onConfirm(){
     if (!selectedWallet || !quote) return;
@@ -78,7 +79,7 @@ export default function PayWithCrypto(){
         <label className="grid gap-1">
           <span className="text-sm text-gray-500">Currency</span>
           <select value={symbol} onChange={e=>setSymbol(e.target.value)} className="rounded-xl border px-3 py-2">
-            {symbols.map(s=>(<option key={s.id} value={s.id}>{s.label}</option>))}
+            {SYMBOLS.map(s=>(<option key={s.id} value={s.id}>{s.label}</option>))}
           </select>
         </label>
       </div>

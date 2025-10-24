@@ -158,3 +158,13 @@ model CryptoPayment {
   status     String   @default("pending") // pending, confirmed, rejected
   createdAt  DateTime @default(now())
 }
+
+
+// === Added by assistant (card payments) ===
+model CardPayment {
+  id        String   @id @default(cuid())
+  userId    String?
+  amountDkk Float
+  status    String   @default("paid") // paid, refunded, failed
+  createdAt DateTime @default(now())
+}

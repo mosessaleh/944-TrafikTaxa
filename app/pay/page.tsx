@@ -1,5 +1,4 @@
 "use client";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
@@ -15,13 +14,13 @@ export default function PayIndex(){
       <h1 className="text-2xl font-bold">Choose Payment Method</h1>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <button onClick={()=>setMethod("card")} className={`rounded-2xl border p-6 text-left ${method==="card"?"ring-2 ring-blue-500":""}`}>
+        <button onClick={()=>setMethod("card")} className={`rounded-2xl border p-6 text-left ${method==="card"?"ring-2":""}`}>
           <div className="text-lg font-semibold">Pay by Card</div>
           <div className="text-sm text-gray-500 mt-1">Visa / Mastercard</div>
         </button>
-        <button onClick={()=>setMethod("crypto")} className={`rounded-2xl border p-6 text-left ${method==="crypto"?"ring-2 ring-blue-500":""}`}>
+        <button onClick={()=>setMethod("crypto")} className={`rounded-2xl border p-6 text-left ${method==="crypto"?"ring-2":""}`}>
           <div className="text-lg font-semibold">Pay with Crypto</div>
-          <div className="text-sm text-gray-500 mt-1">USDT / USDC / BTC / PI</div>
+          <div className="text-sm text-gray-500 mt-1">USDT / USDC / BTC / PI / ETH / BNB / XRP</div>
         </button>
       </div>
 

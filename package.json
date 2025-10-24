@@ -12,7 +12,7 @@
     "prisma:studio": "prisma studio",
     "db:seed": "prisma db seed",
     "format": "prettier --write .",
-    "db:migrate": "prisma migrate dev -n crypto-payments"
+    "db:migrate": "prisma migrate dev -n card-payments"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"

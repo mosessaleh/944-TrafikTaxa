@@ -1,8 +1,10 @@
 {
+  "/_not-found/page": "app/_not-found/page.js",
   "/book/page": "app/book/page.js",
   "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
-  "/api/crypto/tickers/route": "app/api/crypto/tickers/route.js",
-  "/api/crypto/pi/route": "app/api/crypto/pi/route.js",
-  "/admin/page": "app/admin/page.js",
-  "/admin/pi/page": "app/admin/pi/page.js"
+  "/api/profile/route": "app/api/profile/route.js",
+  "/api/favorites/route": "app/api/favorites/route.js",
+  "/api/vehicle-types/route": "app/api/vehicle-types/route.js",
+  "/api/addresses/route": "app/api/addresses/route.js",
+  "/api/quote/route": "app/api/quote/route.js"
 }
