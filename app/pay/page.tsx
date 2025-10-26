@@ -1,8 +1,8 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useState, Suspense } from "react";
 
-export default function PayIndex(){
+function PayIndexContent(){
   const router = useRouter();
   const sp = useSearchParams();
   const amount = sp.get("amount_dkk") || "";
@@ -49,5 +49,13 @@ export default function PayIndex(){
         />
       </div>
     </div>
+  );
+}
+
+export default function PayIndex(){
+  return (
+    <Suspense fallback={<div className="max-w-3xl mx-auto p-6"><div className="text-center">Loading...</div></div>}>
+      <PayIndexContent />
+    </Suspense>
   );
 }

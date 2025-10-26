@@ -3,6 +3,7 @@ import { confirmBookingAndGoToPay } from "@/app/_actions/booking-pay";
 import { getCurrentUser } from '@/lib/session';
 import BookClient from '@/components/book-client';
 import ErrorBoundary from '@/components/error-boundary';
+import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -16,6 +17,11 @@ export const metadata: Metadata = {
 };
 
 export default async function BookPage(){
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect('/login?redirect=/book');
+  }
+
   return (
     <ErrorBoundary>
       <BookClient />

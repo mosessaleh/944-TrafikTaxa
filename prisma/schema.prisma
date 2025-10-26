@@ -148,7 +148,7 @@ model CryptoWallet {
 
 model CryptoPayment {
   id         String   @id @default(cuid())
-  userId     Int?
+  userId     String?
   symbol     String
   network    String
   addressId  String?

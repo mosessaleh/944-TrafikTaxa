@@ -11,9 +11,13 @@ export default function ClientNav(){
       .catch(()=>{});
   },[]);
 
-  async function logout(){
-    await fetch('/api/auth/logout',{method:'POST', credentials:'include'});
-    location.href='/';
+  function logout(){
+    // Use a simple form submission to avoid CORS/fetch issues
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/api/auth/logout';
+    document.body.appendChild(form);
+    form.submit();
   }
 
   if(!me){
