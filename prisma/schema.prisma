@@ -148,7 +148,7 @@ model CryptoWallet {
 
 model CryptoPayment {
   id         String   @id @default(cuid())
-  userId     String?
+  userId     Int?
   symbol     String
   network    String
   addressId  String?
@@ -163,7 +163,7 @@ model CryptoPayment {
 // === Added by assistant (card payments) ===
 model CardPayment {
   id        String   @id @default(cuid())
-  userId    String?
+  userId    Int?
   amountDkk Float
   status    String   @default("paid") // paid, refunded, failed
   createdAt DateTime @default(now())

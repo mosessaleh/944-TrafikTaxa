@@ -1,4 +1,15 @@
 import { formatCurrency } from '@/lib/utils';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Taxi Pricing | 944 Trafik',
+  description: 'Transparent pricing for taxi services. View our fixed rates for city rides, airport transfers, and business travel.',
+  openGraph: {
+    title: 'Taxi Pricing | 944 Trafik',
+    description: 'Transparent pricing for taxi services. View our fixed rates for city rides, airport transfers, and business travel.',
+    images: [{ url: '/logo.svg' }],
+  },
+};
 
 const PRICING = [
   { name: 'City Ride', price: 129, features: ['Up to 5 km', 'Standard sedan', 'Up to 4 passengers'] },

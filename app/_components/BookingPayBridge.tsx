@@ -51,10 +51,10 @@ export default function BookingPayBridge(){
     const origFetch = window.fetch.bind(window);
     window.fetch = async (...args: any[]) => {
       try {
-        const url = typeof args[0] === "string" ? args[0] : (args[0]?.url || "");
+        const url = typeof args[0] === "string" ? args[0] : (args[0] as Request)?.url || "";
         const init = (args[1] || {}) as RequestInit;
         const method = (init.method || "GET").toUpperCase();
-        const res: Response = await origFetch(...args);
+        const res: Response = await (origFetch as any)(...args);
         if (!redirected && method !== "GET" && shouldWatch(url) && res.ok) {
           try {
             const clone = res.clone();
@@ -68,7 +68,7 @@ export default function BookingPayBridge(){
         }
         return res;
       } catch (e) {
-        return origFetch(...args);
+        return (origFetch as any)(...args);
       }
     };
 
@@ -76,10 +76,10 @@ export default function BookingPayBridge(){
     const origOpen = XMLHttpRequest.prototype.open;
     const origSend = XMLHttpRequest.prototype.send;
     let currentUrl = "";
-    XMLHttpRequest.prototype.open = function(method: string, url: string, ...rest: any[]) {
-      (this as any).__isBooking = shouldWatch(url) && String(method).toUpperCase() !== "GET";
-      currentUrl = url;
-      return origOpen.call(this, method, url, ...rest);
+    XMLHttpRequest.prototype.open = function(method: string, url: string | URL, async?: boolean, user?: string | null, password?: string | null) {
+      (this as any).__isBooking = shouldWatch(String(url)) && String(method).toUpperCase() !== "GET";
+      currentUrl = String(url);
+      return origOpen.call(this, method, url, async ?? true, user, password);
     };
     XMLHttpRequest.prototype.send = function(body?: any) {
       const xhr = this as XMLHttpRequest & { __isBooking?: boolean };

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from 'react';
+import useSWR, { mutate } from 'swr';
 import AddressAutocomplete, { Suggestion } from '@/components/address-autocomplete';
 
 function Field({label, children}:{label:string; children:React.ReactNode}){ return (<div className="grid gap-1"><div className="label">{label}</div>{children}</div>); }
@@ -14,8 +15,8 @@ type Me = { id:number; firstName:string; lastName:string } | null;
 function Modal({ open, onClose, title, children }:{ open:boolean; onClose:()=>void; title:string; children:React.ReactNode }){ if(!open) return null; return (<div className="modal-wrap"><div className="modal-overlay" onClick={onClose}/><div className="modal-box"><div className="modal-head px-4 pt-4"><div className="text-lg font-semibold">{title}</div><button onClick={onClose} aria-label="Close" className="px-2 py-1 text-sm rounded border">✕</button></div><div className="p-4">{children}</div></div></div>); }
 
 export default function BookClient(){
-  const [me, setMe] = useState<Me>(null);
-  useEffect(()=>{ (async()=>{ try{ const r=await fetch('/api/profile',{cache:'no-store'}); const j=await r.json(); setMe(j?.me? { id:j.me.id, firstName:j.me.firstName, lastName:j.me.lastName }: null);}catch{ setMe(null);} })(); },[]);
+   const { data: profileData, error: profileError } = useSWR('/api/profile', (url) => fetch(url).then(r => r.json()).then(j => j?.me ? { id: j.me.id, firstName: j.me.firstName, lastName: j.me.lastName } : null));
+   const me = profileData || null;
 
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
@@ -25,8 +26,6 @@ export default function BookClient(){
   useEffect(()=>{ if(me) setRiderName(`${me.firstName} ${me.lastName}`.trim()); },[me]);
 
   const [vehicleId, setVehicleId] = useState<number| null>(null);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [favorites, setFavorites] = useState<FavItem[]>([]);
   const [whenType, setWhenType] = useState<'now'|'later'>('now');
   const [when, setWhen] = useState(()=> new Date(Date.now()+15*60*1000).toISOString().slice(0,16));
 
@@ -38,14 +37,12 @@ export default function BookClient(){
   const [saveModal, setSaveModal] = useState<{open:boolean; target: FavApply|null; name:string; address:string}>({open:false, target:null, name:'', address:''});
   const [pickModal, setPickModal] = useState<{open:boolean; target: FavApply|null}>({open:false, target:null});
 
-  useEffect(()=>{ (async()=>{ try{ const [vt, fav] = await Promise.all([
-        fetch('/api/vehicle-types',{cache:'no-store'}).then(r=>r.json()).catch(()=>null),
-        fetch('/api/favorites',{cache:'no-store'}).then(r=> r.status===200? r.json():{ok:false}).catch(()=>null)
-      ]);
-      if(vt?.ok) setVehicles(vt.items||[]);
-      if(vt?.ok && vt.items?.length && vehicleId==null) setVehicleId(vt.items[0].id);
-      if(fav?.ok) setFavorites(fav.items||[]);
-    }catch{} })(); },[]);
+  const { data: vehicleData, error: vehicleError } = useSWR('/api/vehicle-types', (url) => fetch(url).then(r => r.json()).then(j => j?.ok ? j.items || [] : []));
+  const vehicles = vehicleData || [];
+  useEffect(() => { if (vehicles.length && vehicleId == null) setVehicleId(vehicles[0].id); }, [vehicles, vehicleId]);
+
+  const { data: favoritesData, error: favoritesError, mutate: mutateFavorites } = useSWR('/api/favorites', (url) => fetch(url).then(r => r.status === 200 ? r.json().then(j => j?.ok ? j.items || [] : []) : []));
+  const favorites = favoritesData || [];
 
   const bothSelected = !!(pickupSel && dropoffSel);
   const quotePayload = useMemo(()=>({ pickupAddress: pickupSel?.text || '', dropoffAddress: dropoffSel?.text || '', pickupLat: pickupSel?.lat ?? null, pickupLon: pickupSel?.lon ?? null, dropoffLat: dropoffSel?.lat ?? null, dropoffLon: dropoffSel?.lon ?? null, when: whenType==='now' ? new Date().toISOString() : new Date(when).toISOString(), passengers: 1, vehicleTypeId: vehicleId || undefined }),[pickupSel, dropoffSel, whenType, when, vehicleId]);
@@ -57,7 +54,7 @@ export default function BookClient(){
   const priceText = quote? formatDKK(quote.price) : formatDKK(0);
   const Star = ({onClick}:{onClick:()=>void}) => (<button type="button" onClick={onClick} title="Save to favorites" aria-label="Save to favorites" className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl border bg-white hover:bg-gray-50 active:scale-[.98] transition"><svg viewBox="0 0 24 24" className="w-5 h-5" fill="currentColor"><path d="M11.48 3.499a.75.75 0 0 1 1.04 0l2.644 2.58 3.532.514a.75.75 0 0 1 .416 1.279l-2.556 2.49.604 3.52a.75.75 0 0 1-1.088.79L12 13.97l-3.172 1.673a.75.75 0 0 1-1.088-.79l.604-3.52-2.556-2.49a.75.75 0 0 1 .416-1.279l3.532-.514 2.644-2.58Z"/></svg></button>);
 
-  async function saveFavorite(){ try{ if(!saveModal.target) return; const addr = saveModal.address?.trim(); if(!addr) return; const r = await fetch('/api/favorites',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label: saveModal.name||'Favorite', address: addr, lat: (saveModal.target===FavApply.Pickup? pickupSel?.lat: dropoffSel?.lat)??null, lon: (saveModal.target===FavApply.Pickup? pickupSel?.lon: dropoffSel?.lon)??null }) }); const j = await r.json(); if(j?.ok){ setFavorites(prev=> { const exists = prev.find(x=> x.id===j.item.id); return exists? prev: [j.item, ...prev].slice(0,200); }); setSaveModal({open:false,target:null,name:'',address:''}); } }catch(e){ /* ignore */ } }
+  async function saveFavorite(){ try{ if(!saveModal.target) return; const addr = saveModal.address?.trim(); if(!addr) return; const r = await fetch('/api/favorites',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label: saveModal.name||'Favorite', address: addr, lat: (saveModal.target===FavApply.Pickup? pickupSel?.lat: dropoffSel?.lat)??null, lon: (saveModal.target===FavApply.Pickup? pickupSel?.lon: dropoffSel?.lon)??null }) }); const j = await r.json(); if(j?.ok){ mutateFavorites(); setSaveModal({open:false,target:null,name:'',address:''}); } }catch(e){ /* ignore */ } }
   function applyFav(f:FavItem, to:FavApply){ const s: Suggestion = { id: null, text: f.address, lat: f.lat, lon: f.lon, postcode:null, city:null }; if(to===FavApply.Pickup){ setPickupSel(s); setPickup(s.text); } else { setDropoffSel(s); setDropoff(s.text); } setPickModal({ open:false, target:null }); }
 
   return (
@@ -99,7 +96,7 @@ export default function BookClient(){
 
           {/* Vehicle & Name/When */}
           <div className="grid md:grid-cols-2 gap-3">
-            <Field label="Vehicle type"><select value={vehicleId??''} onChange={e=> setVehicleId(e.target.value? Number(e.target.value): null)} className="select">{vehicles.map(v=> <option key={v.id} value={v.id}>{v.title}</option>)}</select></Field>
+            <Field label="Vehicle type"><select value={vehicleId??''} onChange={e=> setVehicleId(e.target.value? Number(e.target.value): null)} className="select">{vehicles.map((v: Vehicle)=> <option key={v.id} value={v.id}>{v.title}</option>)}</select></Field>
             <Field label="Ride for (name)"><input value={riderName} onChange={e=>setRiderName(e.target.value)} className="input"/></Field>
           </div>
           <div className="grid md:grid-cols-2 gap-3">
@@ -128,7 +125,7 @@ export default function BookClient(){
       <Modal open={pickModal.open} onClose={()=> setPickModal({open:false, target:null})} title="Choose from favorites">
         <div className="max-h-80 overflow-y-auto">
           {favorites.length===0 && (<div className="text-sm text-gray-600">No favorites yet. Select an address and use the star to save it.</div>)}
-          {favorites.length>0 && (<ul className="divide-y">{favorites.map(f=> (<li key={f.id}><button type="button" onClick={()=> applyFav(f, pickModal.target as FavApply)} className="w-full text-left px-3 py-2 hover:bg-gray-50"><div className="font-medium text-sm">{f.label}</div><div className="text-xs text-gray-600">{f.address}</div></button></li>))}</ul>)}
+          {favorites.length>0 && (<ul className="divide-y">{favorites.map((f: FavItem)=> (<li key={f.id}><button type="button" onClick={()=> applyFav(f, pickModal.target as FavApply)} className="w-full text-left px-3 py-2 hover:bg-gray-50"><div className="font-medium text-sm">{f.label}</div><div className="text-xs text-gray-600">{f.address}</div></button></li>))}</ul>)}
         </div>
       </Modal>
     </div>

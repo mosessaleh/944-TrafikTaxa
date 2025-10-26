@@ -35,3 +35,8 @@ export async function computePrice(distanceKm:number, durationMin:number, at: Da
   const mul = Number(vt.multiplier || 1);
   return Math.round(base * (mul > 0 ? mul : 1));
 }
+
+export async function getSettingsForAdmin(){
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  return settings;
+}

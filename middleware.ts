@@ -1,8 +1,38 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { sanitizeInput } from '@/lib/sanitize';
+import { limitOrThrow, clientIpKey } from '@/lib/rate-limit';
 
-export function middleware(_req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const res = NextResponse.next();
+  const pathname = req.nextUrl.pathname;
+
+  // Rate limiting for sensitive endpoints
+  const sensitiveEndpoints = [
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
+    '/api/auth/verify',
+    '/api/auth/resend-code'
+  ];
+
+  if (sensitiveEndpoints.some(endpoint => pathname.startsWith(endpoint))) {
+    try {
+      const clientKey = clientIpKey(req);
+      await limitOrThrow(clientKey, { points: 5, durationSec: 300 }); // 5 requests per 5 minutes
+    } catch (error: any) {
+      if (error.status === 429) {
+        const retryRes = NextResponse.json(
+          { error: 'Too many requests. Please try again later.' },
+          { status: 429 }
+        );
+        retryRes.headers.set('Retry-After', error.retryAfter.toString());
+        return retryRes;
+      }
+    }
+  }
+
 
   // Core security headers
   res.headers.set('X-Frame-Options', 'DENY');

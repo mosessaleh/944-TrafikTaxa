@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
 
 function parseAmountFromForm(form: HTMLFormElement): number | null {
   const names = ["amount_dkk","price_dkk","total_dkk","fare_dkk","total","price","fare","amount"];
@@ -52,7 +53,7 @@ export default function BookingRedirector(){
         const res = await fetch(action, { method, body: fd as any });
         if (!res.ok) {
           const t = await res.text().catch(()=> "");
-          alert(t || "تعذّر إتمام الحجز.");
+          toast.error(t || "تعذّر إتمام الحجز.");
           return;
         }
         // Try read JSON to extract id/amount
@@ -73,7 +74,7 @@ export default function BookingRedirector(){
         catch { window.location.assign(target); }
       } catch (err) {
         console.error("booking submit failed", err);
-        alert("Network error while confirming booking.");
+        toast.error("Network error while confirming booking.");
       }
     }
 

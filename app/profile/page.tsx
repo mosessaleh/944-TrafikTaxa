@@ -1,6 +1,17 @@
 import { getCurrentUser } from '@/lib/session';
 import Link from 'next/link';
 import ProfileEditClient from '@/components/profile-edit-client';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'My Profile | 944 Trafik',
+  description: 'Manage your profile and account settings with 944 Trafik.',
+  openGraph: {
+    title: 'My Profile | 944 Trafik',
+    description: 'Manage your profile and account settings with 944 Trafik.',
+    images: [{ url: '/logo.svg' }],
+  },
+};
 
 function Badge({ ok }: { ok: boolean }){
   return (

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from 'react';
+import useSWR, { mutate } from 'swr';
 import AddressAutocomplete, { type Suggestion } from '@/components/address-autocomplete';
 
 type Me = { id:number; email:string; emailVerified:boolean; firstName:string; lastName:string; phone:string; street:string; houseNumber:string; postalCode:string; city:string } | null;
@@ -43,10 +44,7 @@ export default function AccountClient(){
   const [tab, setTab] = useState<Tab>(()=>{ if (typeof window === 'undefined') return 'profile'; const u = new URL(window.location.href); const t = u.searchParams.get('tab'); return (t==='history'||t==='favorites')? (t as Tab) : 'profile'; });
   useEffect(()=>{ if(typeof window==='undefined') return; const u = new URL(window.location.href); u.searchParams.set('tab', tab); history.replaceState(null, '', u.toString()); },[tab]);
 
-  const [me, setMe] = useState<Me>(null);
   const [saving, setSaving] = useState(false);
-  const [rides, setRides] = useState<Ride[]>([]);
-  const [favs, setFavs] = useState<Fav[]>([]);
   const [msg, setMsg] = useState<string| null>(null);
 
   // Add Favorite modal state
@@ -55,22 +53,28 @@ export default function AccountClient(){
   const [favAddress, setFavAddress] = useState('');
   const [favSel, setFavSel] = useState<Suggestion | null>(null);
 
-  useEffect(()=>{ (async()=>{ try{ const r = await fetch('/api/profile', { cache:'no-store' }); if(r.ok){ const j = await r.json(); setMe(j.me); } else setMe(null);}catch{ setMe(null);} })(); },[]);
-  useEffect(()=>{ if(tab!=='history') return; (async()=>{ try{ const r = await fetch('/api/bookings',{cache:'no-store'}); if(r.ok){ const j=await r.json(); setRides(j.rides||[]);} }catch{} })(); },[tab]);
-  useEffect(()=>{ if(tab!=='favorites') return; (async()=>{ try{ const r = await fetch('/api/favorites',{cache:'no-store'}); if(r.ok){ const j=await r.json(); setFavs(j.items||[]);} }catch{} })(); },[tab]);
+  const { data: profileData, error: profileError, mutate: mutateProfile } = useSWR('/api/profile', (url) => fetch(url).then(r => r.ok ? r.json().then(j => j.me) : null));
+  const me = profileData || null;
+
+  const { data: ridesData, error: ridesError } = useSWR(tab === 'history' ? '/api/bookings' : null, (url) => fetch(url).then(r => r.ok ? r.json().then(j => j.rides || []) : []));
+  const rides = ridesData || [];
+
+  const { data: favsData, error: favsError, mutate: mutateFavs } = useSWR(tab === 'favorites' ? '/api/favorites' : null, (url) => fetch(url).then(r => r.ok ? r.json().then(j => j.items || []) : []));
+  const favs = favsData || [];
 
   async function saveProfile(){
     try{ if(!me) return; setSaving(true); setMsg(null);
       const r = await fetch('/api/profile', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(me) });
       const j = await r.json();
       if(!r.ok || !j?.ok) throw new Error(j?.error||'Save failed');
+      mutateProfile();
       setMsg('Profile saved');
     }catch(e:any){ setMsg(e?.message||'Save failed'); }
     finally{ setSaving(false); }
   }
-  async function updateFav(row: Fav){ const r = await fetch('/api/favorites', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(row) }); const j = await r.json(); if(j?.ok){ setFavs(prev=> prev.map(x=> x.id===row.id? j.item: x)); } }
-  async function deleteFav(id:number){ const r = await fetch(`/api/favorites?id=${id}`, { method:'DELETE' }); const j = await r.json(); if(j?.ok){ setFavs(prev=> prev.filter(x=> x.id!==id)); } }
-  async function createFav(){ try{ const address = (favSel?.text || favAddress).trim(); const label = favLabel.trim() || 'Favorite'; if(!address) return; const res = await fetch('/api/favorites', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label, address, lat: favSel?.lat ?? null, lon: favSel?.lon ?? null }) }); const j = await res.json(); if(j?.ok){ setFavs(prev => [j.item, ...prev]); setAddFavOpen(false); setFavLabel(''); setFavAddress(''); setFavSel(null); } }catch{} }
+  async function updateFav(row: Fav){ const r = await fetch('/api/favorites', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(row) }); const j = await r.json(); if(j?.ok){ mutateFavs(); } }
+  async function deleteFav(id:number){ const r = await fetch(`/api/favorites?id=${id}`, { method:'DELETE' }); const j = await r.json(); if(j?.ok){ mutateFavs(); } }
+  async function createFav(){ try{ const address = (favSel?.text || favAddress).trim(); const label = favLabel.trim() || 'Favorite'; if(!address) return; const res = await fetch('/api/favorites', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label, address, lat: favSel?.lat ?? null, lon: favSel?.lon ?? null }) }); const j = await res.json(); if(j?.ok){ mutateFavs(); setAddFavOpen(false); setFavLabel(''); setFavAddress(''); setFavSel(null); } }catch{} }
 
   if(me===null){ return <div className="container-page p-4"><div className="card"><div className="card-body">Loading…</div></div></div>; }
   if(!me){ return <div className="container-page p-4"><div className="card"><div className="card-body bg-yellow-50 border-yellow-200">Please login to view your account.</div></div></div>; }
@@ -89,14 +93,14 @@ export default function AccountClient(){
           <div className="card-body grid gap-4">
             {!me.emailVerified && <div className="p-2 rounded-lg text-sm bg-orange-50 text-orange-900 border">Your email is not verified.</div>}
             <div className="grid md:grid-cols-2 gap-4">
-              <Field label="First name"><input value={me.firstName} onChange={e=> setMe({...me!, firstName:e.target.value})} className="input"/></Field>
-              <Field label="Last name"><input value={me.lastName} onChange={e=> setMe({...me!, lastName:e.target.value})} className="input"/></Field>
-              <Field label="Email"><input value={me.email} onChange={e=> setMe({...me!, email:e.target.value})} className="input"/></Field>
-              <Field label="Phone"><input value={me.phone} onChange={e=> setMe({...me!, phone:e.target.value})} className="input"/></Field>
-              <Field label="Street"><input value={me.street} onChange={e=> setMe({...me!, street:e.target.value})} className="input"/></Field>
-              <Field label="House no."><input value={me.houseNumber} onChange={e=> setMe({...me!, houseNumber:e.target.value})} className="input"/></Field>
-              <Field label="Postal code"><input value={me.postalCode} onChange={e=> setMe({...me!, postalCode:e.target.value})} className="input"/></Field>
-              <Field label="City"><input value={me.city} onChange={e=> setMe({...me!, city:e.target.value})} className="input"/></Field>
+              <Field label="First name"><input value={me.firstName} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, firstName:e.target.value} : null)} className="input"/></Field>
+              <Field label="Last name"><input value={me.lastName} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, lastName:e.target.value} : null)} className="input"/></Field>
+              <Field label="Email"><input value={me.email} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, email:e.target.value} : null)} className="input"/></Field>
+              <Field label="Phone"><input value={me.phone} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, phone:e.target.value} : null)} className="input"/></Field>
+              <Field label="Street"><input value={me.street} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, street:e.target.value} : null)} className="input"/></Field>
+              <Field label="House no."><input value={me.houseNumber} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, houseNumber:e.target.value} : null)} className="input"/></Field>
+              <Field label="Postal code"><input value={me.postalCode} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, postalCode:e.target.value} : null)} className="input"/></Field>
+              <Field label="City"><input value={me.city} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, city:e.target.value} : null)} className="input"/></Field>
             </div>
             <div className="flex items-center gap-3">
               <button disabled={saving} onClick={saveProfile} className={saving? 'btn-muted':'btn-primary'}>{saving? 'Saving…':'Save'}</button>
@@ -124,7 +128,7 @@ export default function AccountClient(){
                 </tr>
               </thead>
               <tbody>
-                {rides.map(r=> (
+                {rides.map((r: Ride)=> (
                   <tr key={r.id} className="tr">
                     <td className="td">{r.id}</td>
                     <td className="td">{r.pickupAddress}</td>
@@ -156,7 +160,7 @@ export default function AccountClient(){
                 </tr>
               </thead>
               <tbody>
-                {favs.map(f=> (
+                {favs.map((f: Fav)=> (
                   <tr key={f.id} className="tr">
                     <td className="td"><input defaultValue={f.label} onChange={e=> f.label=e.target.value} className="input"/></td>
                     <td className="td"><input defaultValue={f.address} onChange={e=> f.address=e.target.value} className="input w-[30rem] max-w-full"/></td>

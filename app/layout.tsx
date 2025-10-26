@@ -5,6 +5,7 @@ import BookingRedirector from "@/app/_components/BookingRedirector";
 import './globals.css';
 import type { Metadata } from 'next';
 import SiteNavbarServer from '@/components/site-navbar-server';
+import { Toaster } from 'react-hot-toast';
 
 export const metadata: Metadata = { title: '944 Trafik', description: 'Taxi booking' };
 
@@ -12,6 +13,7 @@ export default function RootLayout({ children }:{ children: React.ReactNode }){
   return (
     <html lang="en">
       <body>
+        <Toaster />
         <GlobalBookingModalManager />
         <BookingClientFallback />
        <BookingPayBridge />
