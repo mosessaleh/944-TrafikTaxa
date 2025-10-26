@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { ConfirmCryptoPaymentSchema } from "@/lib/validation";
-import { notifyAdmin, notifyUserEmail } from "@/lib/notify";
+import { notifyAdmin, notifyUserEmail, notifyUserPaymentReceived } from "@/lib/notify";
 
 export async function POST(request: Request) {
   try {
@@ -33,18 +33,14 @@ export async function POST(request: Request) {
     });
 
     // Notify user (processing ~15 minutes)
-    const subjectUser = "تم استلام طلب الدفع بالعملات الرقمية";
-    const htmlUser = `
-      <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto">
-        <h2>طلبك قيد المعالجة</h2>
-        <p>شكرًا لك. استلمنا طلب الدفع بالعملة <b>${symbol.toUpperCase()}</b>.</p>
-        <p>المبلغ: <b>${amountDkk} DKK</b> (~ ${amountCoin} ${symbol.toUpperCase()})</p>
-        <p>نبدأ التحقق الآن، وقد يستغرق ذلك حوالي 15 دقيقة.</p>
-        <p>رقم العملية: <code>${pay.id}</code></p>
-      </div>
-    `;
     if (me.email) {
-      await notifyUserEmail(me.email, subjectUser, htmlUser).catch(() => {});
+      const paymentDetails = {
+        amount: amountDkk,
+        method: `${symbol.toUpperCase()} (${network})`,
+        transactionId: pay.id,
+        bookingId: 'TBD' // This would need to be passed from the booking context
+      };
+      await notifyUserPaymentReceived(me.email, me.firstName, paymentDetails).catch(() => {});
     }
 
     // Notify admin
