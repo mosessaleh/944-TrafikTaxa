@@ -1,4 +1,4 @@
-// File: C:\Users\moses\Projects\Websites\944-TrafikTaxa\app\book\page.tsx
+// File: c:\Users\moses\Projects\Websites\944-TrafikTaxa\app\book\page.tsx
 import * as entry from '../../../../app/book/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

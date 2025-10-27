@@ -17,48 +17,79 @@ export async function GET(req: Request){
     const limit = Math.min(10, Math.max(1, Number(url.searchParams.get('limit')||'8')));
     if (bad(q)) return NextResponse.json({ ok:true, suggestions: [] });
 
-    // For demo purposes, return some hardcoded famous places in Copenhagen
-    // In production, you would use the DAWA APIs
-    const famousPlaces = [
-      { navn: 'Københavns Lufthavn (CPH)', x: 12.6500, y: 55.6180, postnummer: { nr: '2791', navn: 'Dragør' } },
-      { navn: 'Københavns Hovedbanegård', x: 12.5655, y: 55.6729, postnummer: { nr: '1570', navn: 'København V' } },
-      { navn: 'Tivoli Gardens', x: 12.5667, y: 55.6736, postnummer: { nr: '1631', navn: 'København V' } },
-      { navn: 'Christiansborg Slot', x: 12.5808, y: 55.6761, postnummer: { nr: '1218', navn: 'København K' } },
-      { navn: 'Den Lille Havfrue', x: 12.5918, y: 55.6929, postnummer: { nr: '2100', navn: 'København Ø' } },
-      { navn: 'Nyhavn', x: 12.5900, y: 55.6797, postnummer: { nr: '1051', navn: 'København K' } },
-      { navn: 'Politigården', x: 12.5580, y: 55.6794, postnummer: { nr: '1567', navn: 'København V' } },
-      { navn: 'Rigshospitalet', x: 12.5744, y: 55.6961, postnummer: { nr: '2100', navn: 'København Ø' } }
-    ];
+    // Use DAWA API for real Danish addresses
+    // Docs: https://api.dataforsyningen.dk/adresser
+    const dawaUrl = `https://api.dataforsyningen.dk/adresser/autocomplete?q=${encodeURIComponent(q)}&per_side=${limit}&sortering=adresse`;
+    console.log("Fetching from DAWA:", dawaUrl);
 
-    // Filter places based on search query
-    const filteredPlaces = famousPlaces.filter(place =>
-      place.navn.toLowerCase().includes(q.toLowerCase())
-    );
+    const response = await fetch(dawaUrl, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': '944-Trafik-App/1.0'
+      }
+    });
 
-    const data = filteredPlaces.slice(0, limit);
+    if (!response.ok) {
+      console.error("DAWA API error:", response.status, response.statusText);
+      // Fallback to hardcoded addresses if DAWA fails
+      return getFallbackAddresses(q, limit);
+    }
 
-    // Normalize to a compact shape
-    const suggestions = (data||[]).map((it:any)=>{
-      // Handle both address and POI responses
-      const a = it?.adgangsadresse || {};
-      const addr = a?.adresse || a?.vejstykke || {};
-      const x = a?.adgangspunkt?.koordinater?.[0] || it?.x; // lon
-      const y = a?.adgangspunkt?.koordinater?.[1] || it?.y; // lat
-      const post = a?.postnummer?.nr || a?.postnr || it?.postnummer?.nr;
-      const city = a?.postnummer?.navn || a?.postdistrict || it?.postnummer?.navn;
+    const data = await response.json();
+    console.log("DAWA response:", data);
 
+    // Normalize DAWA response to our format
+    const suggestions = (data||[]).map((item:any)=>{
       return {
-        id: a?.id || it?.adresse?.id || it?.id || null,
-        text: it?.tekst || it?.adresse?.betegnelse || it?.navn || '',
-        postcode: post || null,
-        city: city || null,
-        lon: typeof x === 'number' ? x : null,
-        lat: typeof y === 'number' ? y : null
+        id: item.adresse?.id || item.id || null,
+        text: item.tekst || item.adresse?.betegnelse || '',
+        postcode: item.adresse?.postnr || null,
+        city: item.adresse?.postnrnavn || null,
+        lon: item.adresse?.x || null,
+        lat: item.adresse?.y || null
       };
-    }).filter((s:any)=> s.text);
+    }).filter((s:any)=> s.text && s.postcode && s.city);
 
+    console.log("Normalized suggestions:", suggestions);
     return NextResponse.json({ ok:true, suggestions });
   }catch(e:any){
-    return NextResponse.json({ ok:true, suggestions: [] });
+    console.error("Addresses API error:", e);
+    // Fallback to hardcoded addresses if DAWA fails
+    const url = new URL(req.url);
+    const q = (url.searchParams.get('q')||'').trim();
+    const limit = Math.min(10, Math.max(1, Number(url.searchParams.get('limit')||'8')));
+    return getFallbackAddresses(q, limit);
   }
+}
+
+// Fallback function with hardcoded addresses
+function getFallbackAddresses(q: string, limit: number) {
+  console.log("Using fallback addresses for query:", q);
+
+  const danishAddresses = [
+    { navn: 'Københavns Lufthavn (CPH)', x: 12.6500, y: 55.6180, postnummer: { nr: '2791', navn: 'Dragør' } },
+    { navn: 'Københavns Hovedbanegård', x: 12.5655, y: 55.6729, postnummer: { nr: '1570', navn: 'København V' } },
+    { navn: 'Frederikssund Station', x: 12.0686, y: 55.8396, postnummer: { nr: '3600', navn: 'Frederikssund' } },
+    { navn: 'Maglehøjparken 137', x: 12.0686, y: 55.8396, postnummer: { nr: '3600', navn: 'Frederikssund' } },
+    { navn: 'Lufthavnsboulevarden 6', x: 12.6500, y: 55.6180, postnummer: { nr: '2770', navn: 'Kastrup' } },
+    { navn: 'Aarhus Hovedbanegård', x: 10.2108, y: 56.1496, postnummer: { nr: '8000', navn: 'Aarhus C' } },
+    { navn: 'Odense Banegård', x: 10.4024, y: 55.4038, postnummer: { nr: '5000', navn: 'Odense C' } }
+  ];
+
+  const filteredPlaces = danishAddresses.filter((place: any) =>
+    place.navn.toLowerCase().includes(q.toLowerCase()) ||
+    place.postnummer.navn.toLowerCase().includes(q.toLowerCase()) ||
+    place.postnummer.nr.includes(q)
+  );
+
+  const suggestions = filteredPlaces.slice(0, limit).map((place: any) => ({
+    id: null,
+    text: place.navn,
+    postcode: place.postnummer.nr,
+    city: place.postnummer.navn,
+    lon: place.x,
+    lat: place.y
+  }));
+
+  return NextResponse.json({ ok:true, suggestions });
 }

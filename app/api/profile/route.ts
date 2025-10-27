@@ -17,7 +17,7 @@ const Schema = z.object({
 export async function GET(){
   const me = await getUserFromCookie();
   if(!me) return NextResponse.json({ ok:false, me:null }, { status:200 });
-  const safe = await prisma.user.findUnique({ where:{ id: me.id }, select:{ id:true, email:true, emailVerified:true, firstName:true, lastName:true, phone:true, street:true, houseNumber:true, postalCode:true, city:true } });
+  const safe = await prisma.user.findUnique({ where:{ id: me.id }, select:{ id:true, email:true, emailVerified:true, firstName:true, lastName:true, phone:true, street:true, houseNumber:true, postalCode:true, city:true, role:true } });
   return NextResponse.json({ ok:true, me: safe });
 }
 

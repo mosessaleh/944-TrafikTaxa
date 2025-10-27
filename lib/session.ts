@@ -17,6 +17,7 @@ export type CurrentUser = {
   role: 'USER' | 'ADMIN';
   emailVerified: boolean;
   pendingEmail?: string | null;
+  isDeveloper?: boolean;
 };
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
@@ -60,7 +61,10 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       return null;
     }
 
-    return u as any;
+    // Auto-activate developer mode for admin users
+    const isDeveloper = u.role === 'ADMIN';
+
+    return { ...u, isDeveloper } as any;
   } catch (error: any) {
     // Log specific errors for debugging (in production, use proper logging)
     console.error('JWT validation error:', error.message);

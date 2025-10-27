@@ -142,26 +142,10 @@ export default function BookingPayModal({
     if (!amountNum || amountNum<=0) { toast.error("تعذّر تحديد مبلغ الرحلة"); return; }
     setLoading(true);
     try{
-      const res = await fetch("/api/payments/card/mock-confirm", {
-        method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({ amountDkk: amountNum })
-      });
-      if (!res.ok) {
-        const errorMsg = await res.text();
-        toast.error(errorMsg);
-        // Announce error to screen readers
-        const announcement = document.createElement('div');
-        announcement.setAttribute('aria-live', 'assertive');
-        announcement.setAttribute('aria-atomic', 'true');
-        announcement.className = 'sr-only';
-        announcement.textContent = `خطأ في الدفع: ${errorMsg}`;
-        document.body.appendChild(announcement);
-        setTimeout(() => document.body.removeChild(announcement), 3000);
-        return;
-      }
-      await onPaid();
-      onClose();
-    } finally {
+      // Redirect to Stripe payment page instead of using mock
+      window.location.href = `/pay/card?amount_dkk=${encodeURIComponent(amountNum.toString())}`;
+    } catch (err: any) {
+      toast.error("خطأ في التوجيه لصفحة الدفع");
       setLoading(false);
     }
   }

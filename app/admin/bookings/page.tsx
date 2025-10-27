@@ -1,5 +1,6 @@
 "use client";
 import useSWR from 'swr';
+import { useState, useEffect } from 'react';
 
 const fetcher = (url:string)=> fetch(url,{cache:'no-store'}).then(r=>r.json());
 
@@ -12,40 +13,50 @@ function ActionBtn({id, action, label}:{id:number, action:string, label:string})
 }
 
 function TabBtn({active,label,onClick}:{active:boolean,label:string,onClick:()=>void}){
-  return <button onClick={onClick} className={`px-3 py-1.5 rounded-2xl border ${active? 'bg-black text-white':'bg-white'}`}>{label}</button>;
+  return <button onClick={onClick} className={`px-3 py-1.5 rounded-2xl border ${active? 'bg-black text-white':'bg-gray-100 text-gray-700 hover:bg-gray-200'}`} suppressHydrationWarning>{label}</button>;
 }
 
 export default function AdminBookings(){
   const { data } = useSWR('/api/admin/bookings',{ fetcher });
   const rides = (data?.rides||[]) as any[];
   const groups = {
-    pending: rides.filter(r=> r.status==='PENDING'),
+    pending: rides.filter(r=> r.status==='PENDING' && !r.paid),
+    paid: rides.filter(r=> r.status==='PAID'),
     confirmedActive: rides.filter(r=> (r.status==='CONFIRMED' || r.status==='DISPATCHED' || r.status==='ONGOING')),
     completed: rides.filter(r=> r.status==='COMPLETED'),
     canceled: rides.filter(r=> r.status==='CANCELED'),
   } as const;
   const tabs = [
     {key:'pending', label:`Awaiting confirmation (${groups.pending.length})`},
+    {key:'paid', label:`Paid - awaiting confirmation (${groups.paid.length})`},
     {key:'confirmedActive', label:`Confirmed / not finished (${groups.confirmedActive.length})`},
     {key:'completed', label:`Completed (${groups.completed.length})`},
     {key:'canceled', label:`Canceled (${groups.canceled.length})`}
   ] as const;
-  const [active, setActive] = (():[keyof typeof groups, any]=>{
-    const defaultKey = 'pending' as const; return [defaultKey, ()=>{}];
-  })();
-  // lightweight local state without hooks to avoid server-client mismatch; use URL hash instead
-  let current: keyof typeof groups = (typeof window!== 'undefined' && (location.hash?.slice(1) as any)) || 'pending';
-  if(!groups[current]) current = 'pending';
-  function switchTab(k: keyof typeof groups){ if (typeof window!== 'undefined'){ location.hash = k; location.reload(); } }
+  // Use proper React state for tab management
+  const [currentTab, setCurrentTab] = useState<keyof typeof groups>('pending');
 
-  const list = groups[current];
+  useEffect(() => {
+    const hash = typeof window !== 'undefined' ? location.hash?.slice(1) : '';
+    const validTab = hash && groups[hash as keyof typeof groups] ? hash as keyof typeof groups : 'pending';
+    setCurrentTab(validTab);
+  }, [data]);
+
+  function switchTab(k: keyof typeof groups){
+    setCurrentTab(k);
+    if (typeof window !== 'undefined') {
+      location.hash = k;
+    }
+  }
+
+  const list = groups[currentTab];
 
   return (
     <div className="grid gap-4">
       <h1 className="text-2xl font-bold">Bookings</h1>
       <div className="flex flex-wrap gap-2">
         {tabs.map(t=> (
-          <TabBtn key={t.key} active={current===t.key} label={t.label} onClick={()=>switchTab(t.key as any)} />
+          <TabBtn key={t.key} active={currentTab===t.key} label={t.label} onClick={()=>switchTab(t.key as any)} />
         ))}
       </div>
       <div className="overflow-x-auto bg-white border rounded-2xl">

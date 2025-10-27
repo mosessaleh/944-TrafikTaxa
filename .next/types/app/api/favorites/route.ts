@@ -1,4 +1,4 @@
-// File: C:\Users\moses\Projects\Websites\944-TrafikTaxa\app\api\favorites\route.ts
+// File: c:\Users\moses\Projects\Websites\944-TrafikTaxa\app\api\favorites\route.ts
 import * as entry from '../../../../../app/api/favorites/route.js'
 import type { NextRequest } from 'next/server.js'
 

@@ -45,9 +45,10 @@ export async function middleware(req: NextRequest) {
     "default-src 'self'",
     "img-src 'self' data: https://*.tile.openstreetmap.org",
     "style-src 'self' 'unsafe-inline'",
-    // Allow inline/eval for Next dev tooling; includes ws: for HMR
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-    "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org ws:",
+    // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
+    "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org https://api.stripe.com ws:",
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
     "font-src 'self' data:",
     "object-src 'none'",
     "base-uri 'self'",

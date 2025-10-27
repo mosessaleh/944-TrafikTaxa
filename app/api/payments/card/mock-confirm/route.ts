@@ -17,7 +17,7 @@ export async function POST(request: Request) {
 
   // Create card payment record
   const pay = await prisma.cardPayment.create({
-    data: { userId: me.id, amountDkk, status: "paid" }
+    data: { userId: me.id.toString(), amountDkk, status: "paid" }
   });
 
   const userSubject = "تم استلام دفعتك بالبطاقة";

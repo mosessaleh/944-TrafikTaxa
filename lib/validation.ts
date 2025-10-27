@@ -72,7 +72,15 @@ export const VerifyEmailSchema = z.object({
 
 export type VerifyEmailInput = z.infer<typeof VerifyEmailSchema>;
 
-// Card Payment Schema
+// Card Payment Intent Schema
+export const CardPaymentIntentSchema = z.object({
+  amountDkk: z.number().positive("Amount must be positive"),
+  bookingId: z.number().optional(),
+});
+
+export type CardPaymentIntentInput = z.infer<typeof CardPaymentIntentSchema>;
+
+// Card Payment Schema (for confirmation)
 export const CardPaymentSchema = z.object({
   amountDkk: z.number().positive("Amount must be positive"),
 });
@@ -103,3 +111,26 @@ export const ConfirmCryptoPaymentSchema = z.object({
 });
 
 export type ConfirmCryptoPaymentInput = z.infer<typeof ConfirmCryptoPaymentSchema>;
+
+// Confirm Card Payment Schema
+export const ConfirmCardPaymentSchema = z.object({
+  paymentIntentId: z.string().min(1, "Payment intent ID is required"),
+});
+
+export type ConfirmCardPaymentInput = z.infer<typeof ConfirmCardPaymentSchema>;
+
+// PayPal Payment Intent Schema
+export const PayPalPaymentIntentSchema = z.object({
+  amountDkk: z.number().positive("Amount must be positive"),
+  bookingId: z.number().optional(),
+});
+
+export type PayPalPaymentIntentInput = z.infer<typeof PayPalPaymentIntentSchema>;
+
+// Revolut Payment Intent Schema
+export const RevolutPaymentIntentSchema = z.object({
+  amountDkk: z.number().positive("Amount must be positive"),
+  bookingId: z.number().optional(),
+});
+
+export type RevolutPaymentIntentInput = z.infer<typeof RevolutPaymentIntentSchema>;
