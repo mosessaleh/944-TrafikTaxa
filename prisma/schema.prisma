@@ -19,6 +19,7 @@ enum Role {
 enum RideStatus {
   PENDING
   PAID
+  PROGRESSING
   CONFIRMED
   DISPATCHED
   ONGOING

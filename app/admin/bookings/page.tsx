@@ -22,6 +22,7 @@ export default function AdminBookings(){
   const groups = {
     pending: rides.filter(r=> r.status==='PENDING' && !r.paid),
     paid: rides.filter(r=> r.status==='PAID'),
+    processing: rides.filter(r=> r.status==='PROGRESSING'),
     confirmedActive: rides.filter(r=> (r.status==='CONFIRMED' || r.status==='DISPATCHED' || r.status==='ONGOING')),
     completed: rides.filter(r=> r.status==='COMPLETED'),
     canceled: rides.filter(r=> r.status==='CANCELED'),
@@ -29,6 +30,7 @@ export default function AdminBookings(){
   const tabs = [
     {key:'pending', label:`Awaiting confirmation (${groups.pending.length})`},
     {key:'paid', label:`Paid - awaiting confirmation (${groups.paid.length})`},
+    {key:'processing', label:`Processing (${groups.processing.length})`},
     {key:'confirmedActive', label:`Confirmed / not finished (${groups.confirmedActive.length})`},
     {key:'completed', label:`Completed (${groups.completed.length})`},
     {key:'canceled', label:`Canceled (${groups.canceled.length})`}
@@ -75,6 +77,8 @@ export default function AdminBookings(){
                 <td className="p-3">{r.paid? 'Yes':'No'}</td>
                 <td className="p-3 flex gap-1 flex-wrap">
                   {r.status==='PENDING' && <ActionBtn id={r.id} action="CONFIRM" label="Confirm" />}
+                  {r.status==='PAID' && <ActionBtn id={r.id} action="PROCESS" label="Process" />}
+                  {r.status==='PROGRESSING' && <ActionBtn id={r.id} action="CONFIRM_BOOKING" label="Confirm" />}
                   {(r.status==='CONFIRMED') && <ActionBtn id={r.id} action="DISPATCH" label="Dispatch" />}
                   {(r.status==='DISPATCHED') && <ActionBtn id={r.id} action="START" label="Start" />}
                   {(r.status==='ONGOING') && <ActionBtn id={r.id} action="COMPLETE" label="Complete" />}
