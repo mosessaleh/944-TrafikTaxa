@@ -16,25 +16,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/book/page.js"
     ],
-    "/pay/page": [
+    "/_not-found/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/pay/page.js"
-    ],
-    "/pay/card/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/pay/card/page.js"
-    ],
-    "/pay/card/success/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/pay/card/success/page.js"
-    ],
-    "/bookings/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/bookings/page.js"
+      "static/chunks/app/_not-found/page.js"
     ]
   }
 }

@@ -37,10 +37,10 @@ describe('RegisterSchema', () => {
   it('should validate valid registration data', () => {
     const validData = {
       email: 'test@example.com',
-      password: 'password123',
+      password: 'Password123!',
       firstName: 'John',
       lastName: 'Doe',
-      phone: '12345678',
+      phone: '+4512345678',
       street: 'Test Street',
       houseNumber: '1',
       postalCode: '1234',
@@ -52,10 +52,10 @@ describe('RegisterSchema', () => {
   it('should reject invalid email', () => {
     const invalidData = {
       email: 'invalid-email',
-      password: 'password123',
+      password: 'Password123!',
       firstName: 'John',
       lastName: 'Doe',
-      phone: '12345678',
+      phone: '+4512345678',
       street: 'Test Street',
       houseNumber: '1',
       postalCode: '1234',

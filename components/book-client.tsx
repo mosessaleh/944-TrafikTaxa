@@ -18,8 +18,8 @@ type FavItem = { id:number; label:string; address:string; lat:number|null; lon:n
 type Me = { id:number; firstName:string; lastName:string; email?:string; role?:string } | null;
 
 export default function BookClient(){
-  const { data: profileData } = useSWR('/api/profile', (url) =>
-    fetch(url).then(r => r.json()).then(j => j?.me ? {
+  const { data: profileData, error: profileError } = useSWR('/api/profile', (url) =>
+    fetch(url, { credentials: 'include' }).then(r => r.json()).then(j => j?.me ? {
       id: j.me.id,
       firstName: j.me.firstName,
       lastName: j.me.lastName,
@@ -209,12 +209,22 @@ export default function BookClient(){
       <div className="grid gap-8">
 
 
-      {!me && (
+      {!me && !profileError && (
         <div className="card-feature border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50">
           <div className="text-center">
             <div className="text-4xl mb-4">🔐</div>
             <h3 className="text-lg font-semibold text-amber-800 mb-2">Login Required</h3>
             <p className="text-amber-700">You must be logged in to book a ride. Please sign in to continue.</p>
+          </div>
+        </div>
+      )}
+
+      {profileError && (
+        <div className="card-feature border-red-200 bg-gradient-to-r from-red-50 to-pink-50">
+          <div className="text-center">
+            <div className="text-4xl mb-4">⚠️</div>
+            <h3 className="text-lg font-semibold text-red-800 mb-2">Authentication Error</h3>
+            <p className="text-red-700">There was an issue verifying your login. Please try refreshing the page or logging in again.</p>
           </div>
         </div>
       )}
@@ -349,7 +359,8 @@ export default function BookClient(){
               <div className="pt-4 md:pt-6 border-t border-slate-200">
                 <div className="flex flex-col gap-4">
                   <div className="text-sm text-slate-600">
-                    {!me && <span className="flex items-center gap-1 text-amber-600"><span>⚠️</span> Login required to book</span>}
+                    {!me && !profileError && <span className="flex items-center gap-1 text-amber-600"><span>⚠️</span> Login required to book</span>}
+                    {profileError && <span className="flex items-center gap-1 text-red-600"><span>❌</span> Authentication error</span>}
                     {me && quote && <span className="flex items-center gap-1 text-emerald-600"><span>✅</span> Ready to book</span>}
                   </div>
                   <button
@@ -357,9 +368,9 @@ export default function BookClient(){
                       console.log("Book and Pay clicked", { me: !!me, quote: !!quote, qLoading, bothSelected, vehicleId });
                       handleBookAndPay();
                     }}
-                    disabled={!me || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading}
+                    disabled={!me || profileError || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading}
                     className={`w-full px-6 py-4 rounded-2xl font-semibold text-base md:text-lg transition-all duration-200 flex items-center justify-center gap-2 min-h-[48px] ${
-                      !me || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading
+                      !me || profileError || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading
                         ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                         : 'btn-primary shadow-xl hover:shadow-2xl transform hover:scale-[1.02] active:scale-[0.98]'
                     }`}

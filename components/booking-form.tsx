@@ -1,6 +1,7 @@
 "use client";
 import { useState } from 'react';
 import { BookingFormSchema, BookingFormInput } from '@/lib/validation';
+import { sanitizeInput } from '@/lib/sanitize';
 
 function LoadingSpinner() {
   return <div className="loading-spinner"></div>;
@@ -118,7 +119,7 @@ export default function BookingForm(){
         <input
           className="input form-field"
           placeholder="Passenger full name"
-          onChange={e=>setF({...f,riderName:e.target.value})}
+          onChange={e=>setF({...f,riderName:sanitizeInput(e.target.value, 'text')})}
         />
         {validationErrors.riderName && <span className="form-error">{validationErrors.riderName}</span>}
       </label>
@@ -157,7 +158,7 @@ export default function BookingForm(){
         <input
           className="input form-field"
           placeholder="e.g., Rådhuspladsen, København or 55.676,12.568"
-          onChange={e=>setF({...f,pickupAddress:e.target.value})}
+          onChange={e=>setF({...f,pickupAddress:sanitizeInput(e.target.value, 'address')})}
         />
         {validationErrors.pickupAddress && <span className="form-error">{validationErrors.pickupAddress}</span>}
       </label>
@@ -167,7 +168,7 @@ export default function BookingForm(){
         <input
           className="input form-field"
           placeholder="e.g., Copenhagen Airport or 55.618,12.65"
-          onChange={e=>setF({...f,dropoffAddress:e.target.value})}
+          onChange={e=>setF({...f,dropoffAddress:sanitizeInput(e.target.value, 'address')})}
         />
         {validationErrors.dropoffAddress && <span className="form-error">{validationErrors.dropoffAddress}</span>}
       </label>
