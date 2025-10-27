@@ -1,4 +1,4 @@
-// File: c:\Users\moses\Projects\Websites\944-TrafikTaxa\app\.well-known\appspecific\com.chrome.devtools.json\route.ts
+// File: C:\Users\moses\Projects\Websites\944-TrafikTaxa\app\.well-known\appspecific\com.chrome.devtools.json\route.ts
 import * as entry from '../../../../../../app/.well-known/appspecific/com.chrome.devtools.json/route.js'
 import type { NextRequest } from 'next/server.js'
 

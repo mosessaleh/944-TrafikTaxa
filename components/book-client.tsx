@@ -205,144 +205,228 @@ export default function BookClient(){
 
 
   return (
-    <div className="container-page grid gap-6">
-      <h1>Book a ride</h1>
+    <>
+      <div className="grid gap-8">
+
 
       {!me && (
-        <div className="card">
-          <div className="card-body bg-yellow-50 border-yellow-200 text-yellow-900 text-sm">
-            You must be logged in to book.
+        <div className="card-feature border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50">
+          <div className="text-center">
+            <div className="text-4xl mb-4">🔐</div>
+            <h3 className="text-lg font-semibold text-amber-800 mb-2">Login Required</h3>
+            <p className="text-amber-700">You must be logged in to book a ride. Please sign in to continue.</p>
           </div>
         </div>
       )}
 
-      <div className="card">
-        <div className="card-body flex items-end justify-between">
-          <div className="grid gap-1">
-            <div className="strip">Estimated price</div>
-            <div className="text-5xl font-extrabold leading-none">
+      <div className="grid lg:grid-cols-2 gap-6 lg:gap-8">
+        <div className="card">
+          <div className="card-body">
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                <span>📍</span>
+                Trip Details
+              </h2>
+            </div>
+
+            <div className="grid gap-4 md:gap-6">
+              {/* Pickup Address */}
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                  <span className="text-green-600">🚀</span>
+                  Pickup Address
+                </label>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <AddressAutocomplete
+                      label=""
+                      name="pickup"
+                      value={pickup}
+                      onChange={v => { setPickup(v); setPickupSel(null); }}
+                      onSelect={s => { setPickupSel(s); setPickup(s.text); }}
+                    />
+                  </div>
+                  {pickupSel && (
+                    <Star onClick={()=> setSaveModal({ open:true, target: FavApply.Pickup, name:'', address: pickupSel?.text||'' })} />
+                  )}
+                </div>
+                <button type="button" onClick={()=> setPickModal({ open:true, target: FavApply.Pickup })} className="text-sm text-cyan-600 hover:text-cyan-700 font-medium transition-colors flex items-center gap-1">
+                  <span>⭐</span>
+                </button>
+              </div>
+
+              {/* Dropoff Address */}
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                  <span className="text-red-600">🎯</span>
+                  Dropoff Address
+                </label>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <AddressAutocomplete
+                      label=""
+                      name="dropoff"
+                      value={dropoff}
+                      onChange={v => { setDropoff(v); setDropoffSel(null); }}
+                      onSelect={s => { setDropoffSel(s); setDropoff(s.text); }}
+                    />
+                  </div>
+                  {dropoffSel && (
+                    <Star onClick={()=> setSaveModal({ open:true, target: FavApply.Dropoff, name:'', address: dropoffSel?.text||'' })} />
+                  )}
+                </div>
+                <button type="button" onClick={()=> setPickModal({ open:true, target: FavApply.Dropoff })} className="text-sm text-cyan-600 hover:text-cyan-700 font-medium transition-colors flex items-center gap-1">
+                  <span>⭐</span>
+                </button>
+              </div>
+
+              {/* Vehicle and Passenger Details */}
+              <div className="grid gap-4 md:gap-6">
+                <div className="grid sm:grid-cols-2 gap-4 md:gap-6">
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                      <span className="text-purple-600">🚙</span>
+                      Vehicle Type
+                    </label>
+                    <select
+                      value={vehicleId ?? ''}
+                      onChange={e => setVehicleId(e.target.value ? Number(e.target.value) : null)}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-200 hover:shadow-md"
+                    >
+                      {vehicles.map((v: Vehicle) => (
+                        <option key={v.id} value={v.id}>{v.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                      <span className="text-blue-600">👤</span>
+                      Passenger Name
+                    </label>
+                    <input
+                      value={riderName}
+                      onChange={e => setRiderName(e.target.value)}
+                      placeholder="Enter passenger name"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-200 hover:shadow-md"
+                    />
+                  </div>
+                </div>
+
+                {/* Time Selection */}
+                <div className="grid sm:grid-cols-2 gap-4 md:gap-6">
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                      <span className="text-indigo-600">🕐</span>
+                      When to Pickup
+                    </label>
+                    <select
+                      value={whenType}
+                      onChange={e => setWhenType(e.target.value as 'now'|'later')}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-200 hover:shadow-md"
+                    >
+                      <option value="now">🚀 Immediate pickup</option>
+                      <option value="later">📅 Schedule for later</option>
+                    </select>
+                  </div>
+                  {whenType === 'later' && (
+                    <div className="space-y-3">
+                      <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                        <span className="text-emerald-600">📆</span>
+                        Pickup Date & Time
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={when}
+                        onChange={e => setWhen(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-200 hover:shadow-md"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Book Button */}
+              <div className="pt-4 md:pt-6 border-t border-slate-200">
+                <div className="flex flex-col gap-4">
+                  <div className="text-sm text-slate-600">
+                    {!me && <span className="flex items-center gap-1 text-amber-600"><span>⚠️</span> Login required to book</span>}
+                    {me && quote && <span className="flex items-center gap-1 text-emerald-600"><span>✅</span> Ready to book</span>}
+                  </div>
+                  <button
+                    onClick={() => {
+                      console.log("Book and Pay clicked", { me: !!me, quote: !!quote, qLoading, bothSelected, vehicleId });
+                      handleBookAndPay();
+                    }}
+                    disabled={!me || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading}
+                    className={`w-full px-6 py-4 rounded-2xl font-semibold text-base md:text-lg transition-all duration-200 flex items-center justify-center gap-2 min-h-[48px] ${
+                      !me || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading
+                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        : 'btn-primary shadow-xl hover:shadow-2xl transform hover:scale-[1.02] active:scale-[0.98]'
+                    }`}
+                  >
+                    {bookingLoading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                        Creating Booking...
+                      </>
+                    ) : (
+                      <>
+                        <span>💳</span>
+                        Book and Pay
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="card-feature bg-gradient-to-br from-emerald-50 via-white to-cyan-50 border-emerald-200">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl mb-4 shadow-lg">
+              <span className="text-xl md:text-2xl">💰</span>
+            </div>
+            <div className="text-sm font-medium text-emerald-700 mb-2">Estimated Price</div>
+            <div className="text-4xl md:text-6xl font-extrabold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent mb-3">
               {quote ? formatDKK(quote.price) : formatDKK(0)}
             </div>
-            <div className="text-xs text-gray-500">
+            <div className="text-slate-600">
               {quote ? (
-                <>~{quote.distanceKm?.toFixed?.(2)} km • ~{quote.durationMin} min</>
+                <div className="flex items-center justify-center gap-4 text-sm">
+                  <span className="flex items-center gap-1">
+                    <span>📍</span>
+                    ~{quote.distanceKm?.toFixed?.(2)} km
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span>⏱️</span>
+                    ~{quote.durationMin} min
+                  </span>
+                </div>
               ) : (
-                <>Select pickup & dropoff from the list, then choose vehicle type</>
+                <div className="text-slate-500">Select pickup & dropoff addresses to get a quote</div>
               )}
-              {qLoading && <span className="ml-2 text-gray-400">(calculating…)</span>}
+              {qLoading && (
+                <div className="flex items-center justify-center gap-2 mt-2 text-cyan-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-cyan-600 border-t-transparent"></div>
+                  Calculating price...
+                </div>
+              )}
             </div>
-            {qErr && <div className="text-xs text-red-600">{qErr}</div>}
+            {qErr && (
+              <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                ⚠️ {qErr}
+              </div>
+            )}
           </div>
         </div>
       </div>
-
-      <div className="card">
-        <div className="card-body grid gap-4">
-          <div className="grid gap-1">
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <AddressAutocomplete
-                  label="Pickup address"
-                  name="pickup"
-                  value={pickup}
-                  onChange={v => { setPickup(v); setPickupSel(null); }}
-                  onSelect={s => { setPickupSel(s); setPickup(s.text); }}
-                />
-              </div>
-              {pickupSel && (
-                <Star onClick={()=> setSaveModal({ open:true, target: FavApply.Pickup, name:'', address: pickupSel?.text||'' })} />
-              )}
-            </div>
-            <button type="button" onClick={()=> setPickModal({ open:true, target: FavApply.Pickup })} className="text-xs text-gray-600 underline w-fit">
-              Choose from favorites
-            </button>
-          </div>
-
-          <div className="grid gap-1">
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <AddressAutocomplete
-                  label="Dropoff address"
-                  name="dropoff"
-                  value={dropoff}
-                  onChange={v => { setDropoff(v); setDropoffSel(null); }}
-                  onSelect={s => { setDropoffSel(s); setDropoff(s.text); }}
-                />
-              </div>
-              {dropoffSel && (
-                <Star onClick={()=> setSaveModal({ open:true, target: FavApply.Dropoff, name:'', address: dropoffSel?.text||'' })} />
-              )}
-            </div>
-            <button type="button" onClick={()=> setPickModal({ open:true, target: FavApply.Dropoff })} className="text-xs text-gray-600 underline w-fit">
-              Choose from favorites
-            </button>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-3">
-            <Field label="Vehicle type">
-              <select
-                value={vehicleId ?? ''}
-                onChange={e => setVehicleId(e.target.value ? Number(e.target.value) : null)}
-                className="select"
-              >
-                {vehicles.map((v: Vehicle) => (
-                  <option key={v.id} value={v.id}>{v.title}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Ride for (name)">
-              <input
-                value={riderName}
-                onChange={e => setRiderName(e.target.value)}
-                className="input"
-              />
-            </Field>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-3">
-            <Field label="When">
-              <select
-                value={whenType}
-                onChange={e => setWhenType(e.target.value as 'now'|'later')}
-                className="select"
-              >
-                <option value="now">Immediate</option>
-                <option value="later">Schedule for later</option>
-              </select>
-            </Field>
-            {whenType === 'later' && (
-              <Field label="Pickup time">
-                <input
-                  type="datetime-local"
-                  value={when}
-                  onChange={e => setWhen(e.target.value)}
-                  className="input"
-                />
-              </Field>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={() => {
-                console.log("Book and Pay clicked", { me: !!me, quote: !!quote, qLoading, bothSelected, vehicleId });
-                handleBookAndPay();
-              }}
-              disabled={!me || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading}
-              className={!me || !quote || qLoading || !bothSelected || !vehicleId || bookingLoading ?
-                'btn-muted' : 'btn-primary'}
-            >
-              {bookingLoading ? 'Creating Booking...' : 'Book and Pay'}
-            </button>
-            {!me && <span className="text-sm text-gray-500">Login required</span>}
-          </div>
-        </div>
       </div>
 
       {/* Save Favorite Modal */}
       {saveModal.open && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-2xl border bg-white p-6" onClick={e=>e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl border bg-white p-4 md:p-6 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
             <div className="grid gap-3">
               <h3 className="text-lg font-semibold">Save to favorites</h3>
               <Field label="Label">
@@ -379,7 +463,7 @@ export default function BookClient(){
       {/* Pick Favorite Modal */}
       {pickModal.open && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-2xl border bg-white p-6" onClick={e=>e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-2xl border bg-white p-4 md:p-6 max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
             <div className="grid gap-3">
               <h3 className="text-lg font-semibold">Choose from favorites</h3>
               <div className="max-h-80 overflow-y-auto">
@@ -417,6 +501,6 @@ export default function BookClient(){
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
