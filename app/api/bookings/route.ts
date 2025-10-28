@@ -12,15 +12,15 @@ const createBookingSchema = z.object({
   riderName: z.string()
     .min(2, "Rider name must be at least 2 characters")
     .max(100, "Rider name is too long")
-    .regex(/^[a-zA-ZæøåÆØÅ\s\-'\.]+$/u, "Rider name contains invalid characters"),
+    .regex(/^[^\u0600-\u06FF\s\-'\.]+$/u, "Rider name contains invalid characters"),
   pickupAddress: z.string()
     .min(3, "Pickup address must be at least 3 characters")
     .max(500, "Pickup address is too long")
-    .regex(/^[a-zA-ZæøåÆØÅ0-9\s,.\-#&()\/]+$/u, "Pickup address contains invalid characters"),
+    .regex(/^[^\u0600-\u06FF0-9\s,.\-#&()\/]+$/u, "Pickup address contains invalid characters"),
   dropoffAddress: z.string()
     .min(3, "Dropoff address must be at least 3 characters")
     .max(500, "Dropoff address is too long")
-    .regex(/^[a-zA-ZæøåÆØÅ0-9\s,.\-#&()\/]+$/u, "Dropoff address contains invalid characters"),
+    .regex(/^[^\u0600-\u06FF0-9\s,.\-#&()\/]+$/u, "Dropoff address contains invalid characters"),
   pickupLat: z.number().min(-90).max(90).optional().nullable(),
   pickupLon: z.number().min(-180).max(180).optional().nullable(),
   dropoffLat: z.number().min(-90).max(90).optional().nullable(),

@@ -147,7 +147,7 @@ export default function BookingForm(){
           placeholder="Passenger full name"
           aria-describedby={validationErrors.riderName ? "rider-name-error" : undefined}
           aria-invalid={!!validationErrors.riderName}
-          onChange={e=>setF({...f,riderName:sanitizeInput(e.target.value, 'text')})}
+          onChange={e=>setF({...f,riderName:sanitizeInput(e.target.value, 'text') || ''})}
           autoComplete="name"
         />
         {validationErrors.riderName && (
@@ -219,7 +219,7 @@ export default function BookingForm(){
           placeholder="e.g., Rådhuspladsen, København or 55.676,12.568"
           aria-describedby={validationErrors.pickupAddress ? "pickup-error" : "pickup-help"}
           aria-invalid={!!validationErrors.pickupAddress}
-          onChange={e=>setF({...f,pickupAddress:sanitizeInput(e.target.value, 'address')})}
+          onChange={e=>setF({...f,pickupAddress:sanitizeInput(e.target.value, 'address') || ''})}
           autoComplete="address-line1"
         />
         <span id="pickup-help" className="sr-only">Enter pickup location or coordinates</span>
@@ -242,7 +242,7 @@ export default function BookingForm(){
           placeholder="e.g., Copenhagen Airport or 55.618,12.65"
           aria-describedby={validationErrors.dropoffAddress ? "dropoff-error" : "dropoff-help"}
           aria-invalid={!!validationErrors.dropoffAddress}
-          onChange={e=>setF({...f,dropoffAddress:sanitizeInput(e.target.value, 'address')})}
+          onChange={e=>setF({...f,dropoffAddress:sanitizeInput(e.target.value, 'address') || ''})}
           autoComplete="address-line2"
         />
         <span id="dropoff-help" className="sr-only">Enter destination location or coordinates</span>

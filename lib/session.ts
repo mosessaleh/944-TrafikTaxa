@@ -1,8 +1,4 @@
 import { cookies } from 'next/headers';
-import { verify } from 'jsonwebtoken';
-import { prisma } from '@/lib/db';
-
-const SECRET = process.env.SECRET || 'change_me_dev_secret';
 
 export type CurrentUser = {
   id: number;
@@ -10,64 +6,42 @@ export type CurrentUser = {
   firstName: string;
   lastName: string;
   phone: string;
-  street: string;
-  houseNumber: string;
-  postalCode: string;
-  city: string;
+  address: string;
   role: 'USER' | 'ADMIN';
   emailVerified: boolean;
   pendingEmail?: string | null;
-  isDeveloper?: boolean;
 };
 
+/**
+ * Lightweight server-side session reader.
+ *
+ * It expects a cookie named "me" that contains a URL-encoded JSON object like:
+ * { id, email, firstName, lastName, role, emailVerified }
+ * If absent or invalid, returns null.
+ */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
-  const token = cookies().get('session')?.value;
-  if (!token) return null;
   try {
-    const dec: any = verify(token, SECRET, {
-      algorithms: ['HS256'], // Specify algorithm for security
-    });
+    const raw = cookies().get('me')?.value;
+    if (!raw) return null;
 
-    // Additional validation: check if token has required fields
-    if (!dec.id || typeof dec.id !== 'number') {
-      return null;
-    }
+    const parsed = JSON.parse(decodeURIComponent(raw));
+    if (!parsed || typeof parsed !== 'object') return null;
 
-    // Check if token is expired (though verify should handle this, but explicit check)
-    if (dec.exp && dec.exp < Math.floor(Date.now() / 1000)) {
-      return null;
-    }
+    const user: CurrentUser = {
+      id: Number(parsed.id) || 0,
+      email: String(parsed.email || ''),
+      firstName: String(parsed.firstName || ''),
+      lastName: String(parsed.lastName || ''),
+      phone: String(parsed.phone || ''),
+      address: String(parsed.address || ''),
+      role: parsed.role === 'ADMIN' ? 'ADMIN' : 'USER',
+      emailVerified: !!parsed.emailVerified,
+      pendingEmail: parsed.pendingEmail || null,
+    };
 
-    const u = await prisma.user.findUnique({
-      where: { id: dec.id },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        phone: true,
-        street: true,
-        houseNumber: true,
-        postalCode: true,
-        city: true,
-        role: true,
-        emailVerified: true,
-        pendingEmail: true,
-      }
-    });
-
-    // Ensure user exists and is verified if required
-    if (!u || !u.emailVerified) {
-      return null;
-    }
-
-    // Auto-activate developer mode for admin users
-    const isDeveloper = u.role === 'ADMIN';
-
-    return { ...u, isDeveloper } as any;
-  } catch (error: any) {
-    // Log specific errors for debugging (in production, use proper logging)
-    console.error('JWT validation error:', error.message);
+    if (!user.id || !user.email) return null;
+    return user;
+  } catch {
     return null;
   }
 }

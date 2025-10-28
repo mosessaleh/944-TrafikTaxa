@@ -47,10 +47,7 @@ export default async function ProfilePage(){
         firstName: u.firstName,
         lastName: u.lastName,
         phone: u.phone,
-        street: u.street,
-        houseNumber: u.houseNumber,
-        postalCode: u.postalCode,
-        city: u.city,
+        address: u.address,
         pendingEmail: u.pendingEmail || null
       }} />
     </div>

@@ -64,8 +64,11 @@ export async function getUserFromCookie(){
         email: true,
         firstName: true,
         lastName: true,
+        phone: true,
+        address: true,
         role: true,
         emailVerified: true,
+        pendingEmail: true,
         createdAt: true
       }
     });

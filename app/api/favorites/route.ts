@@ -88,15 +88,15 @@ export async function POST(request: NextRequest) {
     const label = sanitizeInput(body?.label, 'text')?.trim();
     const address = sanitizeInput(body?.address, 'address')?.trim();
 
-    // Additional validation for Danish characters
-    if (label && !/^[a-zA-ZæøåÆØÅ\s\-'\.]+$/u.test(label)) {
+    // Additional validation for all languages except Arabic
+    if (label && !/^[^\u0600-\u06FF\s\-'\.]+$/u.test(label)) {
       return NextResponse.json(
         { ok: false, error: 'Label contains invalid characters' },
         { status: 400 }
       );
     }
 
-    if (address && !/^[a-zA-ZæøåÆØÅ0-9\s,.\-#&()\/]+$/u.test(address)) {
+    if (address && !/^[^\u0600-\u06FF0-9\s,.\-#&()\/]+$/u.test(address)) {
       return NextResponse.json(
         { ok: false, error: 'Address contains invalid characters' },
         { status: 400 }

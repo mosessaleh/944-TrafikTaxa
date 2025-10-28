@@ -26,16 +26,13 @@ export default function ProfileEditClient({ initial }: { initial: any }){
     }
 
     try{
-      const res = await fetch('/api/profile/update', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({
-        email: f.email,
-        firstName: f.firstName,
-        lastName: f.lastName,
-        phone: f.phone,
-        street: f.street,
-        houseNumber: f.houseNumber,
-        postalCode: f.postalCode,
-        city: f.city
-      }) });
+    const res = await fetch('/api/profile/update', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({
+      email: f.email,
+      firstName: f.firstName,
+      lastName: f.lastName,
+      phone: f.phone,
+      address: f.address
+    }) });
       const j = await res.json();
       if(!j.ok){ setErr(j.error||'Update failed'); return; }
       if (j.pending){ setMsg('Verification code sent to your new email. Please verify below.'); }
@@ -85,25 +82,10 @@ export default function ProfileEditClient({ initial }: { initial: any }){
           <input className="border rounded-xl px-4 py-3" value={f.phone} onChange={e=>setF({ ...f, phone:e.target.value })} />
           {validationErrors.phone && <span className="text-red-500 text-sm">{validationErrors.phone}</span>}
         </label>
-        <label className="grid gap-1">
-          <span className="text-sm text-gray-600">Street</span>
-          <input className="border rounded-xl px-4 py-3" value={f.street} onChange={e=>setF({ ...f, street:e.target.value })} />
-          {validationErrors.street && <span className="text-red-500 text-sm">{validationErrors.street}</span>}
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm text-gray-600">House No.</span>
-          <input className="border rounded-xl px-4 py-3" value={f.houseNumber} onChange={e=>setF({ ...f, houseNumber:e.target.value })} />
-          {validationErrors.houseNumber && <span className="text-red-500 text-sm">{validationErrors.houseNumber}</span>}
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm text-gray-600">Postal code</span>
-          <input className="border rounded-xl px-4 py-3" value={f.postalCode} onChange={e=>setF({ ...f, postalCode:e.target.value })} />
-          {validationErrors.postalCode && <span className="text-red-500 text-sm">{validationErrors.postalCode}</span>}
-        </label>
         <label className="grid gap-1 md:col-span-2">
-          <span className="text-sm text-gray-600">City</span>
-          <input className="border rounded-xl px-4 py-3" value={f.city} onChange={e=>setF({ ...f, city:e.target.value })} />
-          {validationErrors.city && <span className="text-red-500 text-sm">{validationErrors.city}</span>}
+          <span className="text-sm text-gray-600">Address</span>
+          <input className="border rounded-xl px-4 py-3" value={f.address || ''} onChange={e=>setF({ ...f, address:e.target.value })} />
+          {validationErrors.address && <span className="text-red-500 text-sm">{validationErrors.address}</span>}
         </label>
         <button disabled={loading} className="bg-black text-white rounded-2xl px-5 py-3 md:col-span-2">{loading ? 'Saving...' : 'Save changes'}</button>
       </form>

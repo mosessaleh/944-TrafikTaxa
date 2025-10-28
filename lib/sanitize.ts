@@ -1,105 +1,39 @@
-import DOMPurify from 'isomorphic-dompurify';
-import validator from 'validator';
-
-/**
- * Sanitizes HTML input to prevent XSS attacks
- * @param input - The input string to sanitize
- * @returns Sanitized string safe for HTML output
- */
-export function sanitizeHtml(input: string): string {
-  if (typeof input !== 'string') return '';
-  return DOMPurify.sanitize(input, {
-    ALLOWED_TAGS: [], // Strip all HTML tags
-    ALLOWED_ATTR: [], // Strip all attributes
-  });
-}
-
-/**
- * Sanitizes user input for general text fields
- * @param input - The input string to sanitize
- * @returns Sanitized string
- */
-export function sanitizeText(input: string): string {
-  if (typeof input !== 'string') return '';
-  return validator.escape(input.trim());
-}
-
-/**
- * Sanitizes email input
- * @param input - The email string to sanitize
- * @returns Sanitized email or empty string if invalid
- */
-export function sanitizeEmail(input: string): string {
-  if (typeof input !== 'string') return '';
-  const trimmed = input.trim().toLowerCase();
-  return validator.isEmail(trimmed) ? trimmed : '';
-}
-
-/**
- * Sanitizes phone number input (basic validation)
- * @param input - The phone string to sanitize
- * @returns Sanitized phone number
- */
-export function sanitizePhone(input: string): string {
-  if (typeof input !== 'string') return '';
-  // Remove all non-digit characters except + and spaces
-  const cleaned = input.replace(/[^\d+\s-()]/g, '').trim();
-  return validator.isMobilePhone(cleaned, 'any', { strictMode: false }) ? cleaned : '';
-}
-
-/**
- * Sanitizes address input
- * @param input - The address string to sanitize
- * @returns Sanitized address
- */
+// Unicode-safe sanitizers so Danish letters aren\'t stripped
 export function sanitizeAddress(input: string): string {
   if (typeof input !== 'string') return '';
-  // Allow letters, numbers, spaces, commas, periods, hyphens
-  return input.replace(/[^a-zA-Z0-9\s,.\-]/g, '').trim();
+  return input.replace(/[^\p{L}\p{M}0-9\s,\.\-#&()\/'’]/gu, '').trim();
 }
 
-/**
- * Sanitizes numeric input
- * @param input - The input to sanitize
- * @returns Sanitized number or null if invalid
- */
-export function sanitizeNumber(input: any): number | null {
-  const num = Number(input);
-  return isNaN(num) ? null : num;
+export function sanitizeName(input: string): string {
+  if (typeof input !== 'string') return '';
+  return input.replace(/[^\p{L}\p{M}\s\-'.]/gu, '').trim();
 }
 
-/**
- * Sanitizes boolean input
- * @param input - The input to sanitize
- * @returns Boolean value
- */
-export function sanitizeBoolean(input: any): boolean {
-  return Boolean(input);
-}
-
-/**
- * General input sanitizer that applies appropriate sanitization based on type
- * @param input - The input to sanitize
- * @param type - The type of sanitization to apply
- * @returns Sanitized input
- */
-export function sanitizeInput(input: any, type: 'text' | 'email' | 'phone' | 'address' | 'number' | 'boolean' | 'html'): any {
+export function sanitizeInput(input: any, type: 'text'): string | null;
+export function sanitizeInput(input: any, type: 'address'): string | null;
+export function sanitizeInput(input: any, type: 'number'): number | null;
+export function sanitizeInput(input: any, type: 'boolean'): boolean;
+export function sanitizeInput(input: any, type: string): string | number | boolean | null;
+export function sanitizeInput(input: any, type: string): string | number | boolean | null {
+  if (input == null) return null;
   switch (type) {
     case 'text':
-      return sanitizeText(input);
-    case 'email':
-      return sanitizeEmail(input);
-    case 'phone':
-      return sanitizePhone(input);
+      return typeof input === 'string' ? sanitizeName(input) : null;
     case 'address':
-      return sanitizeAddress(input);
+      return typeof input === 'string' ? sanitizeAddress(input) : null;
     case 'number':
-      return sanitizeNumber(input);
+      if (typeof input === 'number' && !isNaN(input)) return input;
+      if (typeof input === 'string') {
+        const num = parseFloat(input);
+        return isNaN(num) ? null : num;
+      }
+      return null;
     case 'boolean':
-      return sanitizeBoolean(input);
-    case 'html':
-      return sanitizeHtml(input);
+      if (typeof input === 'boolean') return input;
+      if (typeof input === 'string') return input.toLowerCase() === 'true' || input === '1';
+      if (typeof input === 'number') return input !== 0;
+      return false;
     default:
-      return sanitizeText(input);
+      return null;
   }
 }

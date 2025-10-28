@@ -8,10 +8,7 @@ const Schema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   phone: z.string().min(6),
-  street: z.string().min(2),
-  houseNumber: z.string().min(1),
-  postalCode: z.string().min(2),
-  city: z.string().min(2),
+  address: z.string().min(1),
   email: z.string().email()
 });
 
@@ -51,10 +48,7 @@ export async function POST(req: Request){
           firstName: data.firstName,
           lastName: data.lastName,
           phone: data.phone,
-          street: data.street,
-          houseNumber: data.houseNumber,
-          postalCode: data.postalCode,
-          city: data.city,
+          address: data.address,
           pendingEmail: data.email,
           pendingEmailCode: code,
           pendingEmailExpires: expires
@@ -64,19 +58,16 @@ export async function POST(req: Request){
       await sendEmail(data.email, 'Verify your new email', `<p>Your verification code is <b>${code}</b>. It expires in 15 minutes.</p>`);
       pendingNotice = true;
     } else {
-      await prisma.user.update({
-        where: { id: me.id },
-        data: {
-          firstName: data.firstName,
-          lastName: data.lastName,
-          phone: data.phone,
-          street: data.street,
-          houseNumber: data.houseNumber,
-          postalCode: data.postalCode,
-          city: data.city
-        }
-      });
-    }
+       await prisma.user.update({
+         where: { id: me.id },
+         data: {
+           firstName: data.firstName,
+           lastName: data.lastName,
+           phone: data.phone,
+           address: data.address
+         }
+       });
+     }
 
     return NextResponse.json({ ok:true, pending: pendingNotice });
   }catch(e:any){

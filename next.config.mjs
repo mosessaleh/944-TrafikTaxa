@@ -72,6 +72,11 @@ const nextConfig = {
 
   // Webpack optimizations
   webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
+    // Disable caching in development
+    if (dev) {
+      config.cache = false;
+    }
+
     // Code splitting optimizations
     if (!dev && !isServer) {
       config.optimization.splitChunks.chunks = 'all';

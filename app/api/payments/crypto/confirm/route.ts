@@ -14,44 +14,52 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid payload", details: parsed.error.flatten() }, { status: 400 });
     }
-    const { symbol, walletId, network, address, amountDkk, amountCoin } = parsed.data;
+    const { bookingId, transactionHash } = parsed.data;
 
     // Prisma expects string userId
     const userId = String(me.id);
 
-    const pay = await prisma.cryptoPayment.create({
-      data: {
+    // Find the crypto payment by transaction hash
+    const existingPayment = await prisma.cryptoPayment.findFirst({
+      where: {
         userId,
-        symbol,
-        network,
-        addressId: walletId || null,
-        address,
-        amountDkk: Number(amountDkk),
-        amountCoin: Number(amountCoin),
-        status: "pending",
-      },
+        status: "pending"
+      }
     });
 
-    // Notify user (processing ~15 minutes)
+    if (!existingPayment) {
+      return NextResponse.json({ error: "Payment not found" }, { status: 404 });
+    }
+
+    // Update payment status to confirmed
+    const pay = await prisma.cryptoPayment.update({
+      where: { id: existingPayment.id },
+      data: {
+        status: "confirmed"
+      }
+    });
+
+    // Notify user (payment confirmed)
     if (me.email) {
       const paymentDetails = {
-        amount: amountDkk,
-        method: `${symbol.toUpperCase()} (${network})`,
+        amount: existingPayment.amountDkk,
+        method: `${existingPayment.symbol.toUpperCase()} (${existingPayment.network})`,
         transactionId: pay.id,
-        bookingId: 'TBD' // This would need to be passed from the booking context
+        bookingId: bookingId
       };
       await notifyUserPaymentReceived(me.email, me.firstName, paymentDetails).catch(() => {});
     }
 
     // Notify admin
-    const subjectAdmin = "Crypto payment pending verification";
+    const subjectAdmin = "Crypto payment confirmed";
     const htmlAdmin = `
       <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto">
-        <h2>Crypto Payment Pending</h2>
+        <h2>Crypto Payment Confirmed</h2>
         <p>User ID: ${userId}${me.email ? ` (${me.email})` : ""}</p>
-        <p>Symbol: ${symbol.toUpperCase()} — Network: ${network}</p>
-        <p>Address: ${address}</p>
-        <p>Amount: ${amountDkk} DKK (~ ${amountCoin} ${symbol.toUpperCase()})</p>
+        <p>Symbol: ${existingPayment.symbol.toUpperCase()} — Network: ${existingPayment.network}</p>
+        <p>Address: ${existingPayment.address}</p>
+        <p>Amount: ${existingPayment.amountDkk} DKK (~ ${existingPayment.amountCoin} ${existingPayment.symbol.toUpperCase()})</p>
+        <p>Transaction Hash: <code>${transactionHash}</code></p>
         <p>Payment ID: <code>${pay.id}</code></p>
       </div>
     `;

@@ -4,7 +4,7 @@ import { hashPassword } from '@/lib/auth';
 
 export async function POST(req: Request){
   try{
-    const { email, password, firstName, lastName, phone, street, houseNumber, postalCode, city, token } = await req.json();
+    const { email, password, firstName, lastName, phone, address, token } = await req.json();
     if (!token || token !== process.env.ADMIN_TOKEN) return NextResponse.json({ ok:false, error:'Forbidden' }, { status:403 });
     if (!email || !password) return NextResponse.json({ ok:false, error:'email and password required' }, { status:400 });
     const hashed = await hashPassword(password);
@@ -17,10 +17,7 @@ export async function POST(req: Request){
         firstName: firstName || 'Admin',
         lastName: lastName || 'User',
         phone: phone || '00000000',
-        street: street || 'Admin Street',
-        houseNumber: houseNumber || '1',
-        postalCode: postalCode || '0000',
-        city: city || 'Copenhagen',
+        address: address || 'Admin Address',
         role: 'ADMIN',
         emailVerified: true
       }

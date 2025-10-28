@@ -1,19 +1,13 @@
 {
-  "description": "Add public /api/crypto/available route to fix 404 for BookingPayModal.",
+  "description": "Allow Danish/Unicode letters in registration (street/name) + Unicode-safe sanitization.",
   "files": [
     {
-      "path": "app/api/crypto/available/route.ts",
-      "content": "import { NextResponse } from \"next/server\";\nimport { prisma } from \"@/lib/db\";\n\n/**\n * Public endpoint: list available crypto symbols for checkout.\n * Tries DB (CryptoWallet with isActive=true). Falls back to a static set if DB isn't ready.\n * Response shape: { symbols: [{ symbol, total, active }...] }\n */\nexport async function GET() {\n  try {\n    const wallets = await prisma.cryptoWallet.findMany({\n      where: { isActive: true },\n      select: { symbol: true, isActive: true },\n    });\n    const map = new Map<string, { total: number; active: number }>();\n    for (const w of wallets) {\n      const key = String(w.symbol || \"\").toLowerCase();\n      const rec = map.get(key) || { total: 0, active: 0 };\n      rec.total += 1;\n      if (w.isActive) rec.active += 1;\n      map.set(key, rec);\n    }\n    const symbols = Array.from(map.entries()).map(([symbol, v]) => ({\n      symbol,\n      total: v.total,\n      active: v.active,\n    }));\n    return NextResponse.json({ symbols, source: \"db\" });\n  } catch (_e) {\n    // Fallback: common coins so UI doesn't break even if DB model isn't present\n    const defaults = [\"pi\",\"btc\",\"eth\",\"usdt\",\"usdc\",\"bnb\",\"xrp\"].map(s => ({\n      symbol: s, total: 1, active: 1\n    }));\n    return NextResponse.json({ symbols: defaults, source: \"fallback\" });\n  }\n}\n"
+      "path": "lib/validation.ts",
+      "content": "import { z } from 'zod';\n\n// Unicode-aware regexes (Danish letters, accents, combinations)\nexport const nameRegex = /^[\\p{L}\\p{M}\\s\\-'.]+$/u;\nexport const addressRegex = /^[\\p{L}\\p{M}0-9\\s,\\.\\-#&()\\/'’]+$/u;\nexport const houseNumberRegex = /^[0-9\\p{L}\\p{M}\\s\\/\\-.]+$/u;\n\n// Optional: a ready-to-use schema (use it in your route if desired)\nexport const RegisterSchema = z.object({\n  firstName: z.string().min(2).regex(nameRegex, 'First name contains invalid characters'),\n  lastName: z.string().min(2).regex(nameRegex, 'Last name contains invalid characters'),\n  street: z.string().min(3).regex(addressRegex, 'Street contains invalid characters'),\n  houseNumber: z.string().min(1).regex(houseNumberRegex, 'House number contains invalid characters').optional(),\n  city: z.string().min(2).regex(nameRegex, 'City contains invalid characters'),\n  postcode: z.string().min(2).max(10),\n  email: z.string().email(),\n  password: z.string().min(8)\n});\n"
     },
     {
-      "path": "app/DEV_NOTES__assistant.md",
-      "content_update": "regex",
-      "updates": [
-        {
-          "pattern": "$",
-          "replacement": "\n[2025-10-24 06:26:58] Added /api/crypto/available (public) to satisfy BookingPayModal; DB-first with graceful fallback.\n"
-        }
-      ]
+      "path": "lib/sanitize.ts",
+      "content": "// Unicode-safe sanitizers so Danish letters aren\\'t stripped\nexport function sanitizeAddress(input: string): string {\n  if (typeof input !== 'string') return '';\n  return input.replace(/[^\\p{L}\\p{M}0-9\\s,\\.\\-#&()\\/'’]/gu, '').trim();\n}\n\nexport function sanitizeName(input: string): string {\n  if (typeof input !== 'string') return '';\n  return input.replace(/[^\\p{L}\\p{M}\\s\\-'.]/gu, '').trim();\n}\n"
     }
   ]
 }
