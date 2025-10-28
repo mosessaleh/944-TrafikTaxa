@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Enhanced validation with stricter rules and sanitization
-const nameRegex = /^[a-zA-Z\s\-'\.]+$/;
+const nameRegex = /^[a-zA-ZæøåÆØÅ\s\-'\.]+$/u;
 const addressRegex = /^[a-zA-ZæøåÆØÅ0-9\s,.\-#&()\/]+$/u;
 const phoneRegex = /^[\+]?[0-9\s\-\(\)]+$/;
 const postalCodeRegex = /^[0-9]{4,10}$/; // Danish postal codes are 4 digits
@@ -74,7 +74,7 @@ export const RegisterSchema = z.object({
   city: z.string()
     .min(2, "City must be at least 2 characters")
     .max(50, "City is too long")
-    .regex(/^[a-zA-Z\s\-'\.]+$/, "City contains invalid characters"),
+    .regex(/^[a-zA-ZæøåÆØÅ\s\-'\.]+$/u, "City contains invalid characters"),
 });
 
 export type RegisterInput = z.infer<typeof RegisterSchema>;

@@ -7,10 +7,10 @@ import { sendEmail } from '@/lib/email';
 const Schema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
+  firstName: z.string().min(1).regex(/^[a-zA-ZæøåÆØÅ\s\-'\.]+$/u, "First name contains invalid characters"),
+  lastName: z.string().min(1).regex(/^[a-zA-ZæøåÆØÅ\s\-'\.]+$/u, "Last name contains invalid characters"),
   phone: z.string().min(6),
-  street: z.string().min(2).regex(/^[a-zA-ZæøåÆØÅ\s\-.,'&()]+$/u, "Street contains invalid characters"),
+  street: z.string().min(2).regex(/^[a-zA-ZæøåÆØÅ0-9\s,.\-#&()\/]+$/u, "Street contains invalid characters"),
   houseNumber: z.string().min(1),
   postalCode: z.string().min(2),
   city: z.string().min(2).regex(/^[a-zA-ZæøåÆØÅ\s\-.,'&()]+$/u, "City contains invalid characters")

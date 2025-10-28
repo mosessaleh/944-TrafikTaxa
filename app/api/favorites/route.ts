@@ -87,6 +87,21 @@ export async function POST(request: NextRequest) {
     // Validate and sanitize inputs
     const label = sanitizeInput(body?.label, 'text')?.trim();
     const address = sanitizeInput(body?.address, 'address')?.trim();
+
+    // Additional validation for Danish characters
+    if (label && !/^[a-zA-ZæøåÆØÅ\s\-'\.]+$/u.test(label)) {
+      return NextResponse.json(
+        { ok: false, error: 'Label contains invalid characters' },
+        { status: 400 }
+      );
+    }
+
+    if (address && !/^[a-zA-ZæøåÆØÅ0-9\s,.\-#&()\/]+$/u.test(address)) {
+      return NextResponse.json(
+        { ok: false, error: 'Address contains invalid characters' },
+        { status: 400 }
+      );
+    }
     const lat = typeof body?.lat === 'number' && body.lat >= -90 && body.lat <= 90 ? body.lat : null;
     const lon = typeof body?.lon === 'number' && body.lon >= -180 && body.lon <= 180 ? body.lon : null;
 

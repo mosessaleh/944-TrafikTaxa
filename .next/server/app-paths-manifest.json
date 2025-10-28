@@ -1,7 +1,3 @@
 {
-  "/register/page": "app/register/page.js",
-  "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
-  "/page": "app/page.js",
-  "/login/page": "app/login/page.js",
-  "/api/addresses/route": "app/api/addresses/route.js"
+  "/register/page": "app/register/page.js"
 }
