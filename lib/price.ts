@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db';
+import { CacheManager } from '@/lib/cache';
 
 function isHoliday(at: Date){
   const list = (process.env.HOLIDAYS||'').split(',').map(s=> s.trim()).filter(Boolean);
@@ -28,12 +29,27 @@ export async function computeBase(distanceKm:number, durationMin:number, at: Dat
 }
 
 export async function computePrice(distanceKm:number, durationMin:number, at: Date, vehicleTypeId?: number){
+  // Check cache first
+  if (vehicleTypeId) {
+    const cachedPrice = CacheManager.getPriceCache(distanceKm, durationMin, vehicleTypeId);
+    if (cachedPrice !== null) {
+      return cachedPrice;
+    }
+  }
+
   const base = await computeBase(distanceKm, durationMin, at);
   if (!vehicleTypeId) return base;
+
   const vt = await prisma.vehicleType.findUnique({ where: { id: vehicleTypeId }, select: { active: true, multiplier: true } });
   if (!vt || !vt.active) throw new Error('Vehicle type not available');
+
   const mul = Number(vt.multiplier || 1);
-  return Math.round(base * (mul > 0 ? mul : 1));
+  const finalPrice = Math.round(base * (mul > 0 ? mul : 1));
+
+  // Cache the result
+  CacheManager.setPriceCache(distanceKm, durationMin, vehicleTypeId, finalPrice);
+
+  return finalPrice;
 }
 
 export async function getSettingsForAdmin(){

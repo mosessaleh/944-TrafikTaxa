@@ -31,6 +31,44 @@ describe('BookingFormSchema', () => {
     };
     expect(() => BookingFormSchema.parse(invalidData)).toThrow();
   });
+
+  it('should validate scheduled trips with future pickup time', () => {
+    const futureTime = new Date();
+    futureTime.setHours(futureTime.getHours() + 2);
+
+    const validData = {
+      passengers: 1,
+      pickupAddress: 'Test Street 1',
+      dropoffAddress: 'Test Street 2',
+      tripType: 'scheduled' as const,
+      pickupTime: futureTime.toISOString(),
+    };
+    expect(() => BookingFormSchema.parse(validData)).not.toThrow();
+  });
+
+  it('should reject scheduled trips with past pickup time', () => {
+    const pastTime = new Date();
+    pastTime.setHours(pastTime.getHours() - 2);
+
+    const invalidData = {
+      passengers: 1,
+      pickupAddress: 'Test Street 1',
+      dropoffAddress: 'Test Street 2',
+      tripType: 'scheduled' as const,
+      pickupTime: pastTime.toISOString(),
+    };
+    expect(() => BookingFormSchema.parse(invalidData)).toThrow();
+  });
+
+  it('should reject addresses with invalid characters', () => {
+    const invalidData = {
+      passengers: 1,
+      pickupAddress: 'Test <script>alert("xss")</script> Street',
+      dropoffAddress: 'Test Street 2',
+      tripType: 'immediate' as const,
+    };
+    expect(() => BookingFormSchema.parse(invalidData)).toThrow();
+  });
 });
 
 describe('RegisterSchema', () => {
@@ -52,6 +90,36 @@ describe('RegisterSchema', () => {
   it('should reject invalid email', () => {
     const invalidData = {
       email: 'invalid-email',
+      password: 'Password123!',
+      firstName: 'John',
+      lastName: 'Doe',
+      phone: '+4512345678',
+      street: 'Test Street',
+      houseNumber: '1',
+      postalCode: '1234',
+      city: 'Test City',
+    };
+    expect(() => RegisterSchema.parse(invalidData)).toThrow();
+  });
+
+  it('should reject weak passwords', () => {
+    const invalidData = {
+      email: 'test@example.com',
+      password: 'weak',
+      firstName: 'John',
+      lastName: 'Doe',
+      phone: '+4512345678',
+      street: 'Test Street',
+      houseNumber: '1',
+      postalCode: '1234',
+      city: 'Test City',
+    };
+    expect(() => RegisterSchema.parse(invalidData)).toThrow();
+  });
+
+  it('should reject emails with HTML tags', () => {
+    const invalidData = {
+      email: 'test<script>alert("xss")</script>@example.com',
       password: 'Password123!',
       firstName: 'John',
       lastName: 'Doe',

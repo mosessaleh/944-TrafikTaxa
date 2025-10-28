@@ -77,15 +77,15 @@ describe('BookingForm', () => {
   it('shows validation errors for invalid form data', async () => {
     const { getByText, getByPlaceholderText } = render(<BookingForm />);
 
-    const dropoffInput = getByPlaceholderText('e.g., Copenhagen Airport or 55.618,12.65');
+    const pickupInput = getByPlaceholderText('e.g., Rådhuspladsen, København or 55.676,12.568');
     const getQuoteButton = getByText('Get quote');
 
-    // Enter invalid characters in dropoff address and try to get quote
-    fireEvent.change(dropoffInput, { target: { value: '<script>alert("xss")</script>' } });
+    // Enter invalid characters in pickup address and try to get quote
+    fireEvent.change(pickupInput, { target: { value: '<script>alert("xss")</script>' } });
     fireEvent.click(getQuoteButton);
 
     await waitFor(() => {
-      expect(getByText('Dropoff address contains invalid characters')).toBeTruthy();
+      expect(getByText('Pickup address contains invalid characters')).toBeTruthy();
     });
   });
 });

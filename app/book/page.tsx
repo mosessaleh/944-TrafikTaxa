@@ -1,10 +1,14 @@
+import dynamic from 'next/dynamic';
 import BookingPayTrigger from "@/app/_components/BookingPayTrigger";
 import { confirmBookingAndGoToPay } from "@/app/_actions/booking-pay";
 import { getCurrentUser } from '@/lib/session';
-import BookClient from '@/components/book-client';
 import ErrorBoundary from '@/components/error-boundary';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
+
+const BookClient = dynamic(() => import('@/components/book-client'), {
+  loading: () => <div className="flex items-center justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-500"></div></div>
+});
 
 export const metadata: Metadata = {
   title: 'Book Your Taxi Ride | 944 Trafik',

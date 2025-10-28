@@ -25,7 +25,7 @@ export function withSecurityHeaders(resp: Response){
     "default-src 'self'",
     "img-src 'self' data: https://*.tile.openstreetmap.org https://*.stripe.com https://*.paypal.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    "script-src 'self' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com",
+    "script-src 'self' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com",
     "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org https://api.stripe.com https://api.paypal.com wss://*.stripe.com",
     "font-src 'self' data: https://fonts.gstatic.com",
     "object-src 'none'",

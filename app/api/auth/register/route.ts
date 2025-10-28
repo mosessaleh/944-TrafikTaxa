@@ -10,10 +10,10 @@ const Schema = z.object({
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   phone: z.string().min(6),
-  street: z.string().min(2),
+  street: z.string().min(2).regex(/^[a-zA-ZæøåÆØÅ\s\-.,'&()]+$/u, "Street contains invalid characters"),
   houseNumber: z.string().min(1),
   postalCode: z.string().min(2),
-  city: z.string().min(2)
+  city: z.string().min(2).regex(/^[a-zA-ZæøåÆØÅ\s\-.,'&()]+$/u, "City contains invalid characters")
 });
 
 export async function POST(req: Request){

@@ -190,3 +190,21 @@ model RevolutPayment {
   paymentId  String
   createdAt  DateTime @default(now())
 }
+
+// === Added by assistant (Audit Logging) ===
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  event     String
+  userId    String?
+  ipAddress String?
+  userAgent String?
+  metadata  Json     @default("{}")
+  severity  String   @default("low") // low, medium, high, critical
+  timestamp DateTime @default(now())
+
+  @@index([event])
+  @@index([userId])
+  @@index([ipAddress])
+  @@index([timestamp])
+  @@index([severity])
+}

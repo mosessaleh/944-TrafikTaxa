@@ -4,7 +4,21 @@ import { BookingFormSchema, BookingFormInput } from '@/lib/validation';
 import { sanitizeInput } from '@/lib/sanitize';
 
 function LoadingSpinner() {
-  return <div className="loading-spinner"></div>;
+  return (
+    <div
+      className="loading-spinner inline-block w-4 h-4 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin"
+      role="status"
+      aria-label="Loading"
+    >
+      <span className="sr-only">Loading...</span>
+    </div>
+  );
+}
+
+function SkeletonLoader({ className = "" }: { className?: string }) {
+  return (
+    <div className={`animate-pulse bg-gray-200 rounded ${className}`} aria-hidden="true"></div>
+  );
 }
 
 export default function BookingForm(){
@@ -112,104 +126,186 @@ export default function BookingForm(){
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-4 animate-fade-in">
+    <form
+      onSubmit={submit}
+      className="grid gap-4 animate-fade-in"
+      role="form"
+      aria-labelledby="booking-form-title"
+      noValidate
+    >
+      <h2 id="booking-form-title" className="sr-only">Taxi Booking Form</h2>
+
       {/* Rider name */}
-      <label className="form-group">
-        <span className="label">Passenger name (if booking for someone else)</span>
+      <div className="form-group" role="group" aria-labelledby="rider-name-label">
+        <label htmlFor="rider-name" id="rider-name-label" className="label">
+          Passenger name (if booking for someone else)
+        </label>
         <input
+          id="rider-name"
           className="input form-field"
+          type="text"
           placeholder="Passenger full name"
+          aria-describedby={validationErrors.riderName ? "rider-name-error" : undefined}
+          aria-invalid={!!validationErrors.riderName}
           onChange={e=>setF({...f,riderName:sanitizeInput(e.target.value, 'text')})}
+          autoComplete="name"
         />
-        {validationErrors.riderName && <span className="form-error">{validationErrors.riderName}</span>}
-      </label>
+        {validationErrors.riderName && (
+          <div id="rider-name-error" className="form-error animate-fade-in flex items-center gap-1" role="alert" aria-live="polite">
+            <span className="text-red-500">⚠</span>
+            <span>{validationErrors.riderName}</span>
+          </div>
+        )}
+      </div>
 
       {/* Passengers */}
-      <label className="form-group">
-        <span className="label">Number of passengers (max 4 per car)</span>
+      <div className="form-group" role="group" aria-labelledby="passengers-label">
+        <label htmlFor="passengers" id="passengers-label" className="label">
+          Number of passengers (max 4 per car)
+        </label>
         <input
+          id="passengers"
           className="input form-field"
           type="number"
           min={1}
           max={4}
           defaultValue={1}
+          aria-describedby={validationErrors.passengers ? "passengers-error" : "passengers-help"}
+          aria-invalid={!!validationErrors.passengers}
           onChange={e=>setF({...f,passengers:Number(e.target.value)})}
         />
-        {validationErrors.passengers && <span className="form-error">{validationErrors.passengers}</span>}
-      </label>
+        <span id="passengers-help" className="sr-only">Maximum 4 passengers per vehicle</span>
+        {validationErrors.passengers && (
+          <div id="passengers-error" className="form-error animate-fade-in flex items-center gap-1" role="alert" aria-live="polite">
+            <span className="text-red-500">⚠</span>
+            <span>{validationErrors.passengers}</span>
+          </div>
+        )}
+      </div>
 
       {/* Trip type */}
-      <label className="form-group">
-        <span className="label">Trip type</span>
+      <div className="form-group" role="group" aria-labelledby="trip-type-label">
+        <label htmlFor="trip-type" id="trip-type-label" className="label">
+          Trip type
+        </label>
         <select
+          id="trip-type"
           className="select form-field"
           value={f.tripType}
+          aria-describedby={validationErrors.tripType ? "trip-type-error" : undefined}
+          aria-invalid={!!validationErrors.tripType}
           onChange={e=>setF({...f,tripType:e.target.value as 'immediate'|'scheduled'})}
         >
           <option value="immediate">Immediate</option>
           <option value="scheduled">Schedule for later</option>
         </select>
-        {validationErrors.tripType && <span className="form-error">{validationErrors.tripType}</span>}
-      </label>
+        {validationErrors.tripType && (
+          <div id="trip-type-error" className="form-error animate-fade-in flex items-center gap-1" role="alert" aria-live="polite">
+            <span className="text-red-500">⚠</span>
+            <span>{validationErrors.tripType}</span>
+          </div>
+        )}
+      </div>
 
       {/* Pickup/Dropoff */}
-      <label className="form-group">
-        <span className="label">Pickup address (you can also enter lat,lng)</span>
+      <div className="form-group" role="group" aria-labelledby="pickup-label">
+        <label htmlFor="pickup-address" id="pickup-label" className="label">
+          Pickup address (you can also enter lat,lng)
+        </label>
         <input
+          id="pickup-address"
           className="input form-field"
+          type="text"
           placeholder="e.g., Rådhuspladsen, København or 55.676,12.568"
+          aria-describedby={validationErrors.pickupAddress ? "pickup-error" : "pickup-help"}
+          aria-invalid={!!validationErrors.pickupAddress}
           onChange={e=>setF({...f,pickupAddress:sanitizeInput(e.target.value, 'address')})}
+          autoComplete="address-line1"
         />
-        {validationErrors.pickupAddress && <span className="form-error">{validationErrors.pickupAddress}</span>}
-      </label>
+        <span id="pickup-help" className="sr-only">Enter pickup location or coordinates</span>
+        {validationErrors.pickupAddress && (
+          <div id="pickup-error" className="form-error animate-fade-in flex items-center gap-1" role="alert" aria-live="polite">
+            <span className="text-red-500">⚠</span>
+            <span>{validationErrors.pickupAddress}</span>
+          </div>
+        )}
+      </div>
 
-      <label className="form-group">
-        <span className="label">Dropoff address (you can also enter lat,lng)</span>
+      <div className="form-group" role="group" aria-labelledby="dropoff-label">
+        <label htmlFor="dropoff-address" id="dropoff-label" className="label">
+          Dropoff address (you can also enter lat,lng)
+        </label>
         <input
+          id="dropoff-address"
           className="input form-field"
+          type="text"
           placeholder="e.g., Copenhagen Airport or 55.618,12.65"
+          aria-describedby={validationErrors.dropoffAddress ? "dropoff-error" : "dropoff-help"}
+          aria-invalid={!!validationErrors.dropoffAddress}
           onChange={e=>setF({...f,dropoffAddress:sanitizeInput(e.target.value, 'address')})}
+          autoComplete="address-line2"
         />
-        {validationErrors.dropoffAddress && <span className="form-error">{validationErrors.dropoffAddress}</span>}
-      </label>
+        <span id="dropoff-help" className="sr-only">Enter destination location or coordinates</span>
+        {validationErrors.dropoffAddress && (
+          <div id="dropoff-error" className="form-error animate-fade-in flex items-center gap-1" role="alert" aria-live="polite">
+            <span className="text-red-500">⚠</span>
+            <span>{validationErrors.dropoffAddress}</span>
+          </div>
+        )}
+      </div>
 
       {/* When (only if scheduled) */}
       {scheduled && (
-        <label className="form-group animate-slide-in">
-          <span className="label">Pickup time</span>
+        <div className="form-group animate-slide-in" role="group" aria-labelledby="pickup-time-label">
+          <label htmlFor="pickup-time" id="pickup-time-label" className="label">
+            Pickup time
+          </label>
           <input
+            id="pickup-time"
             className="input form-field"
             type="datetime-local"
+            aria-describedby={validationErrors.pickupTime ? "pickup-time-error" : "pickup-time-help"}
+            aria-invalid={!!validationErrors.pickupTime}
             onChange={e=>setF({...f,pickupTime: e.target.value? new Date(e.target.value).toISOString():''})}
+            min={new Date().toISOString().slice(0, 16)}
           />
-          {validationErrors.pickupTime && <span className="form-error">{validationErrors.pickupTime}</span>}
-        </label>
+          <span id="pickup-time-help" className="sr-only">Select pickup date and time</span>
+          {validationErrors.pickupTime && (
+            <div id="pickup-time-error" className="form-error animate-fade-in flex items-center gap-1" role="alert" aria-live="polite">
+              <span className="text-red-500">⚠</span>
+              <span>{validationErrors.pickupTime}</span>
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="flex gap-2">
+      <div className="flex gap-2" role="group" aria-label="Form actions">
         <button
           type="button"
           onClick={getQuote}
           disabled={isLoadingQuote}
           className="btn-ghost disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-describedby="quote-button-status"
         >
           {isLoadingQuote ? (
             <>
-              <LoadingSpinner />
-              Getting quote...
+              <LoadingSpinner aria-hidden="true" />
+              <span id="quote-button-status">Getting quote...</span>
             </>
           ) : (
             'Get quote'
           )}
         </button>
         <button
+          type="submit"
           disabled={isSubmitting}
           className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-describedby="booking-button-status"
         >
           {isSubmitting ? (
             <>
-              <LoadingSpinner />
-              Booking...
+              <LoadingSpinner aria-hidden="true" />
+              <span id="booking-button-status">Booking...</span>
             </>
           ) : (
             'Book now'
@@ -217,13 +313,77 @@ export default function BookingForm(){
         </button>
       </div>
 
-      {quote && (
-        <div className="text-sm text-gray-700 animate-fade-in bg-gray-50 p-3 rounded-xl border">
-          Distance ~ {quote.distanceKm.toFixed(2)} km · Duration ~ {quote.durationMin} min · Estimated price ~ {quote.price} DKK
+      {/* Status messages */}
+      {isLoadingQuote && !quote && (
+        <div
+          className="bg-gray-50 p-3 rounded-xl border animate-pulse"
+          role="status"
+          aria-live="polite"
+          aria-label="Loading quote"
+        >
+          <div className="flex items-center gap-2">
+            <LoadingSpinner />
+            <span>Calculating your fare...</span>
+          </div>
+          <div className="mt-2 space-y-1">
+            <SkeletonLoader className="h-4 w-3/4" />
+            <SkeletonLoader className="h-4 w-1/2" />
+          </div>
         </div>
       )}
-      {msg && <p className="form-success">{msg}</p>}
-      {err && <p className="form-error">{err}</p>}
+
+      {quote && (
+        <div
+          className="text-sm text-gray-700 animate-fade-in bg-green-50 p-3 rounded-xl border border-green-200"
+          role="status"
+          aria-live="polite"
+          aria-label="Quote information"
+        >
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-green-600">✓</span>
+            <span className="font-medium text-green-800">Quote calculated</span>
+          </div>
+          <div className="text-gray-700">
+            Distance ~ {quote.distanceKm.toFixed(2)} km · Duration ~ {quote.durationMin} min · Estimated price ~ {quote.price} DKK
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <div
+          className="form-success animate-fade-in border border-green-200 bg-green-50 p-3 rounded-lg"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-green-600 text-lg">✓</span>
+            <span className="font-medium text-green-800">Success!</span>
+          </div>
+          <p className="text-green-700 mt-1">{msg}</p>
+        </div>
+      )}
+
+      {err && (
+        <div
+          className="form-error animate-fade-in border border-red-200 bg-red-50 p-3 rounded-lg"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-red-600 text-lg">⚠</span>
+            <span className="font-medium text-red-800">Error</span>
+          </div>
+          <p className="text-red-700 mt-1">{err}</p>
+          <button
+            type="button"
+            onClick={() => setErr('')}
+            className="mt-2 text-sm text-red-600 hover:text-red-800 underline focus:outline-none focus:ring-2 focus:ring-red-500 rounded"
+            aria-label="Dismiss error message"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
     </form>
   );
 }

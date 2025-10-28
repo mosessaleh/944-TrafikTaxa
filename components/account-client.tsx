@@ -1,195 +1,443 @@
 "use client";
-import { useEffect, useState } from 'react';
-import useSWR, { mutate } from 'swr';
-import AddressAutocomplete, { type Suggestion } from '@/components/address-autocomplete';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import useSWR from 'swr';
 
-type Me = { id:number; email:string; emailVerified:boolean; firstName:string; lastName:string; phone:string; street:string; houseNumber:string; postalCode:string; city:string } | null;
-
-type Ride = { id:number; pickupAddress:string; dropoffAddress:string; pickupTime:string; price:number; status:string };
-
-type Fav = { id:number; label:string; address:string; lat:number|null; lon:number|null };
-
-type Tab = 'profile'|'history'|'favorites';
-
-function TabButton({active, children, onClick}:{active:boolean; children:React.ReactNode; onClick:()=>void}){
-  return <button onClick={onClick} className={`px-4 py-2 rounded-2xl border transition ${active? 'bg-black text-white border-black shadow-sm':'bg-white text-black hover:bg-gray-100'}`}>{children}</button>;
+interface User {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  role: string;
+  emailVerified: boolean;
 }
-function Field({label, children}:{label:string; children:React.ReactNode}){
-  return (
-    <div className="grid gap-1">
-      <div className="label">{label}</div>
-      {children}
-    </div>
+
+interface Ride {
+  id: number;
+  riderName: string;
+  passengers: number;
+  pickupAddress: string;
+  dropoffAddress: string;
+  scheduled: boolean;
+  pickupTime: string;
+  distanceKm: number;
+  durationMin: number;
+  price: number;
+  status: string;
+  createdAt: string;
+}
+
+interface Favorite {
+  id: number;
+  label: string;
+  address: string;
+  lat: number | null;
+  lon: number | null;
+  createdAt: string;
+}
+
+export default function AccountClient() {
+  const router = useRouter();
+  const [tab, setTab] = useState<'profile' | 'history' | 'favorites'>('profile');
+  const [me, setMe] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch user profile
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const response = await fetch('/api/profile', {
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache',
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Profile API response:', data);
+          if (data.ok) {
+            setMe(data.me);
+          }
+        } else if (response.status === 401) {
+          router.push('/login');
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to fetch user:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUser();
+  }, [router]);
+
+  // Fetch rides data
+  const { data: ridesData, error: ridesError, isLoading: ridesLoading } = useSWR(
+    tab === 'history' && me ? '/api/bookings' : null,
+    async (url) => {
+      console.log('Fetching bookings from:', url);
+      const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+      });
+
+      console.log('Bookings response status:', response.status);
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Please log in to view your bookings');
+        }
+        if (response.status === 403) {
+          throw new Error('Email verification required');
+        }
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Bookings API error:', errorData);
+        throw new Error(errorData.error || `Failed to fetch bookings: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Bookings data received:', data);
+
+      if (!data.ok) {
+        throw new Error(data.error || 'Failed to fetch bookings');
+      }
+
+      return data.rides || [];
+    },
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      dedupingInterval: 5000,
+      errorRetryCount: 1,
+      errorRetryInterval: 1000,
+      shouldRetryOnError: false,
+      onError: (error) => {
+        console.error('Bookings fetch error:', error);
+      },
+    }
   );
-}
-function Modal({ open, onClose, title, children }:{ open:boolean; onClose:()=>void; title:string; children:React.ReactNode }){
-  if(!open) return null;
-  return (
-    <div className="modal-wrap">
-      <div className="modal-overlay" onClick={onClose}/>
-      <div className="modal-box">
-        <div className="modal-head px-4 pt-4">
-          <div className="text-lg font-semibold">{title}</div>
-          <button onClick={onClose} aria-label="Close" className="px-2 py-1 text-sm rounded border">✕</button>
-        </div>
-        <div className="p-4">
-          {children}
+
+  // Fetch favorites data
+  const { data: favsData, error: favsError, mutate: mutateFavs, isLoading: favsLoading } = useSWR(
+    tab === 'favorites' && me ? '/api/favorites' : null,
+    async (url) => {
+      console.log('Fetching favorites from:', url);
+      console.log('Current tab:', tab);
+      console.log('Current user:', me);
+      const response = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+      });
+
+      console.log('Favorites response status:', response.status);
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          throw new Error('Please log in to view your favorites');
+        }
+        if (response.status === 403) {
+          throw new Error('Email verification required');
+        }
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Favorites API error:', errorData);
+        throw new Error(errorData.error || `Failed to fetch favorites: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Favorites data received:', data);
+
+      if (!data.ok) {
+        throw new Error(data.error || 'Failed to fetch favorites');
+      }
+
+      return data.items || [];
+    },
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      dedupingInterval: 5000,
+      errorRetryCount: 1,
+      errorRetryInterval: 1000,
+      shouldRetryOnError: false,
+      onError: (error) => {
+        console.error('Favorites fetch error:', error);
+      },
+    }
+  );
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      router.push('/');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen pt-20 pb-8">
+        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-600 mx-auto"></div>
+            <p className="mt-4 text-slate-600">Loading account...</p>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-export default function AccountClient(){
-  const [tab, setTab] = useState<Tab>(()=>{ if (typeof window === 'undefined') return 'profile'; const u = new URL(window.location.href); const t = u.searchParams.get('tab'); return (t==='history'||t==='favorites')? (t as Tab) : 'profile'; });
-  useEffect(()=>{ if(typeof window==='undefined') return; const u = new URL(window.location.href); u.searchParams.set('tab', tab); history.replaceState(null, '', u.toString()); },[tab]);
-
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string| null>(null);
-
-  // Add Favorite modal state
-  const [addFavOpen, setAddFavOpen] = useState(false);
-  const [favLabel, setFavLabel] = useState('');
-  const [favAddress, setFavAddress] = useState('');
-  const [favSel, setFavSel] = useState<Suggestion | null>(null);
-
-  const { data: profileData, error: profileError, mutate: mutateProfile } = useSWR('/api/profile', (url) => fetch(url).then(r => r.ok ? r.json().then(j => j.me) : null));
-  const me = profileData || null;
-
-  const { data: ridesData, error: ridesError } = useSWR(tab === 'history' ? '/api/bookings' : null, (url) => fetch(url).then(r => r.ok ? r.json().then(j => j.rides || []) : []));
-  const rides = ridesData || [];
-
-  const { data: favsData, error: favsError, mutate: mutateFavs } = useSWR(tab === 'favorites' ? '/api/favorites' : null, (url) => fetch(url).then(r => r.ok ? r.json().then(j => j.items || []) : []));
-  const favs = favsData || [];
-
-  async function saveProfile(){
-    try{ if(!me) return; setSaving(true); setMsg(null);
-      const r = await fetch('/api/profile', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(me) });
-      const j = await r.json();
-      if(!r.ok || !j?.ok) throw new Error(j?.error||'Save failed');
-      mutateProfile();
-      setMsg('Profile saved');
-    }catch(e:any){ setMsg(e?.message||'Save failed'); }
-    finally{ setSaving(false); }
+    );
   }
-  async function updateFav(row: Fav){ const r = await fetch('/api/favorites', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify(row) }); const j = await r.json(); if(j?.ok){ mutateFavs(); } }
-  async function deleteFav(id:number){ const r = await fetch(`/api/favorites?id=${id}`, { method:'DELETE' }); const j = await r.json(); if(j?.ok){ mutateFavs(); } }
-  async function createFav(){ try{ const address = (favSel?.text || favAddress).trim(); const label = favLabel.trim() || 'Favorite'; if(!address) return; const res = await fetch('/api/favorites', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label, address, lat: favSel?.lat ?? null, lon: favSel?.lon ?? null }) }); const j = await res.json(); if(j?.ok){ mutateFavs(); setAddFavOpen(false); setFavLabel(''); setFavAddress(''); setFavSel(null); } }catch{} }
 
-  if(me===null){ return <div className="container-page p-4"><div className="card"><div className="card-body">Loading…</div></div></div>; }
-  if(!me){ return <div className="container-page p-4"><div className="card"><div className="card-body bg-yellow-50 border-yellow-200">Please login to view your account.</div></div></div>; }
+
+  if (!me) {
+    return (
+      <div className="min-h-screen pt-20 pb-8">
+        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-slate-800 mb-4">Access Denied</h1>
+            <p className="text-slate-600 mb-6">Please log in to view your account.</p>
+            <button
+              onClick={() => router.push('/login')}
+              className="btn-primary"
+            >
+              Go to Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container-page p-4 grid gap-6">
-      <h1>Account</h1>
-      <div className="flex gap-2">
-        <TabButton active={tab==='profile'} onClick={()=> setTab('profile')}>Profile</TabButton>
-        <TabButton active={tab==='history'} onClick={()=> setTab('history')}>History</TabButton>
-        <TabButton active={tab==='favorites'} onClick={()=> setTab('favorites')}>Favorites</TabButton>
+    <div className="min-h-screen pt-20 pb-8">
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-800 mb-2">My Account</h1>
+          <p className="text-slate-600">Manage your profile and view your booking history</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="mb-6">
+          <nav className="flex space-x-1 bg-slate-100 p-1 rounded-lg">
+            {[
+              { id: 'profile', label: 'Profile', icon: '👤' },
+              { id: 'history', label: 'Booking History', icon: '📋' },
+              { id: 'favorites', label: 'Favorite Addresses', icon: '⭐' },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id as any)}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                  tab === t.id
+                    ? 'bg-white text-slate-800 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800'
+                }`}
+              >
+                <span>{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </nav>
+        </div>
+
+        {/* Tab Content */}
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+          {tab === 'profile' && (
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-slate-800 mb-6">Profile Information</h2>
+              <div className="grid gap-6">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">First Name</label>
+                    <div className="p-3 bg-slate-50 rounded-md text-slate-800">{me.firstName}</div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Last Name</label>
+                    <div className="p-3 bg-slate-50 rounded-md text-slate-800">{me.lastName}</div>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
+                  <div className="p-3 bg-slate-50 rounded-md text-slate-800 flex items-center gap-2">
+                    {me.email}
+                    {me.emailVerified ? (
+                      <span className="text-green-600 text-sm">✓ Verified</span>
+                    ) : (
+                      <span className="text-amber-600 text-sm">⚠ Not verified</span>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Phone</label>
+                  <div className="p-3 bg-slate-50 rounded-md text-slate-800">{me.phone}</div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
+                  <div className="p-3 bg-slate-50 rounded-md text-slate-800 capitalize">{me.role.toLowerCase()}</div>
+                </div>
+              </div>
+              <div className="mt-8 pt-6 border-t border-slate-200">
+                <button
+                  onClick={handleLogout}
+                  className="btn-ghost text-red-600 hover:text-red-700 hover:bg-red-50"
+                >
+                  🚪 Logout
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tab === 'history' && (
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-slate-800 mb-6">Booking History</h2>
+              {ridesLoading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
+                  <p className="mt-2 text-slate-600">Loading bookings...</p>
+                </div>
+              ) : ridesError ? (
+                <div className="text-center py-8">
+                  <p className="text-red-600 mb-4">Failed to load bookings</p>
+                  <p className="text-slate-600 text-sm">{ridesError.message}</p>
+                </div>
+              ) : !ridesData || ridesData.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-slate-600">No bookings found</p>
+                  <button
+                    onClick={() => router.push('/book')}
+                    className="btn-primary mt-4"
+                  >
+                    Book Your First Ride
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {ridesData.map((ride: Ride) => (
+                    <div key={ride.id} className="border border-slate-200 rounded-lg p-4">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-semibold text-slate-800">
+                            Booking #{ride.id}
+                          </h3>
+                          <p className="text-sm text-slate-600">
+                            {new Date(ride.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-slate-800">{ride.price} DKK</p>
+                          <p className="text-sm text-slate-600 capitalize">{ride.status}</p>
+                        </div>
+                      </div>
+                      <div className="grid md:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-slate-600">From:</p>
+                          <p className="font-medium">{ride.pickupAddress}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600">To:</p>
+                          <p className="font-medium">{ride.dropoffAddress}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600">Passengers:</p>
+                          <p className="font-medium">{ride.passengers}</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-600">Distance:</p>
+                          <p className="font-medium">{ride.distanceKm.toFixed(1)} km</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-slate-100">
+                        <p className="text-sm text-slate-600">
+                          {ride.scheduled ? 'Scheduled for' : 'Booked for'} {new Date(ride.pickupTime).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'favorites' && (
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-slate-800 mb-6">Favorite Addresses</h2>
+              {favsLoading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
+                  <p className="mt-2 text-slate-600">Loading favorites...</p>
+                </div>
+              ) : favsError ? (
+                <div className="text-center py-8">
+                  <p className="text-red-600 mb-4">Failed to load favorites</p>
+                  <p className="text-slate-600 text-sm">{favsError.message}</p>
+                </div>
+              ) : !favsData || favsData.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-slate-600">No favorite addresses yet</p>
+                  <button
+                    onClick={() => router.push('/book')}
+                    className="btn-primary mt-4"
+                  >
+                    Start Booking to Add Favorites
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {favsData.map((fav: Favorite) => (
+                    <div key={fav.id} className="border border-slate-200 rounded-lg p-4">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-slate-800 mb-1">{fav.label}</h3>
+                          <p className="text-slate-600 text-sm">{fav.address}</p>
+                          {fav.lat && fav.lon && (
+                            <p className="text-slate-500 text-xs mt-1">
+                              {fav.lat.toFixed(4)}, {fav.lon.toFixed(4)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (confirm('Remove this favorite address?')) {
+                              try {
+                                const response = await fetch(`/api/favorites?id=${fav.id}`, {
+                                  method: 'DELETE',
+                                  credentials: 'include',
+                                });
+                                if (response.ok) {
+                                  mutateFavs();
+                                }
+                              } catch (error) {
+                                console.error('Failed to delete favorite:', error);
+                              }
+                            }
+                          }}
+                          className="text-red-600 hover:text-red-700 p-2"
+                          title="Remove favorite"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-
-      {tab==='profile' && (
-        <div className="card">
-          <div className="card-body grid gap-4">
-            {!me.emailVerified && <div className="p-2 rounded-lg text-sm bg-orange-50 text-orange-900 border">Your email is not verified.</div>}
-            <div className="grid md:grid-cols-2 gap-4">
-              <Field label="First name"><input value={me.firstName} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, firstName:e.target.value} : null)} className="input"/></Field>
-              <Field label="Last name"><input value={me.lastName} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, lastName:e.target.value} : null)} className="input"/></Field>
-              <Field label="Email"><input value={me.email} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, email:e.target.value} : null)} className="input"/></Field>
-              <Field label="Phone"><input value={me.phone} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, phone:e.target.value} : null)} className="input"/></Field>
-              <Field label="Street"><input value={me.street} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, street:e.target.value} : null)} className="input"/></Field>
-              <Field label="House no."><input value={me.houseNumber} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, houseNumber:e.target.value} : null)} className="input"/></Field>
-              <Field label="Postal code"><input value={me.postalCode} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, postalCode:e.target.value} : null)} className="input"/></Field>
-              <Field label="City"><input value={me.city} onChange={e=> mutateProfile((prev: Me) => prev ? {...prev, city:e.target.value} : null)} className="input"/></Field>
-            </div>
-            <div className="flex items-center gap-3">
-              <button disabled={saving} onClick={saveProfile} className={saving? 'btn-muted':'btn-primary'}>{saving? 'Saving…':'Save'}</button>
-              {msg && <span className="text-sm text-gray-600">{msg}</span>}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {tab==='history' && (
-        <div className="grid gap-3">
-          <div>
-            <a href="/book" className="btn-primary">Book a new ride</a>
-          </div>
-          <div className="card overflow-x-auto">
-            <table className="table">
-              <thead className="thead">
-                <tr>
-                  <th className="th">#</th>
-                  <th className="th">Pickup</th>
-                  <th className="th">Dropoff</th>
-                  <th className="th">Time</th>
-                  <th className="th">Price</th>
-                  <th className="th">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rides.map((r: Ride)=> (
-                  <tr key={r.id} className="tr">
-                    <td className="td">{r.id}</td>
-                    <td className="td">{r.pickupAddress}</td>
-                    <td className="td">{r.dropoffAddress}</td>
-                    <td className="td">{new Date(r.pickupTime).toLocaleString()}</td>
-                    <td className="td">{r.price} DKK</td>
-                    <td className="td uppercase text-xs">{r.status}</td>
-                  </tr>
-                ))}
-                {rides.length===0 && (<tr><td className="td" colSpan={6}>No rides yet.</td></tr>)}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {tab==='favorites' && (
-        <div className="grid gap-3">
-          <div>
-            <button onClick={()=>{ setAddFavOpen(true); setFavLabel(''); setFavAddress(''); setFavSel(null); }} className="btn-ghost">Add favorite</button>
-          </div>
-          <div className="card overflow-x-auto">
-            <table className="table">
-              <thead className="thead">
-                <tr>
-                  <th className="th">Label</th>
-                  <th className="th">Address</th>
-                  <th className="th">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {favs.map((f: Fav)=> (
-                  <tr key={f.id} className="tr">
-                    <td className="td"><input defaultValue={f.label} onChange={e=> f.label=e.target.value} className="input"/></td>
-                    <td className="td"><input defaultValue={f.address} onChange={e=> f.address=e.target.value} className="input w-[30rem] max-w-full"/></td>
-                    <td className="td flex gap-2">
-                      <button className="btn-ghost" onClick={()=> updateFav(f)}>Save</button>
-                      <button className="btn-danger" onClick={()=> deleteFav(f.id)}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-                {favs.length===0 && (<tr><td className="td" colSpan={3}>No favorites yet.</td></tr>)}
-              </tbody>
-            </table>
-          </div>
-
-          <Modal open={addFavOpen} onClose={()=> setAddFavOpen(false)} title="Add favorite">
-            <div className="grid gap-3">
-              <Field label="Label"><input value={favLabel} onChange={e=> setFavLabel(e.target.value)} placeholder="e.g. Home, Work" className="input"/></Field>
-              <div className="grid gap-1">
-                <div className="label">Address</div>
-                <AddressAutocomplete label=" " name="favAddress" value={favSel? favSel.text : favAddress} onChange={v=>{ setFavAddress(v); setFavSel(null); }} onSelect={(s)=>{ setFavSel(s); }}/>
-              </div>
-              <div className="flex items-center justify-end gap-2">
-                <button onClick={()=> setAddFavOpen(false)} className="btn-ghost">Cancel</button>
-                <button onClick={createFav} className="btn-primary">Save</button>
-              </div>
-            </div>
-          </Modal>
-        </div>
-      )}
     </div>
   );
 }

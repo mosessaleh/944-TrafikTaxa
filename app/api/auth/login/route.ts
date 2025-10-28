@@ -8,11 +8,12 @@ export async function POST(req: Request){
     try { parsed = JSON.parse(bodyText || '{}'); } catch { return NextResponse.json({ ok:false, error:'Invalid JSON body' }, { status:400 }); }
 
     // استيرادات ديناميكية داخل الهاندلر
-    const [{ z }, { prisma }, authMod, rl] = await Promise.all([
+    const [{ z }, { prisma }, authMod, rl, { AuditLogger }] = await Promise.all([
       import('zod'),
       import('@/lib/db'),
       import('@/lib/auth'),
-      import('@/lib/rate-limit')
+      import('@/lib/rate-limit'),
+      import('@/lib/audit-log')
     ]);
 
     const Schema = z.object({ email: z.string().email(), password: z.string().min(6) });
@@ -24,15 +25,26 @@ export async function POST(req: Request){
 
     // الاستعلام عن المستخدم
     const user = await prisma.user.findFirst({ where: { email } });
-    if (!user) return NextResponse.json({ ok:false, error:'Invalid email or password' }, { status:401 });
+    if (!user) {
+      // تسجيل محاولة تسجيل دخول فاشلة
+      await AuditLogger.logLoginFailed(email, rl.clientIpKey(req), req.headers.get('user-agent') || undefined);
+      return NextResponse.json({ ok:false, error:'Invalid email or password' }, { status:401 });
+    }
 
     // مقارنة كلمة السر (lib/crypto مستخدم عبر lib/auth)
     const ok = await authMod.comparePassword(password, user.hashedPassword);
-    if (!ok) return NextResponse.json({ ok:false, error:'Invalid email or password' }, { status:401 });
+    if (!ok) {
+      // تسجيل محاولة تسجيل دخول فاشلة
+      await AuditLogger.logLoginFailed(email, rl.clientIpKey(req), req.headers.get('user-agent') || undefined);
+      return NextResponse.json({ ok:false, error:'Invalid email or password' }, { status:401 });
+    }
 
     // إنشاء الجلسة ككوكي
     const token = authMod.signToken({ id: user.id });
     authMod.setSessionCookie(token);
+
+    // تسجيل تسجيل دخول ناجح
+    await AuditLogger.logLoginSuccess(user.id.toString(), rl.clientIpKey(req), req.headers.get('user-agent') || undefined);
 
     return NextResponse.json({ ok:true, user: { id:user.id, email:user.email, role:user.role, emailVerified:user.emailVerified, firstName:user.firstName, lastName:user.lastName } });
   }catch(e:any){

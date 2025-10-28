@@ -1,3 +1,5 @@
+import { CacheManager } from '@/lib/cache';
+
 function badText(a: string){
   const s = (a||'').trim();
   if (!s) return true;
@@ -20,6 +22,12 @@ async function osrmDistance(lat1:number, lon1:number, lat2:number, lon2:number){
 }
 
 async function geocode(addr:string){
+  // Check cache first
+  const cached = CacheManager.getGeoCache(addr);
+  if (cached) {
+    return cached;
+  }
+
   const u = new URL('https://nominatim.openstreetmap.org/search');
   u.searchParams.set('format','json');
   u.searchParams.set('q', addr);
@@ -28,7 +36,12 @@ async function geocode(addr:string){
   if(!r.ok) throw new Error('Geocode failed');
   const j:any[] = await r.json();
   const p = j?.[0]; if(!p) throw new Error('No geocode');
-  return { lat: Number(p.lat), lon: Number(p.lon) };
+  const result = { lat: Number(p.lat), lon: Number(p.lon) };
+
+  // Cache the result
+  CacheManager.setGeoCache(addr, result);
+
+  return result;
 }
 
 export type LocInput = { address?: string|null; lat?: number|null; lon?: number|null };

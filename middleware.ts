@@ -48,9 +48,9 @@ export async function middleware(req: NextRequest) {
     "default-src 'self'",
     "img-src 'self' data: https://*.tile.openstreetmap.org https://*.stripe.com https://*.paypal.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe
-    ...(isDev ? ["script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com"]
-              : ["script-src 'self' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com"]),
+    // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe + Google Analytics
+    ...(isDev ? ["script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com"]
+              : ["script-src 'self' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com"]),
     "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org https://api.stripe.com https://api.paypal.com" +
       (isDev ? " ws:" : ""),
     "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.paypal.com",

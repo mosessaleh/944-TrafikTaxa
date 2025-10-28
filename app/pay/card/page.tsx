@@ -22,6 +22,9 @@ function CardPaymentContent() {
   const [stripe, setStripe] = useState<any>(null);
   const [paymentIntentId, setPaymentIntentId] = useState<string>("");
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [retryCount, setRetryCount] = useState<number>(0);
+  const [lastError, setLastError] = useState<string>("");
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
 
   useEffect(() => {
     console.log("CardPayment: Initializing payment", { amount, bookingId });
@@ -101,8 +104,14 @@ function CardPaymentContent() {
     initializePayment();
   }, [amount]);
 
-  const handlePayment = async () => {
-    console.log("CardPayment: handlePayment called", { clientSecret: clientSecret?.substring(0, 20) + "...", paymentIntentId, bookingId });
+  const handlePayment = async (isRetry = false) => {
+    console.log("CardPayment: handlePayment called", {
+      clientSecret: clientSecret?.substring(0, 20) + "...",
+      paymentIntentId,
+      bookingId,
+      isRetry,
+      retryCount
+    });
 
     if (!clientSecret) {
       console.error("CardPayment: No clientSecret available");
@@ -111,6 +120,12 @@ function CardPaymentContent() {
 
     setLoading(true);
     setError("");
+    setLastError("");
+
+    if (isRetry) {
+      setIsRetrying(true);
+      setRetryCount(prev => prev + 1);
+    }
 
     try {
       // Check if this is a mock payment
@@ -135,7 +150,9 @@ function CardPaymentContent() {
         } catch (err) {
           console.error("CardPayment: Mock payment confirmation failed", err);
           setError("Mock payment failed");
+          setLastError("Mock payment failed");
           setLoading(false);
+          setIsRetrying(false);
         }
         return;
       }
@@ -145,8 +162,17 @@ function CardPaymentContent() {
       router.push(`/pay/card/success?payment_intent=${paymentIntentId}&booking_id=${bookingId}`);
     } catch (err: any) {
       console.error("CardPayment: Payment failed", err);
-      setError(err.message || "Payment failed");
+      const errorMessage = err.message || "Payment failed";
+      setError(errorMessage);
+      setLastError(errorMessage);
       setLoading(false);
+      setIsRetrying(false);
+    }
+  };
+
+  const handleRetry = () => {
+    if (retryCount < 3) { // Max 3 retries
+      handlePayment(true);
     }
   };
 
@@ -183,9 +209,15 @@ function CardPaymentContent() {
   if (loading) {
     return (
       <div className="max-w-2xl mx-auto p-6">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black mx-auto mb-4"></div>
-          <p>Initializing payment...</p>
+        <div className="bg-white rounded-2xl shadow-lg p-8">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+            <h2 className="text-xl font-semibold mb-2">Setting up secure payment</h2>
+            <p className="text-gray-600">Please wait while we initialize your payment...</p>
+            <div className="mt-4 bg-gray-100 rounded-full h-2">
+              <div className="bg-cyan-500 h-2 rounded-full animate-pulse w-3/4"></div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -194,14 +226,28 @@ function CardPaymentContent() {
   if (error) {
     return (
       <div className="max-w-2xl mx-auto p-6">
-        <div className="text-center">
-          <div className="text-red-600 mb-4">⚠️ {error}</div>
-          <button
-            onClick={() => router.back()}
-            className="px-6 py-3 bg-gray-200 rounded-xl hover:bg-gray-300"
-          >
-            Go Back
-          </button>
+        <div className="bg-white rounded-2xl shadow-lg p-8">
+          <div className="text-center">
+            <div className="text-red-500 mb-4">
+              <div className="text-4xl mb-2">⚠️</div>
+              <h2 className="text-xl font-semibold text-red-700 mb-2">Payment Setup Failed</h2>
+              <p className="text-red-600">{error}</p>
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="block w-full px-6 py-3 bg-cyan-600 text-white rounded-xl hover:bg-cyan-700 transition-colors"
+              >
+                🔄 Try Again
+              </button>
+              <button
+                onClick={() => router.back()}
+                className="block w-full px-6 py-3 bg-gray-200 text-gray-800 rounded-xl hover:bg-gray-300 transition-colors"
+              >
+                ← Go Back
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -292,7 +338,7 @@ function CardPaymentContent() {
           <div className="mt-6 space-y-4">
             <div className="text-sm font-medium text-gray-700 mb-3">Payment method:</div>
             <button
-              onClick={handlePayment}
+              onClick={() => handlePayment(false)}
               disabled={loading}
               className="w-full bg-black text-white py-4 px-6 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -304,13 +350,25 @@ function CardPaymentContent() {
         {/* Mock payment button for admin users */}
         {isAdmin && (
           <div className="mt-8 space-y-4">
-            <button
-              onClick={handlePayment}
-              disabled={!clientSecret}
-              className="w-full bg-black text-white py-4 px-6 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Pay {amount} DKK (Mock)
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={() => handlePayment(false)}
+                disabled={!clientSecret || isRetrying}
+                className="w-full bg-black text-white py-4 px-6 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRetrying ? "Retrying..." : `Pay ${amount} DKK (Mock)`}
+              </button>
+
+              {lastError && retryCount < 3 && (
+                <button
+                  onClick={handleRetry}
+                  disabled={loading || isRetrying}
+                  className="w-full bg-orange-600 text-white py-3 px-6 rounded-xl font-medium hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  🔄 Retry Payment ({retryCount}/3)
+                </button>
+              )}
+            </div>
 
             <button
               onClick={() => router.back()}
@@ -318,6 +376,26 @@ function CardPaymentContent() {
             >
               Cancel
             </button>
+          </div>
+        )}
+
+        {/* Retry Information */}
+        {lastError && (
+          <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-red-500">⚠</span>
+              <span className="text-red-700 text-sm font-medium">Payment Failed</span>
+            </div>
+            <p className="text-red-600 text-sm mb-2">{lastError}</p>
+            {retryCount < 3 ? (
+              <p className="text-gray-600 text-xs">
+                You can retry up to 3 times. Attempt {retryCount}/3
+              </p>
+            ) : (
+              <p className="text-gray-600 text-xs">
+                Maximum retry attempts reached. Please contact support.
+              </p>
+            )}
           </div>
         )}
 
@@ -339,11 +417,14 @@ function PaymentForm() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const [retryCount, setRetryCount] = useState<number>(0);
+  const [lastError, setLastError] = useState<string>("");
+  const [isRetrying, setIsRetrying] = useState<boolean>(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    console.log("PaymentForm: handleSubmit called");
+    console.log("PaymentForm: handleSubmit called", { retryCount, isRetrying });
 
     if (!stripe || !elements) {
       console.error("PaymentForm: Stripe or elements not available", { stripe: !!stripe, elements: !!elements });
@@ -353,38 +434,106 @@ function PaymentForm() {
     setLoading(true);
     setError("");
 
-    console.log("PaymentForm: Confirming payment with Stripe");
+    try {
+      console.log("PaymentForm: Confirming payment with Stripe");
 
-    const { error: submitError } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/pay/card/success`,
-      },
-    });
+      const { error: submitError } = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/pay/card/success?retry_count=${retryCount}`,
+        },
+      });
 
-    if (submitError) {
-      console.error("PaymentForm: Payment confirmation failed", submitError);
-      setError(submitError.message || "Payment failed");
+      if (submitError) {
+        console.error("PaymentForm: Payment confirmation failed", submitError);
+        const errorMessage = submitError.message || "Payment failed";
+        setError(errorMessage);
+        setLastError(errorMessage);
+        setLoading(false);
+
+        // Auto-retry for certain errors
+        if (retryCount < 3 && (
+          submitError.type === 'card_error' ||
+          submitError.code === 'card_declined' ||
+          submitError.code === 'processing_error'
+        )) {
+          console.log("PaymentForm: Auto-retrying payment due to recoverable error");
+          setTimeout(() => {
+            setRetryCount(prev => prev + 1);
+            setIsRetrying(true);
+          }, 2000);
+        }
+      } else {
+        console.log("PaymentForm: Payment confirmed successfully, redirecting to success page");
+        // If successful, Stripe will redirect to return_url
+      }
+    } catch (err: any) {
+      console.error("PaymentForm: Unexpected error during payment", err);
+      const errorMessage = err.message || "An unexpected error occurred";
+      setError(errorMessage);
+      setLastError(errorMessage);
       setLoading(false);
-    } else {
-      console.log("PaymentForm: Payment confirmed successfully, redirecting to success page");
     }
-    // If successful, Stripe will redirect to return_url
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <PaymentElement />
       {error && (
-        <div className="text-red-600 text-sm">{error}</div>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-red-500">⚠</span>
+            <span className="text-red-700 text-sm font-medium">{error}</span>
+          </div>
+        </div>
       )}
-      <button
-        type="submit"
-        disabled={!stripe || loading}
-        className="w-full bg-black text-white py-4 px-6 rounded-xl font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {loading ? "Processing..." : `Pay ${amount} DKK`}
-      </button>
+
+      <div className="space-y-3">
+        <button
+          type="submit"
+          disabled={!stripe || loading || isRetrying}
+          className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 text-white py-4 px-6 rounded-xl font-semibold hover:from-cyan-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02] disabled:transform-none"
+        >
+          {loading || isRetrying ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+              {isRetrying ? `Retrying... (${retryCount}/3)` : "Processing Payment..."}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2">
+              <span>🔒</span>
+              Pay {amount} DKK Securely
+            </div>
+          )}
+        </button>
+
+        {lastError && retryCount < 3 && !loading && (
+          <button
+            type="button"
+            onClick={() => {
+              setRetryCount(prev => prev + 1);
+              setIsRetrying(true);
+              setError("");
+              // Trigger form submission again
+              setTimeout(() => {
+                const form = document.querySelector('form');
+                if (form) form.requestSubmit();
+              }, 100);
+            }}
+            className="w-full bg-orange-600 text-white py-3 px-6 rounded-xl font-medium hover:bg-orange-700 transition-colors"
+          >
+            🔄 Retry Payment ({retryCount}/3)
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="w-full bg-gray-100 text-gray-700 py-3 px-6 rounded-xl font-medium hover:bg-gray-200 transition-colors"
+        >
+          ← Change Payment Method
+        </button>
+      </div>
     </form>
   );
 }

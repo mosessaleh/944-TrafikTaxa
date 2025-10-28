@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
@@ -7,7 +7,8 @@ import { computePrice } from '@/lib/price';
 import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 import { sanitizeInput } from '@/lib/sanitize';
 
-const Schema = z.object({
+// Validation schema for booking creation
+const createBookingSchema = z.object({
   riderName: z.string()
     .min(2, "Rider name must be at least 2 characters")
     .max(100, "Rider name is too long")
@@ -35,24 +36,116 @@ const Schema = z.object({
   }, "Pickup time must be in the future but within 90 days"),
 });
 
-export async function GET(){
-  const u = await getUserFromCookie();
-  if (!u) return NextResponse.json({ ok:false }, { status:401 });
-  if (!u.emailVerified) return NextResponse.json({ ok:false, error:'Email not verified' }, { status:403 });
-  const rides = await prisma.ride.findMany({ where:{ userId:u.id }, orderBy:{ createdAt:'desc' } });
-  return NextResponse.json({ ok:true, rides });
+/**
+ * GET /api/bookings - Fetch user's bookings
+ */
+export async function GET(request: NextRequest) {
+  try {
+    // Rate limiting
+    await limitOrThrow('bookings:' + clientIpKey(request), { points: 30, durationSec: 60 });
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, error: 'Too many requests, try again later.' },
+      { status: error?.status || 429 }
+    );
+  }
+
+  try {
+    // Authentication
+    const user = await getUserFromCookie();
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    if (!user.emailVerified) {
+      return NextResponse.json(
+        { ok: false, error: 'Email verification required' },
+        { status: 403 }
+      );
+    }
+
+    // Fetch bookings with vehicle type information
+    const bookings = await prisma.ride.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        vehicleType: {
+          select: {
+            title: true,
+            capacity: true
+          }
+        }
+      }
+    });
+
+    // Transform bookings for frontend consumption
+    const transformedBookings = bookings.map(booking => ({
+      id: booking.id,
+      riderName: booking.riderName,
+      passengers: booking.passengers,
+      pickupAddress: booking.pickupAddress,
+      dropoffAddress: booking.dropoffAddress,
+      pickupTime: booking.pickupTime.toISOString(),
+      distanceKm: booking.distanceKm,
+      durationMin: booking.durationMin,
+      price: booking.price,
+      status: booking.status,
+      scheduled: booking.scheduled,
+      vehicleType: booking.vehicleType,
+      createdAt: booking.createdAt.toISOString()
+    }));
+
+    return NextResponse.json({
+      ok: true,
+      bookings: transformedBookings,
+      count: transformedBookings.length
+    });
+
+  } catch (error) {
+    console.error('[API] Error fetching bookings:', error);
+    return NextResponse.json(
+      { ok: false, error: 'Failed to fetch bookings' },
+      { status: 500 }
+    );
+  }
 }
 
-export async function POST(req: Request){
-  try{ await limitOrThrow('book:'+clientIpKey(req), { points: 5, durationSec: 60 }); }
-  catch(e:any){ return NextResponse.json({ ok:false, error:'Too many requests, try again later.' }, { status: e?.status||429 }); }
+/**
+ * POST /api/bookings - Create a new booking
+ */
+export async function POST(request: NextRequest) {
+  try {
+    // Rate limiting
+    await limitOrThrow('book:' + clientIpKey(request), { points: 5, durationSec: 60 });
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, error: 'Too many requests, try again later.' },
+      { status: error?.status || 429 }
+    );
+  }
 
-  try{
-    const u = await getUserFromCookie();
-    if (!u) return NextResponse.json({ ok:false, error:'Unauthorized' }, { status:401 });
-    if (!u.emailVerified) return NextResponse.json({ ok:false, error:'Email not verified' }, { status:403 });
+  try {
+    // Authentication
+    const user = await getUserFromCookie();
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
 
-    const rawData = await req.json();
+    if (!user.emailVerified) {
+      return NextResponse.json(
+        { ok: false, error: 'Email verification required' },
+        { status: 403 }
+      );
+    }
+
+    // Parse and validate request body
+    const rawData = await request.json();
 
     // Sanitize inputs before validation
     const sanitizedData = {
@@ -68,43 +161,118 @@ export async function POST(req: Request){
       pickupTime: rawData.pickupTime // Keep as string for date validation
     };
 
-    const data = Schema.parse(sanitizedData);
+    const validatedData = createBookingSchema.parse(sanitizedData);
 
-    // Ensure vehicle type is active
-    const vt = await prisma.vehicleType.findUnique({ where:{ id: data.vehicleTypeId }, select:{ id:true, active:true } });
-    if (!vt || !vt.active) return NextResponse.json({ ok:false, error:'Vehicle type not available' }, { status:400 });
+    // Verify vehicle type exists and is active
+    const vehicleType = await prisma.vehicleType.findUnique({
+      where: { id: validatedData.vehicleTypeId },
+      select: { id: true, active: true }
+    });
 
+    if (!vehicleType || !vehicleType.active) {
+      return NextResponse.json(
+        { ok: false, error: 'Selected vehicle type is not available' },
+        { status: 400 }
+      );
+    }
+
+    // Calculate distance and duration
     const { distanceKm, durationMin } = await safeEstimateDistance(
-      { address: data.pickupAddress, lat: data.pickupLat||null, lon: data.pickupLon||null },
-      { address: data.dropoffAddress, lat: data.dropoffLat||null, lon: data.dropoffLon||null }
+      {
+        address: validatedData.pickupAddress,
+        lat: validatedData.pickupLat || null,
+        lon: validatedData.pickupLon || null
+      },
+      {
+        address: validatedData.dropoffAddress,
+        lat: validatedData.dropoffLat || null,
+        lon: validatedData.dropoffLon || null
+      }
     );
-    const at = new Date(data.pickupTime);
-    const price = await computePrice(distanceKm, durationMin, at, data.vehicleTypeId);
 
-    const ride = await prisma.ride.create({
+    // Calculate price
+    const pickupTime = new Date(validatedData.pickupTime);
+    const price = await computePrice(distanceKm, durationMin, pickupTime, validatedData.vehicleTypeId);
+
+    // Create booking
+    const booking = await prisma.ride.create({
       data: {
-        userId: u.id,
-        riderName: data.riderName,
+        userId: user.id,
+        riderName: validatedData.riderName,
         passengers: 1,
-        pickupAddress: data.pickupAddress,
-        dropoffAddress: data.dropoffAddress,
-        scheduled: data.scheduled,
-        pickupTime: at,
+        pickupAddress: validatedData.pickupAddress,
+        dropoffAddress: validatedData.dropoffAddress,
+        scheduled: validatedData.scheduled,
+        pickupTime,
         distanceKm: Number(distanceKm.toFixed(2)),
         durationMin,
         price,
-        vehicleTypeId: data.vehicleTypeId
+        vehicleTypeId: validatedData.vehicleTypeId
+      },
+      include: {
+        vehicleType: {
+          select: {
+            title: true,
+            capacity: true
+          }
+        }
       }
     });
 
-    const admin = process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL;
-    if (admin) {
-      const title = data.scheduled ? 'Scheduled booking' : 'Immediate booking';
-      import('@/lib/email').then(({ sendEmail })=> sendEmail(admin, `${title} #${ride.id}`, `<p>New booking: Vehicle type ${data.vehicleTypeId}.<br/>Pickup: ${ride.pickupAddress}<br/>Dropoff: ${ride.dropoffAddress}<br/>Time: ${ride.pickupTime.toISOString()}<br/>Price: ${ride.price}</p>`)).catch(()=>{});
+    // Send notification to admin (async, don't wait)
+    const adminEmail = process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL;
+    if (adminEmail) {
+      const title = validatedData.scheduled ? 'Scheduled booking' : 'Immediate booking';
+      import('@/lib/email').then(({ sendEmail }) =>
+        sendEmail(
+          adminEmail,
+          `${title} #${booking.id}`,
+          `<p>New booking details:</p>
+          <ul>
+            <li><strong>Booking ID:</strong> ${booking.id}</li>
+            <li><strong>Customer:</strong> ${user.firstName} ${user.lastName} (${user.email})</li>
+            <li><strong>Rider:</strong> ${booking.riderName}</li>
+            <li><strong>Vehicle:</strong> ${booking.vehicleType.title}</li>
+            <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
+            <li><strong>Dropoff:</strong> ${booking.dropoffAddress}</li>
+            <li><strong>Time:</strong> ${booking.pickupTime.toISOString()}</li>
+            <li><strong>Distance:</strong> ${booking.distanceKm} km</li>
+            <li><strong>Duration:</strong> ${booking.durationMin} minutes</li>
+            <li><strong>Price:</strong> ${booking.price} DKK</li>
+          </ul>`
+        )
+      ).catch((error) => {
+        console.error('[API] Failed to send admin notification:', error);
+      });
     }
 
-    return NextResponse.json({ ok:true, ride });
-  }catch(e:any){
-    return NextResponse.json({ ok:false, error:'Could not place booking. Please refine addresses and try again.' }, { status:400 });
+    return NextResponse.json({
+      ok: true,
+      booking: {
+        id: booking.id,
+        riderName: booking.riderName,
+        pickupAddress: booking.pickupAddress,
+        dropoffAddress: booking.dropoffAddress,
+        pickupTime: booking.pickupTime.toISOString(),
+        price: booking.price,
+        status: booking.status,
+        vehicleType: booking.vehicleType
+      }
+    }, { status: 201 });
+
+  } catch (error) {
+    console.error('[API] Error creating booking:', error);
+
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { ok: false, error: 'Invalid input data', details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json(
+      { ok: false, error: 'Could not place booking. Please refine addresses and try again.' },
+      { status: 400 }
+    );
   }
 }
