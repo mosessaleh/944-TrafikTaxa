@@ -1,7 +1,6 @@
 {
-  "/register/page": "app/register/page.js",
-  "/verify/page": "app/verify/page.js",
-  "/book/page": "app/book/page.js",
-  "/account/page": "app/account/page.js",
-  "/admin/vehicles/page": "app/admin/vehicles/page.js"
+  "/api/admin/bookings/update/route": "app/api/admin/bookings/update/route.js",
+  "/api/admin/bookings/route": "app/api/admin/bookings/route.js",
+  "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
+  "/admin/bookings/page": "app/admin/bookings/page.js"
 }

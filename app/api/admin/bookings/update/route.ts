@@ -28,7 +28,7 @@ export async function POST(req: Request){
     if (action==='CONFIRM_BOOKING') data.status='CONFIRMED';
     if (action==='REFUNDING') data.status='REFUNDING';
     if (action==='REFUNDED') data.status='REFUNDED';
-
+    
     const updated = await prisma.ride.update({ where:{ id }, data });
 
     const email = ride.user.email;

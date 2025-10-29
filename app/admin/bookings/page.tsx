@@ -127,7 +127,7 @@ export default function AdminBookings(){
         await fetch('/api/admin/bookings/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, action })
+          body: JSON.stringify({ id, status: action })
         });
       }
       setSelectedBookings([]);
@@ -358,7 +358,7 @@ export default function AdminBookings(){
                                  const response = await fetch('/api/admin/bookings/update', {
                                    method: 'POST',
                                    headers: { 'Content-Type': 'application/json' },
-                                   body: JSON.stringify({ id: r.id, action })
+                                   body: JSON.stringify({ id: r.id, action: action })
                                  });
                                  console.log('Response status:', response.status);
                                  const data = await response.json();
