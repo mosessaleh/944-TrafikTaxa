@@ -62,12 +62,19 @@ export default function AdminCryptoPage(){
   };
 
   async function addCurrency(){
+    console.log('Adding currency:', { symbol: newSymbol, network: newNetwork, address: newAddress });
     const res = await fetch("/api/admin/crypto/wallets", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ symbol: newSymbol, network: newNetwork, address: newAddress })
     });
-    if (!res.ok){ toast.error(await res.text()); return; }
+    console.log('Response status:', res.status);
+    const responseText = await res.text();
+    console.log('Response text:', responseText);
+    if (!res.ok){
+      toast.error(responseText);
+      return;
+    }
     setAddOpen(false); setNewAddress("");
     mutate("/api/admin/crypto/symbols");
   }

@@ -2,11 +2,19 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/session";
+import { getUserFromCookie } from "@/lib/auth";
 
 export async function GET() {
-  const me = await getCurrentUser();
-  if (!me || me.role !== "ADMIN") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  console.log('GET /api/admin/crypto/symbols called');
+  const me = await getUserFromCookie();
+  console.log('User in symbols:', me);
+  if (!me) {
+    console.log('Forbidden: no user');
+    return NextResponse.json({ error: "forbidden - no user" }, { status: 403 });
+  }
+  if (me.role !== "ADMIN") {
+    console.log('Forbidden: user not admin, role:', me.role);
+    return NextResponse.json({ error: "forbidden - not admin" }, { status: 403 });
   }
   const wallets = await prisma.cryptoWallet.findMany({
     select: { symbol: true, isActive: true }

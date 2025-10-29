@@ -1,6 +1,11 @@
 {
-  "/api/admin/bookings/update/route": "app/api/admin/bookings/update/route.js",
-  "/api/admin/bookings/route": "app/api/admin/bookings/route.js",
-  "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
-  "/admin/bookings/page": "app/admin/bookings/page.js"
+  "/book/page": "app/book/page.js",
+  "/api/admin/crypto/symbols/route": "app/api/admin/crypto/symbols/route.js",
+  "/api/crypto/tickers/route": "app/api/crypto/tickers/route.js",
+  "/page": "app/page.js",
+  "/api/admin/crypto/wallets/route": "app/api/admin/crypto/wallets/route.js",
+  "/admin/crypto/page": "app/admin/crypto/page.js",
+  "/admin/settings/page": "app/admin/settings/page.js",
+  "/admin/vehicles/page": "app/admin/vehicles/page.js",
+  "/admin/page": "app/admin/page.js"
 }
