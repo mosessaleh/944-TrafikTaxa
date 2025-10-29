@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-// Unicode-aware regexes (all languages except Arabic)
-export const nameRegex = /^[^\u0600-\u06FF\s\-'.]+$/u;
-export const addressRegex = /^[^\u0600-\u06FF0-9\s,\.\-#&()\/'’]+$/u;
+// Unicode-aware regexes (all languages including Arabic)
+export const nameRegex = /^[\u0600-\u06FF\s\-'.a-zA-Z]+$/u;
+export const addressRegex = /^[\u0600-\u06FF0-9\s,\.\-#&()\/'’a-zA-Z]+$/u;
 export const houseNumberRegex = /^[0-9^\u0600-\u06FF\s\/\-.]+$/u;
 
 // Booking Form Schema
@@ -35,10 +35,10 @@ export type LoginInput = z.infer<typeof LoginSchema>;
 // Profile Update Schema
 export const ProfileUpdateSchema = z.object({
   email: z.string().email(),
-  firstName: z.string().min(2).regex(nameRegex, 'First name contains invalid characters'),
-  lastName: z.string().min(2).regex(nameRegex, 'Last name contains invalid characters'),
+  firstName: z.string().min(2),
+  lastName: z.string().min(2),
   phone: z.string().optional(),
-  address: z.string().min(3).regex(addressRegex, 'Address contains invalid characters')
+  address: z.string().min(3)
 });
 
 export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>;
@@ -84,7 +84,7 @@ export type CardPaymentIntentInput = z.infer<typeof CardPaymentIntentSchema>;
 // Confirm Card Payment Schema
 export const ConfirmCardPaymentSchema = z.object({
   paymentIntentId: z.string().min(1),
-  bookingId: z.number().int().positive()
+  bookingId: z.number().int().positive().optional()
 });
 
 export type ConfirmCardPaymentInput = z.infer<typeof ConfirmCardPaymentSchema>;
@@ -127,9 +127,9 @@ export type RevolutPaymentIntentInput = z.infer<typeof RevolutPaymentIntentSchem
 
 // Optional: a ready-to-use schema (use it in your route if desired)
 export const RegisterSchema = z.object({
-  firstName: z.string().min(2).regex(nameRegex, 'First name contains invalid characters'),
-  lastName: z.string().min(2).regex(nameRegex, 'Last name contains invalid characters'),
-  address: z.string().min(3).regex(addressRegex, 'Address contains invalid characters'),
+  firstName: z.string().min(2),
+  lastName: z.string().min(2),
+  address: z.string().min(3),
   email: z.string().email(),
   password: z.string().min(8),
   phone: z.string().min(6)

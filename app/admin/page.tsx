@@ -1,9 +1,9 @@
 import { prisma } from '@/lib/db';
-import { getCurrentUser } from '@/lib/session';
+import { getUserFromCookie } from '@/lib/auth';
 import Link from 'next/link';
 
 export default async function AdminHome(){
-  const me = await getCurrentUser();
+  const me = await getUserFromCookie();
   if (!me || me.role !== 'ADMIN'){
     return (
       <div className="max-w-xl mx-auto grid gap-4">

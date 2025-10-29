@@ -1,6 +1,7 @@
-import { getCurrentUser } from '@/lib/session';
+import { getUserFromCookie } from '@/lib/auth';
 import Link from 'next/link';
 import ProfileEditClient from '@/components/profile-edit-client';
+import ProfileBookings from '@/components/profile-bookings';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -22,7 +23,7 @@ function Badge({ ok }: { ok: boolean }){
 }
 
 export default async function ProfilePage(){
-  const u = await getCurrentUser();
+  const u = await getUserFromCookie();
   if (!u) return <div>Unauthorized</div>;
   const verifyUrl = `/verify?email=${encodeURIComponent(u.email)}`;
 
@@ -50,6 +51,10 @@ export default async function ProfilePage(){
         address: u.address,
         pendingEmail: u.pendingEmail || null
       }} />
+
+      <section className="grid gap-4 bg-white border rounded-2xl p-6">
+        <ProfileBookings />
+      </section>
     </div>
   );
 }

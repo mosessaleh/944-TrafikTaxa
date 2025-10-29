@@ -1,7 +1,7 @@
 import dynamic from 'next/dynamic';
 import BookingPayTrigger from "@/app/_components/BookingPayTrigger";
 import { confirmBookingAndGoToPay } from "@/app/_actions/booking-pay";
-import { getCurrentUser } from '@/lib/session';
+import { getUserFromCookie } from '@/lib/auth';
 import ErrorBoundary from '@/components/error-boundary';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 };
 
 export default async function BookPage(){
-  const user = await getCurrentUser();
+  const user = await getUserFromCookie();
   if (!user) {
     redirect('/login?redirect=/book');
   }

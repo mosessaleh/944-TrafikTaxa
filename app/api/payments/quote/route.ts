@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     const json = await res.json();
     priceDkk = json?.data?.dkk;
   } else {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ""}/api/crypto/tickers?ids=${id}&vs=dkk`, { cache: "no-store" });
+    const res = await fetch(`http://localhost:3000/api/crypto/tickers?ids=${id}&vs=dkk`, { cache: "no-store" });
     const json = await res.json();
     priceDkk = json?.data?.[id]?.dkk;
   }

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { getCurrentUser } from '@/lib/session';
+import { getUserFromCookie } from '@/lib/auth';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default async function LogoutPage(){
-  const user = await getCurrentUser();
+  const user = await getUserFromCookie();
   if (user) {
     // If user is still logged in, redirect to logout API
     redirect('/api/auth/logout');

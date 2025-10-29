@@ -40,13 +40,21 @@ export async function POST(req: Request){
     }
 
     // إنشاء الجلسة ككوكي
-    const token = authMod.signToken({ id: user.id });
-    authMod.setSessionCookie(token);
+    const token = authMod.signToken({ id: user.id, role: user.role });
+    const res = NextResponse.json({ ok:true, user: { id:user.id, email:user.email, role:user.role, emailVerified:user.emailVerified, firstName:user.firstName, lastName:user.lastName } });
+    const secure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
+    res.cookies.set('session', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      path: '/',
+      maxAge: 60*60*24*7
+    });
 
     // تسجيل تسجيل دخول ناجح
     await AuditLogger.logLoginSuccess(user.id.toString(), rl.clientIpKey(req), req.headers.get('user-agent') || undefined);
 
-    return NextResponse.json({ ok:true, user: { id:user.id, email:user.email, role:user.role, emailVerified:user.emailVerified, firstName:user.firstName, lastName:user.lastName } });
+    return res;
   }catch(e:any){
     // لوج للخادم + رد JSON دائم
     console.error('[auth/login] fatal', e?.stack||e?.message||e);

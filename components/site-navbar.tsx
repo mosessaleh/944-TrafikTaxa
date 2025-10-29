@@ -17,9 +17,10 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             <img src="/logo.svg" alt="944 Trafik" className="h-10 w-auto drop-shadow-sm group-hover:scale-105 transition-transform duration-300" />
           </Link>
           <nav className="hidden md:flex items-center gap-2">
-            <Link href="/" className="px-4 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200">🏠 Home</Link>
-            <Link href="/book" className="px-4 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200">🚗 Book Ride</Link>
-            <Link href="/pricing" className="px-4 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200">💰 Pricing</Link>
+            <Link href="/" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">🏠 Home</Link>
+            <Link href="/book" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">🚗 Book Ride</Link>
+            <Link href="/pricing" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">💰 Pricing</Link>
+            <Link href="/terms" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">📄 Terms</Link>
             {me && <Link href="/history" className="px-4 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200">📋 History</Link>}
             {isAdmin && <Link href="/admin" className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200">⚙️ Admin</Link>}
           </nav>
@@ -70,24 +71,31 @@ export default function SiteNavbar({ me }: { me: NavUser }){
           <nav className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-4 space-y-2">
             <Link
               href="/"
-              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200"
+              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
               🏠 Home
             </Link>
             <Link
               href="/book"
-              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200"
+              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
               🚗 Book Ride
             </Link>
             <Link
               href="/pricing"
-              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200"
+              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
               💰 Pricing
+            </Link>
+            <Link
+              href="/terms"
+              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              📄 Terms
             </Link>
             {me && (
               <Link

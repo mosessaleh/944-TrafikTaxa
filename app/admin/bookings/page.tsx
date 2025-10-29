@@ -35,6 +35,8 @@ export default function AdminBookings(){
     confirmedActive: rides.filter(r=> (r.status==='CONFIRMED' || r.status==='DISPATCHED' || r.status==='ONGOING')),
     completed: rides.filter(r=> r.status==='COMPLETED'),
     canceled: rides.filter(r=> r.status==='CANCELED'),
+    refunding: rides.filter(r=> r.status==='REFUNDING'),
+    refunded: rides.filter(r=> r.status==='REFUNDED'),
   } as const;
 
   // Filter rides based on search and date
@@ -66,7 +68,9 @@ export default function AdminBookings(){
     {key:'processing', label:`Processing (${filterRides(groups.processing).length})`},
     {key:'confirmedActive', label:`Confirmed / not finished (${filterRides(groups.confirmedActive).length})`},
     {key:'completed', label:`Completed (${filterRides(groups.completed).length})`},
-    {key:'canceled', label:`Canceled (${filterRides(groups.canceled).length})`}
+    {key:'canceled', label:`Canceled (${filterRides(groups.canceled).length})`},
+    {key:'refunding', label:`Refunding (${filterRides(groups.refunding).length})`},
+    {key:'refunded', label:`Refunded (${filterRides(groups.refunded).length})`}
   ] as const;
 
   // Use proper React state for tab management
@@ -161,11 +165,6 @@ export default function AdminBookings(){
 
   return (
     <div className="grid gap-8">
-      {/* Dashboard Header */}
-      <div className="text-center">
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent mb-2">📊 Booking Management</h1>
-        <p className="text-slate-600">Manage and track all customer bookings</p>
-      </div>
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -187,26 +186,6 @@ export default function AdminBookings(){
         </div>
       </div>
 
-      {/* Status Distribution */}
-      <div className="card-feature">
-        <h3 className="text-lg font-semibold mb-4 text-center">📈 Booking Status Distribution</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {statusData.map((status, index) => (
-            <div key={status.name} className="text-center">
-              <div
-                className="w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center text-white font-bold text-lg"
-                style={{ backgroundColor: status.color }}
-              >
-                {status.value}
-              </div>
-              <div className="text-sm font-medium text-slate-700">{status.name}</div>
-              <div className="text-xs text-slate-500">
-                {stats.total > 0 ? ((status.value / stats.total) * 100).toFixed(1) : 0}%
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
 
       {/* Bulk Actions Bar */}
       {selectedBookings.length > 0 && (
@@ -286,10 +265,10 @@ export default function AdminBookings(){
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs">
             <thead>
               <tr className="bg-gradient-to-r from-slate-50 to-slate-100 text-left">
-                <th className="p-4 font-semibold text-slate-700">
+                <th className="px-2 py-2 font-semibold text-slate-700 w-8">
                   <input
                     type="checkbox"
                     checked={selectedBookings.length === filteredList.length && filteredList.length > 0}
@@ -300,24 +279,24 @@ export default function AdminBookings(){
                         setSelectedBookings([]);
                       }
                     }}
-                    className="rounded"
+                    className="rounded scale-75"
                   />
                 </th>
-                <th className="p-4 font-semibold text-slate-700">#</th>
-                <th className="p-4 font-semibold text-slate-700">👤 User</th>
-                <th className="p-4 font-semibold text-slate-700">📍 Pickup</th>
-                <th className="p-4 font-semibold text-slate-700">🎯 Dropoff</th>
-                <th className="p-4 font-semibold text-slate-700">🕐 Time</th>
-                <th className="p-4 font-semibold text-slate-700">💰 Price</th>
-                <th className="p-4 font-semibold text-slate-700">📊 Status</th>
-                <th className="p-4 font-semibold text-slate-700">💳 Paid</th>
-                <th className="p-4 font-semibold text-slate-700">⚡ Actions</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-12">#</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-24">👤 User</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-32">📍 Pickup</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-32">🎯 Dropoff</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-20">🕐 Time</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-16">💰 Price</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-20">📊 Status</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-12">💳 Paid</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-32">⚡ Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredList.map((r:any)=> (
                  <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors duration-150">
-                   <td className="p-4">
+                   <td className="px-2 py-2">
                      <input
                        type="checkbox"
                        checked={selectedBookings.includes(r.id)}
@@ -328,43 +307,83 @@ export default function AdminBookings(){
                            setSelectedBookings(selectedBookings.filter(id => id !== r.id));
                          }
                        }}
-                       className="rounded"
+                       className="rounded scale-75"
                      />
                    </td>
-                   <td className="p-4 font-medium text-slate-800">{r.id}</td>
-                   <td className="p-4 text-slate-700">{r.user?.firstName} {r.user?.lastName}</td>
-                   <td className="p-4 text-slate-600 max-w-xs truncate" title={r.pickupAddress}>{r.pickupAddress}</td>
-                   <td className="p-4 text-slate-600 max-w-xs truncate" title={r.dropoffAddress}>{r.dropoffAddress}</td>
-                   <td className="p-4 text-slate-600">{new Date(r.pickupTime).toLocaleString()}</td>
-                   <td className="p-4 font-semibold text-emerald-600">{r.price} DKK</td>
-                   <td className="p-4">
-                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                   <td className="px-2 py-2 font-medium text-slate-800 text-xs">{r.id}</td>
+                   <td className="px-2 py-2 text-slate-700 text-xs truncate">{r.user?.firstName} {r.user?.lastName}</td>
+                   <td className="px-2 py-2 text-slate-600 truncate" title={r.pickupAddress}>
+                     <div className="text-xs">{r.pickupAddress}</div>
+                   </td>
+                   <td className="px-2 py-2 text-slate-600 truncate" title={r.dropoffAddress}>
+                     <div className="text-xs">{r.dropoffAddress}</div>
+                   </td>
+                   <td className="px-2 py-2 text-slate-600">
+                     <div className="text-xs">{new Date(r.pickupTime).toLocaleDateString()}</div>
+                     <div className="text-xs text-slate-500">{new Date(r.pickupTime).toLocaleTimeString()}</div>
+                   </td>
+                   <td className="px-2 py-2 font-semibold text-emerald-600 text-xs">{r.price} DKK</td>
+                   <td className="px-2 py-2">
+                     <span className={`px-1 py-0.5 rounded-full text-xs font-medium ${
                        r.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' :
                        r.status === 'CANCELED' ? 'bg-red-100 text-red-800' :
                        r.status === 'PROGRESSING' ? 'bg-blue-100 text-blue-800' :
                        r.status === 'CONFIRMED' ? 'bg-cyan-100 text-cyan-800' :
+                       r.status === 'REFUNDING' ? 'bg-yellow-100 text-yellow-800' :
+                       r.status === 'REFUNDED' ? 'bg-green-100 text-green-800' :
                        'bg-slate-100 text-slate-800'
                      }`}>
                        {r.status}
                      </span>
                    </td>
-                   <td className="p-4">
+                   <td className="px-2 py-2">
                      {r.paid ? (
-                       <span className="text-emerald-600 font-medium">✅ Yes</span>
+                       <span className="text-emerald-600 font-medium text-xs">✅</span>
                      ) : (
-                       <span className="text-slate-500">❌ No</span>
+                       <span className="text-slate-500 text-xs">❌</span>
                      )}
                    </td>
-                   <td className="p-4">
-                     <div className="flex gap-2 flex-wrap">
-                       {r.status==='PENDING' && <ActionBtn id={r.id} action="CONFIRM" label="Confirm" icon="✅" />}
-                       {r.status==='PAID' && <ActionBtn id={r.id} action="PROCESS" label="Process" icon="⚙️" />}
-                       {r.status==='PROGRESSING' && <ActionBtn id={r.id} action="CONFIRM_BOOKING" label="Confirm" icon="✅" />}
-                       {(r.status==='CONFIRMED') && <ActionBtn id={r.id} action="DISPATCH" label="Dispatch" icon="🚗" />}
-                       {(r.status==='DISPATCHED') && <ActionBtn id={r.id} action="START" label="Start" icon="▶️" />}
-                       {(r.status==='ONGOING') && <ActionBtn id={r.id} action="COMPLETE" label="Complete" icon="🏁" />}
-                       {r.status!=='CANCELED' && r.status!=='COMPLETED' && <ActionBtn id={r.id} action="CANCEL" label="Cancel" icon="❌" />}
-                       {!r.paid && <ActionBtn id={r.id} action="MARK_PAID" label="Mark Paid" icon="💳" />}
+                   <td className="px-2 py-2">
+                     <div className="flex flex-col gap-1">
+                       <select
+                         className="px-2 py-1 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-cyan-500 focus:border-transparent"
+                         onChange={async (e) => {
+                           if (e.target.value) {
+                             const action = e.target.value;
+                             console.log('Selected action:', action);
+                             e.target.value = ''; // Reset select
+                             if (confirm(`Are you sure you want to ${action.toLowerCase().replace('_', ' ')} this booking?`)) {
+                               console.log('Sending request with:', { id: r.id, action });
+                               try {
+                                 const response = await fetch('/api/admin/bookings/update', {
+                                   method: 'POST',
+                                   headers: { 'Content-Type': 'application/json' },
+                                   body: JSON.stringify({ id: r.id, action })
+                                 });
+                                 console.log('Response status:', response.status);
+                                 const data = await response.json();
+                                 console.log('Response data:', data);
+                                 if (response.ok) {
+                                   location.reload();
+                                 } else {
+                                   alert(`Error: ${data.error || 'Unknown error'}`);
+                                 }
+                               } catch (error) {
+                                 console.error('Error:', error);
+                                 alert('Network error occurred');
+                               }
+                             }
+                           }
+                         }}
+                         defaultValue=""
+                       >
+                         <option value="">Action</option>
+                         <option value="CONFIRM">✅ Confirm</option>
+                         <option value="CANCEL">❌ Cancel</option>
+                         <option value="MARK_PAID">💳 Mark Paid</option>
+                         <option value="REFUNDING">🔄 Refund in Progress</option>
+                         <option value="REFUNDED">✅ Mark Refunded</option>
+                       </select>
                      </div>
                    </td>
                  </tr>

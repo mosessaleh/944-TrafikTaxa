@@ -64,8 +64,8 @@ export default function BookClient(){
     if (vehicles.length && vehicleId == null) setVehicleId(vehicles[0].id);
   }, [vehicles, vehicleId]);
 
-  const { data: favoritesData, error: favoritesError, mutate: mutateFavorites } = useSWR('/api/favorites', (url) =>
-    fetch(url).then(r => r.status === 200 ? r.json().then(j => j?.ok ? j.items || [] : []) : [])
+  const { data: favoritesData, error: favoritesError, mutate: mutateFavorites } = useSWR(me ? '/api/favorites' : null, (url) =>
+    fetch(url, { credentials: 'include' }).then(r => r.status === 200 ? r.json().then(j => j?.ok ? j.favorites || [] : []) : [])
   );
   const favorites = favoritesData || [];
 
@@ -125,7 +125,7 @@ export default function BookClient(){
         dropoffLon: quotePayload.dropoffLon,
         vehicleTypeId: vehicleId!,
         scheduled: whenType === 'later',
-        pickupTime: whenType === 'later' ? new Date(when).toISOString() : new Date().toISOString(),
+        pickupTime: whenType === 'later' ? new Date(when).toISOString() : new Date(Date.now() + 5 * 60 * 1000).toISOString(),
         amountDkk: quote.price
       };
 
@@ -166,6 +166,7 @@ export default function BookClient(){
       const r = await fetch('/api/favorites',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
+        credentials: 'include',
         body: JSON.stringify({
           label: saveModal.name||'Favorite',
           address: addr,
@@ -177,9 +178,13 @@ export default function BookClient(){
       if(j?.ok){
         mutateFavorites();
         setSaveModal({open:false,target:null,name:'',address:''});
+        alert('Address saved to favorites successfully!');
+      } else {
+        alert('Failed to save favorite: ' + (j?.error || 'Unknown error'));
       }
     }catch(e){
-      // ignore
+      console.error('Save favorite error:', e);
+      alert('Failed to save favorite. Please try again.');
     }
   }
 

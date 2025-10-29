@@ -11,16 +11,13 @@ import { sanitizeInput } from '@/lib/sanitize';
 const createBookingSchema = z.object({
   riderName: z.string()
     .min(2, "Rider name must be at least 2 characters")
-    .max(100, "Rider name is too long")
-    .regex(/^[^\u0600-\u06FF\s\-'\.]+$/u, "Rider name contains invalid characters"),
+    .max(100, "Rider name is too long"),
   pickupAddress: z.string()
     .min(3, "Pickup address must be at least 3 characters")
-    .max(500, "Pickup address is too long")
-    .regex(/^[^\u0600-\u06FF0-9\s,.\-#&()\/]+$/u, "Pickup address contains invalid characters"),
+    .max(500, "Pickup address is too long"),
   dropoffAddress: z.string()
     .min(3, "Dropoff address must be at least 3 characters")
-    .max(500, "Dropoff address is too long")
-    .regex(/^[^\u0600-\u06FF0-9\s,.\-#&()\/]+$/u, "Dropoff address contains invalid characters"),
+    .max(500, "Dropoff address is too long"),
   pickupLat: z.number().min(-90).max(90).optional().nullable(),
   pickupLon: z.number().min(-180).max(180).optional().nullable(),
   dropoffLat: z.number().min(-90).max(90).optional().nullable(),
@@ -100,7 +97,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      bookings: transformedBookings,
+      rides: transformedBookings,
       count: transformedBookings.length
     });
 
@@ -152,12 +149,12 @@ export async function POST(request: NextRequest) {
       riderName: sanitizeInput(rawData.riderName, 'text'),
       pickupAddress: sanitizeInput(rawData.pickupAddress, 'address'),
       dropoffAddress: sanitizeInput(rawData.dropoffAddress, 'address'),
-      pickupLat: sanitizeInput(rawData.pickupLat, 'number'),
-      pickupLon: sanitizeInput(rawData.pickupLon, 'number'),
-      dropoffLat: sanitizeInput(rawData.dropoffLat, 'number'),
-      dropoffLon: sanitizeInput(rawData.dropoffLon, 'number'),
-      vehicleTypeId: sanitizeInput(rawData.vehicleTypeId, 'number'),
-      scheduled: sanitizeInput(rawData.scheduled, 'boolean'),
+      pickupLat: rawData.pickupLat ? parseFloat(rawData.pickupLat) : null,
+      pickupLon: rawData.pickupLon ? parseFloat(rawData.pickupLon) : null,
+      dropoffLat: rawData.dropoffLat ? parseFloat(rawData.dropoffLat) : null,
+      dropoffLon: rawData.dropoffLon ? parseFloat(rawData.dropoffLon) : null,
+      vehicleTypeId: parseInt(rawData.vehicleTypeId),
+      scheduled: rawData.scheduled === 'true' || rawData.scheduled === true,
       pickupTime: rawData.pickupTime // Keep as string for date validation
     };
 
@@ -239,6 +236,18 @@ export async function POST(request: NextRequest) {
             <li><strong>Distance:</strong> ${booking.distanceKm} km</li>
             <li><strong>Duration:</strong> ${booking.durationMin} minutes</li>
             <li><strong>Price:</strong> ${booking.price} DKK</li>
+          </ul>
+          <h3>Cancellation Policy</h3>
+          <p>Please inform the customer about our cancellation policy:</p>
+          <ul>
+            <li><strong>More than 2 hours before pickup:</strong> No cancellation fee (100% refund)</li>
+            <li><strong>1-2 hours before pickup:</strong> 25% cancellation fee</li>
+            <li><strong>Less than 1 hour before pickup:</strong> 50% cancellation fee</li>
+            <li><strong>After pickup time:</strong> No cancellation allowed</li>
+          </ul>
+          <h4>Immediate Bookings:</h4>
+          <ul>
+            <li><strong>Any time before completion:</strong> 100 DKK fixed cancellation fee</li>
           </ul>`
         )
       ).catch((error) => {
@@ -248,7 +257,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      booking: {
+      ride: {
         id: booking.id,
         riderName: booking.riderName,
         pickupAddress: booking.pickupAddress,

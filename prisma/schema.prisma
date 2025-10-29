@@ -25,6 +25,8 @@ enum RideStatus {
   ONGOING
   COMPLETED
   CANCELED
+  REFUNDING
+  REFUNDED
 }
 
 enum VehicleKey {
@@ -32,6 +34,7 @@ enum VehicleKey {
   SEVEN_NO_BAG
   VAN
   LIMO
+  // Allow dynamic keys for new vehicle types
 }
 
 // =====================
@@ -63,7 +66,7 @@ model User {
 
 model VehicleType {
   id         Int        @id @default(autoincrement())
-  key        VehicleKey @unique
+  key        String     @unique
   title      String
   capacity   Int        @default(4)
   active     Boolean    @default(true)

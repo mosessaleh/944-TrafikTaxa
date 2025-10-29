@@ -1,7 +1,11 @@
 "use client";
 import { useState } from 'react';
 import Link from 'next/link';
-import { LoginSchema, LoginInput } from '@/lib/validation';
+
+interface LoginInput {
+  email: string;
+  password: string;
+}
 
 export default function LoginPage(){
   const [f,setF]=useState<LoginInput>({email:'',password:''});
@@ -12,14 +16,12 @@ export default function LoginPage(){
   async function onSubmit(e:React.FormEvent){
     e.preventDefault(); setErr(''); setValidationErrors({}); setSubmitting(true);
 
-    // Validate form
-    const validation = LoginSchema.safeParse(f);
-    if (!validation.success) {
-      const errors: Record<string, string> = {};
-      validation.error.errors.forEach(err => {
-        if (err.path[0]) errors[err.path[0] as string] = err.message;
+    // Basic validation
+    if (!f.email || !f.password) {
+      setValidationErrors({
+        email: f.email ? '' : 'Email is required',
+        password: f.password ? '' : 'Password is required'
       });
-      setValidationErrors(errors);
       setSubmitting(false);
       return;
     }

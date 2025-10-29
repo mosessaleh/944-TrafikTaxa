@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 
 interface User {
@@ -25,7 +25,9 @@ interface Ride {
   durationMin: number;
   price: number;
   status: string;
+  paid: boolean;
   createdAt: string;
+  vehicleTypeId: number;
 }
 
 interface Favorite {
@@ -39,7 +41,9 @@ interface Favorite {
 
 export default function AccountClient() {
   const router = useRouter();
-  const [tab, setTab] = useState<'profile' | 'history' | 'favorites'>('profile');
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get('tab') as 'profile' | 'history' | 'favorites' || 'profile';
+  const [tab, setTab] = useState<'profile' | 'history' | 'favorites'>(initialTab);
   const [me, setMe] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -77,7 +81,7 @@ export default function AccountClient() {
   }, [router]);
 
   // Fetch rides data
-  const { data: ridesData, error: ridesError, isLoading: ridesLoading } = useSWR(
+  const { data: ridesData, error: ridesError, isLoading: ridesLoading, mutate: mutateRides } = useSWR(
     tab === 'history' && me ? '/api/bookings' : null,
     async (url) => {
       console.log('Fetching bookings from:', url);
@@ -163,7 +167,7 @@ export default function AccountClient() {
         throw new Error(data.error || 'Failed to fetch favorites');
       }
 
-      return data.items || [];
+      return data.favorites || [];
     },
     {
       revalidateOnFocus: false,
@@ -186,6 +190,42 @@ export default function AccountClient() {
       console.error('Logout error:', error);
     }
   };
+
+  const handleCancelBooking = async (bookingId: number) => {
+    if (!confirm('Are you sure you want to cancel this booking? Your payment will be refunded within 3-5 business days.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/bookings/${bookingId}/cancel`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        // Refresh the bookings data
+        mutateRides();
+        alert('Booking cancelled successfully. You will receive a confirmation email and your refund will be processed within 3-5 business days.');
+      } else {
+        const errorData = await response.json();
+        alert(`Failed to cancel booking: ${errorData.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Cancel booking error:', error);
+      alert('Failed to cancel booking. Please try again.');
+    }
+  };
+
+  // Update URL when tab changes
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', tab);
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    router.replace(newUrl, { scroll: false });
+  }, [tab, router]);
 
   if (loading) {
     return (
@@ -324,45 +364,58 @@ export default function AccountClient() {
                   </button>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-2">
                   {ridesData.map((ride: Ride) => (
-                    <div key={ride.id} className="border border-slate-200 rounded-lg p-4">
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <h3 className="font-semibold text-slate-800">
-                            Booking #{ride.id}
-                          </h3>
-                          <p className="text-sm text-slate-600">
-                            {new Date(ride.createdAt).toLocaleDateString()}
+                    <div key={ride.id} className="border border-slate-200 rounded-lg p-3 hover:bg-slate-50 transition-colors">
+                      <div className="flex justify-between items-center">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 mb-1">
+                            <h3 className="font-semibold text-slate-800 text-sm">
+                              Booking #{ride.id}
+                            </h3>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              ride.status === 'CONFIRMED' || ride.status === 'confirmed' ? 'bg-green-100 text-green-800' :
+                                ride.status === 'PENDING' || ride.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                                ride.status === 'CANCELED' || ride.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                'bg-gray-100 text-gray-800'
+                            }`}>
+                              {ride.status}
+                            </span>
+                            {ride.paid && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                Paid
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-slate-600">
+                            <span>{new Date(ride.createdAt).toLocaleDateString()}</span>
+                            <span>{ride.distanceKm.toFixed(1)} km</span>
+                            <span>{ride.passengers} passenger{ride.passengers !== 1 ? 's' : ''}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-slate-500 truncate">
+                                📍 {ride.pickupAddress} → {ride.dropoffAddress}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="text-xs text-slate-600 mt-1">
+                            {ride.scheduled ? '📅 Scheduled' : '🚗 Immediate'}: {new Date(ride.pickupTime).toLocaleString()}
                           </p>
                         </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-slate-800">{ride.price} DKK</p>
-                          <p className="text-sm text-slate-600 capitalize">{ride.status}</p>
+                        <div className="flex items-center gap-3 ml-4">
+                          <div className="text-right">
+                            <p className="font-semibold text-slate-800 text-sm">{ride.price} DKK</p>
+                          </div>
+                          {(ride.status !== 'CANCELED' && ride.status !== 'cancelled') && (
+                            <button
+                              onClick={() => handleCancelBooking(ride.id)}
+                              className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          )}
                         </div>
-                      </div>
-                      <div className="grid md:grid-cols-2 gap-4 text-sm">
-                        <div>
-                          <p className="text-slate-600">From:</p>
-                          <p className="font-medium">{ride.pickupAddress}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600">To:</p>
-                          <p className="font-medium">{ride.dropoffAddress}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600">Passengers:</p>
-                          <p className="font-medium">{ride.passengers}</p>
-                        </div>
-                        <div>
-                          <p className="text-slate-600">Distance:</p>
-                          <p className="font-medium">{ride.distanceKm.toFixed(1)} km</p>
-                        </div>
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-slate-100">
-                        <p className="text-sm text-slate-600">
-                          {ride.scheduled ? 'Scheduled for' : 'Booked for'} {new Date(ride.pickupTime).toLocaleString()}
-                        </p>
                       </div>
                     </div>
                   ))}

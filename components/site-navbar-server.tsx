@@ -1,8 +1,8 @@
 import SiteNavbar, { type NavUser } from './site-navbar';
-import { getCurrentUser } from '@/lib/session';
+import { getUserFromCookie } from '@/lib/auth';
 
 export default async function SiteNavbarServer(){
-  const meFull = await getCurrentUser().catch(() => null);
+  const meFull = await getUserFromCookie().catch(() => null);
   const me: NavUser | null = meFull ? {
     id: Number(meFull.id),
     firstName: String(meFull.firstName || ''),

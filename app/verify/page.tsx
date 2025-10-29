@@ -1,6 +1,10 @@
 "use client";
 import { useEffect, useState } from 'react';
-import { VerifyEmailSchema, VerifyEmailInput } from '@/lib/validation';
+
+interface VerifyEmailInput {
+  email: string;
+  code: string;
+}
 
 export default function VerifyPage({ searchParams }:{ searchParams: { email?: string } }){
   const [f,setF]=useState<VerifyEmailInput>({email:'',code:''});
@@ -13,14 +17,18 @@ export default function VerifyPage({ searchParams }:{ searchParams: { email?: st
   async function onVerify(e:React.FormEvent){
     e.preventDefault(); setErr(''); setMsg(''); setValidationErrors({});
 
-    // Validate form
-    const validation = VerifyEmailSchema.safeParse(f);
-    if (!validation.success) {
-      const errors: Record<string, string> = {};
-      validation.error.errors.forEach(err => {
-        if (err.path[0]) errors[err.path[0] as string] = err.message;
+    // Basic validation
+    if (!f.email || !f.code) {
+      setValidationErrors({
+        email: f.email ? '' : 'Email is required',
+        code: f.code ? '' : 'Verification code is required'
       });
-      setValidationErrors(errors);
+      return;
+    }
+    if (f.code.length !== 6 || !/^\d{6}$/.test(f.code)) {
+      setValidationErrors({
+        code: 'Code must be exactly 6 digits'
+      });
       return;
     }
 

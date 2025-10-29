@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
-import { sanitizeInput } from '@/lib/sanitize';
+import { normalizeInput, sanitizeName, sanitizeAddress } from '@/lib/sanitize';
 import { limitOrThrow, clientIpKey } from '@/lib/rate-limit';
 
 /**
@@ -85,23 +85,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // Validate and sanitize inputs
-    const label = sanitizeInput(body?.label, 'text')?.trim();
-    const address = sanitizeInput(body?.address, 'address')?.trim();
+    const label = typeof body?.label === 'string' ? sanitizeName(normalizeInput(body.label)).trim() : '';
+    const address = typeof body?.address === 'string' ? sanitizeAddress(normalizeInput(body.address)).trim() : '';
 
-    // Additional validation for all languages except Arabic
-    if (label && !/^[^\u0600-\u06FF\s\-'\.]+$/u.test(label)) {
-      return NextResponse.json(
-        { ok: false, error: 'Label contains invalid characters' },
-        { status: 400 }
-      );
-    }
-
-    if (address && !/^[^\u0600-\u06FF0-9\s,.\-#&()\/]+$/u.test(address)) {
-      return NextResponse.json(
-        { ok: false, error: 'Address contains invalid characters' },
-        { status: 400 }
-      );
-    }
     const lat = typeof body?.lat === 'number' && body.lat >= -90 && body.lat <= 90 ? body.lat : null;
     const lon = typeof body?.lon === 'number' && body.lon >= -180 && body.lon <= 180 ? body.lon : null;
 

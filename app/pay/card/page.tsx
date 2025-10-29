@@ -61,6 +61,7 @@ function CardPaymentContent() {
         console.log("CardPayment: Initializing Stripe for regular user");
 
         // For regular users, use real Stripe payments
+        console.log("CardPayment: Waiting for Stripe to load...");
         const stripeInstance = await stripePromise;
         if (!stripeInstance) {
           console.error("CardPayment: Stripe failed to initialize");
@@ -72,6 +73,7 @@ function CardPaymentContent() {
         console.log("CardPayment: Creating payment intent", { amountDkk: parseFloat(amount), bookingId });
 
         // Create payment intent
+        console.log("CardPayment: Creating payment intent", { amountDkk: parseFloat(amount), bookingId });
         const response = await fetch("/api/payments/card/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
