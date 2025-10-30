@@ -59,6 +59,7 @@ model User {
   resetToken          String?
   resetExpires        DateTime?
   createdAt           DateTime  @default(now())
+  canPayByInvoice     Boolean   @default(false)
 
   rides     Ride[]
   favorites FavoriteAddress[]
@@ -126,6 +127,7 @@ model Ride {
   status         RideStatus @default(PENDING)
   paid           Boolean    @default(false)
   createdAt      DateTime   @default(now())
+  paymentMethod  String?
 
   vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
   vehicleTypeId Int
@@ -189,6 +191,25 @@ model RevolutPayment {
   status     String   @default("paid") // paid, refunded, failed
   paymentId  String
   createdAt  DateTime @default(now())
+}
+
+// === Added by assistant (Payment Methods) ===
+model PaymentMethod {
+  id                Int      @id @default(autoincrement())
+  key               String   @unique // 'card', 'crypto', 'paypal', 'revolut', 'invoice'
+  title             String
+  description       String?
+  isActive          Boolean  @default(true)
+  // Development mode settings
+  devPublicKey      String?
+  devSecretKey      String?
+  devWebhookSecret  String?
+  // Production mode settings
+  prodPublicKey     String?
+  prodSecretKey     String?
+  prodWebhookSecret String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // === Added by assistant (Audit Logging) ===

@@ -68,7 +68,20 @@ export async function GET(request: NextRequest) {
     const bookings = await prisma.ride.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
-      include: {
+      select: {
+        id: true,
+        riderName: true,
+        passengers: true,
+        pickupAddress: true,
+        dropoffAddress: true,
+        scheduled: true,
+        pickupTime: true,
+        distanceKm: true,
+        durationMin: true,
+        price: true,
+        status: true,
+        paid: true,
+        createdAt: true,
         vehicleType: {
           select: {
             title: true,

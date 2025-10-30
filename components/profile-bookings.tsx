@@ -14,6 +14,7 @@ interface Ride {
   durationMin: number;
   price: number;
   status: string;
+  paymentMethod?: string;
   createdAt: string;
 }
 
@@ -121,6 +122,9 @@ export default function ProfileBookings() {
             <div className="text-right">
               <p className="font-semibold text-slate-800">{ride.price} DKK</p>
               <p className="text-sm text-slate-600 capitalize">{ride.status}</p>
+              {ride.paymentMethod && (
+                <p className="text-xs text-slate-500 capitalize">{ride.paymentMethod}</p>
+              )}
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-4 text-sm">

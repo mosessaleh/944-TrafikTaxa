@@ -81,7 +81,7 @@ export default function AdminBookings(){
 
   // Export to CSV function
   const exportToCSV = () => {
-    const headers = ['ID', 'User', 'Pickup Address', 'Dropoff Address', 'Time', 'Price', 'Status', 'Paid'];
+    const headers = ['ID', 'User', 'Pickup Address', 'Dropoff Address', 'Time', 'Price', 'Status', 'Paid', 'Payment Method'];
     const csvData = filteredList.map(ride => [
       ride.id,
       `${ride.user?.firstName} ${ride.user?.lastName}`,
@@ -90,7 +90,8 @@ export default function AdminBookings(){
       new Date(ride.pickupTime).toLocaleString(),
       ride.price,
       ride.status,
-      ride.paid ? 'Yes' : 'No'
+      ride.paid ? 'Yes' : 'No',
+      ride.paymentMethod || 'N/A'
     ]);
 
     const csvContent = [headers, ...csvData].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
@@ -290,6 +291,7 @@ export default function AdminBookings(){
                 <th className="px-2 py-2 font-semibold text-slate-700 w-16">💰 Price</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-20">📊 Status</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-12">💳 Paid</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-20">💳 Method</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-32">⚡ Actions</th>
               </tr>
             </thead>
@@ -343,6 +345,9 @@ export default function AdminBookings(){
                        <span className="text-slate-500 text-xs">❌</span>
                      )}
                    </td>
+                   <td className="px-2 py-2 text-slate-600 text-xs capitalize">
+                     {r.paymentMethod || 'N/A'}
+                   </td>
                    <td className="px-2 py-2">
                      <div className="flex flex-col gap-1">
                        <select
@@ -389,7 +394,7 @@ export default function AdminBookings(){
                  </tr>
                ))}
               {filteredList.length===0 && (
-                <tr><td colSpan={10} className="p-8 text-center text-slate-500">
+                <tr><td colSpan={11} className="p-8 text-center text-slate-500">
                   <div className="text-4xl mb-2">📭</div>
                   <div className="font-medium">No bookings match your filters</div>
                   <div className="text-sm mt-1">Try adjusting your search or date filters</div>

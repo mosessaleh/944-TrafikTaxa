@@ -306,6 +306,12 @@ export default async function AdminHome(){
             <div className="font-medium text-gray-900">Crypto Wallets</div>
             <div className="text-sm text-gray-500">Manage payments</div>
           </Link>
+
+          <Link href="/admin/payments" className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+            <div className="text-2xl mb-2">💳</div>
+            <div className="font-medium text-gray-900">Payment Methods</div>
+            <div className="text-sm text-gray-500">Configure payment options</div>
+          </Link>
         </div>
       </div>
 

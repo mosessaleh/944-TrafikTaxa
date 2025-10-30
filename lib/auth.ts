@@ -57,7 +57,7 @@ export async function getUserFromCookie(){
       return null;
     }
 
-    const user = await prisma.user.findUnique({
+    const user = await (prisma as any).user.findUnique({
       where: { id: dec.id },
       select: {
         id: true,
@@ -69,6 +69,7 @@ export async function getUserFromCookie(){
         role: true,
         emailVerified: true,
         pendingEmail: true,
+        canPayByInvoice: true,
         createdAt: true
       }
     });
