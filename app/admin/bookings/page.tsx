@@ -291,7 +291,7 @@ export default function AdminBookings(){
                 <th className="px-2 py-2 font-semibold text-slate-700 w-16">💰 Price</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-20">📊 Status</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-12">💳 Paid</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-20">💳 Method</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-20">💳 Payment Method</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-32">⚡ Actions</th>
               </tr>
             </thead>

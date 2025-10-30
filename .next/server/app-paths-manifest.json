@@ -1,6 +1,9 @@
 {
+  "/book/page": "app/book/page.js",
+  "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
   "/account/page": "app/account/page.js",
   "/pay/page": "app/pay/page.js",
-  "/book/page": "app/book/page.js",
-  "/admin/payments/page": "app/admin/payments/page.js"
+  "/api/admin/bookings/route": "app/api/admin/bookings/route.js",
+  "/page": "app/page.js",
+  "/admin/bookings/page": "app/admin/bookings/page.js"
 }
