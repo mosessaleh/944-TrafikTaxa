@@ -126,8 +126,9 @@ model Ride {
   distanceKm     Float?
   durationMin    Int?
   price          Int
-  status         RideStatus @default(PENDING)
-  paid           Boolean    @default(false)
+  status         String     @default("PENDING")
+  explanation    String     @default("Waiting for payment")
+  paymentStatus  String     @default("UNPAID")
   createdAt      DateTime   @default(now())
   paymentMethod  String?
 

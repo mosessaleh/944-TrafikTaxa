@@ -18,16 +18,50 @@ export async function POST(req: Request){
     if (!ride) return NextResponse.json({ ok:false, error:'Ride not found' },{ status:404 });
 
     let data:any = {};
-    if (action==='CONFIRM') data.status='CONFIRMED';
-    if (action==='DISPATCH') data.status='DISPATCHED';
-    if (action==='START') data.status='ONGOING';
-    if (action==='COMPLETE') data.status='COMPLETED';
-    if (action==='CANCEL') data.status='CANCELED';
-    if (action==='MARK_PAID') data.paid=true;
-    if (action==='PROCESS') data.status='PROGRESSING';
-    if (action==='CONFIRM_BOOKING') data.status='CONFIRMED';
-    if (action==='REFUNDING') data.status='REFUNDING';
-    if (action==='REFUNDED') data.status='REFUNDED';
+    let explanation = '';
+
+    if (action==='CONFIRM') {
+      data.status='CONFIRMED';
+      explanation = 'Waiting for car dispatch';
+    }
+    if (action==='DISPATCH') {
+      data.status='DISPATCHED';
+      explanation = 'Car is on the way';
+    }
+    if (action==='START') {
+      data.status='ONGOING';
+      explanation = 'Waiting for passenger pickup';
+    }
+    if (action==='COMPLETE') {
+      data.status='COMPLETED';
+      explanation = 'Ride completed successfully';
+    }
+    if (action==='CANCEL') {
+      data.status='CANCELED';
+      explanation = 'Ride has been canceled';
+    }
+    if (action==='MARK_PAID') {
+      data.paymentStatus='PAID';
+      explanation = 'Payment confirmed by admin';
+    }
+    if (action==='PROCESS') {
+      data.status='PROGRESSING';
+      explanation = 'Booking is being processed';
+    }
+    if (action==='CONFIRM_BOOKING') {
+      data.status='CONFIRMED';
+      explanation = 'Waiting for car dispatch';
+    }
+    if (action==='REFUNDING') {
+      data.status='REFUNDING';
+      explanation = 'Refund in progress';
+    }
+    if (action==='REFUNDED') {
+      data.status='REFUNDED';
+      explanation = 'Refund completed';
+    }
+
+    if (explanation) data.explanation = explanation;
     
     const updated = await prisma.ride.update({ where:{ id }, data });
 

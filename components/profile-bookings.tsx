@@ -14,6 +14,8 @@ interface Ride {
   durationMin: number;
   price: number;
   status: string;
+  paymentStatus: string;
+  explanation: string;
   paymentMethod?: string;
   createdAt: string;
 }
@@ -122,8 +124,9 @@ export default function ProfileBookings() {
             <div className="text-right">
               <p className="font-semibold text-slate-800">{ride.price} DKK</p>
               <p className="text-sm text-slate-600 capitalize">{ride.status}</p>
+              <p className="text-xs text-slate-500">{ride.explanation}</p>
               {ride.paymentMethod && (
-                <p className="text-xs text-slate-500 capitalize">{ride.paymentMethod}</p>
+                <p className="text-xs text-slate-400 capitalize">💳 {JSON.parse(ride.paymentMethod).method}</p>
               )}
             </div>
           </div>
@@ -149,14 +152,12 @@ export default function ProfileBookings() {
             <p className="text-sm text-slate-600">
               {ride.scheduled ? 'Scheduled for' : 'Booked for'} {new Date(ride.pickupTime).toLocaleString()}
             </p>
-            {ride.status !== 'CANCELED' && (
+            {ride.paymentStatus !== 'PAID' && ride.status !== 'CANCELED' && (
               <button
                 onClick={() => router.push(`/pay?booking_id=${ride.id}`)}
-                disabled={ride.status === 'PAID' || ride.status === 'CONFIRMED' ||
-                         ride.status === 'REFUNDING' || ride.status === 'REFUNDED'}
+                disabled={ride.status === 'COMPLETED'}
                 className={`px-3 py-1 text-sm rounded transition-colors ${
-                  ride.status === 'PAID' || ride.status === 'CONFIRMED' ||
-                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED'
+                  ride.status === 'COMPLETED'
                     ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                     : 'bg-green-600 text-white hover:bg-green-700'
                 }`}

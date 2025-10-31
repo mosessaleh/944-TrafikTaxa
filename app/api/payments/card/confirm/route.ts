@@ -4,7 +4,6 @@ import { prisma } from "@/lib/db";
 import { retrievePaymentIntent } from "@/lib/stripe";
 import { ConfirmCardPaymentSchema } from "@/lib/validation";
 import { notifyUserPaymentReceived, notifyUserBookingConfirmation, notifyAdmin } from "@/lib/notify";
-import { RideStatus } from "@prisma/client";
 
 export async function POST(request: Request) {
   try {
@@ -39,7 +38,7 @@ export async function POST(request: Request) {
       console.log("card/confirm: Finding unpaid booking for user to get amount");
 
       const booking = await prisma.ride.findFirst({
-        where: { userId: me.id, paid: false },
+        where: { userId: me.id, status: 'PENDING' },
         orderBy: { createdAt: 'desc' }
       });
 
@@ -67,7 +66,9 @@ export async function POST(request: Request) {
 
       await prisma.ride.update({
         where: { id: booking.id },
-        data: { paid: true, status: 'PAID' as any }
+        data: {
+          status: 'CONFIRMED'
+        }
       });
 
       // Send confirmation emails
@@ -157,7 +158,9 @@ export async function POST(request: Request) {
 
         await prisma.ride.update({
           where: { id: booking.id },
-          data: { paid: true, status: 'CONFIRMED' }
+          data: {
+            status: 'CONFIRMED'
+          }
         });
 
         // Send confirmation emails

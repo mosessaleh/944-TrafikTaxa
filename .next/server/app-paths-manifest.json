@@ -1,6 +1,13 @@
 {
+  "/pay/page": "app/pay/page.js",
+  "/pay/card/page": "app/pay/card/page.js",
+  "/account/page": "app/account/page.js",
+  "/pay/card/success/page": "app/pay/card/success/page.js",
   "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
   "/api/profile/route": "app/api/profile/route.js",
-  "/account/page": "app/account/page.js",
-  "/api/bookings/route": "app/api/bookings/route.js"
+  "/api/bookings/route": "app/api/bookings/route.js",
+  "/api/payments/methods/route": "app/api/payments/methods/route.js",
+  "/bookings/page": "app/bookings/page.js",
+  "/api/bookings/[id]/route": "app/api/bookings/[id]/route.js",
+  "/api/payments/card/confirm/route": "app/api/payments/card/confirm/route.js"
 }

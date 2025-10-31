@@ -50,7 +50,7 @@ export default async function AdminHome(){
     prisma.ride.count({ where: { status: 'CANCELED' } }),
     prisma.ride.count({ where: { status: 'REFUNDING' as any } }),
     prisma.ride.count({ where: { status: 'REFUNDED' as any } }),
-    prisma.ride.count({ where: { paid: false } }),
+    prisma.ride.count({ where: { status: 'PENDING' } }),
 
     // Users statistics
     prisma.user.count(),
@@ -58,12 +58,12 @@ export default async function AdminHome(){
 
     // Revenue statistics
     prisma.ride.aggregate({
-      where: { paid: true },
+      where: { status: 'COMPLETED' },
       _sum: { price: true }
     }),
     prisma.ride.aggregate({
       where: {
-        paid: true,
+        status: 'COMPLETED',
         createdAt: {
           gte: new Date(new Date().setHours(0, 0, 0, 0))
         }
@@ -72,7 +72,7 @@ export default async function AdminHome(){
     }),
     prisma.ride.aggregate({
       where: {
-        paid: true,
+        status: 'COMPLETED',
         createdAt: {
           gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
         }
@@ -81,7 +81,7 @@ export default async function AdminHome(){
     }),
     prisma.ride.aggregate({
       where: {
-        paid: true,
+        status: 'COMPLETED',
         createdAt: {
           gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1)
         }

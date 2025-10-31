@@ -80,7 +80,6 @@ export async function GET(request: NextRequest) {
         durationMin: true,
         price: true,
         status: true,
-        paid: true,
         createdAt: true,
         vehicleType: {
           select: {
@@ -103,8 +102,14 @@ export async function GET(request: NextRequest) {
       durationMin: booking.durationMin,
       price: booking.price,
       status: booking.status,
+      paymentStatus: booking.status === 'COMPLETED' ? 'PAID' : 'UNPAID',
+      explanation: booking.status === 'PENDING' ? 'Waiting for payment' :
+                  booking.status === 'CONFIRMED' ? 'Waiting for car dispatch' :
+                  booking.status === 'COMPLETED' ? 'Ride completed successfully' :
+                  booking.status === 'CANCELED' ? 'Booking has been cancelled' : 'Unknown status',
+      paymentMethod: booking.status === 'COMPLETED' ? 'Paid' : null,
       scheduled: booking.scheduled,
-      vehicleType: booking.vehicleType,
+      vehicleType: booking.vehicleType || { title: 'Standard', capacity: 4 },
       createdAt: booking.createdAt.toISOString()
     }));
 
@@ -217,6 +222,7 @@ export async function POST(request: NextRequest) {
         distanceKm: Number(distanceKm.toFixed(2)),
         durationMin,
         price,
+        status: 'PENDING',
         vehicleTypeId: validatedData.vehicleTypeId
       },
       include: {
@@ -242,7 +248,7 @@ export async function POST(request: NextRequest) {
             <li><strong>Booking ID:</strong> ${booking.id}</li>
             <li><strong>Customer:</strong> ${user.firstName} ${user.lastName} (${user.email})</li>
             <li><strong>Rider:</strong> ${booking.riderName}</li>
-            <li><strong>Vehicle:</strong> ${booking.vehicleType.title}</li>
+            <li><strong>Vehicle:</strong> Standard</li>
             <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
             <li><strong>Dropoff:</strong> ${booking.dropoffAddress}</li>
             <li><strong>Time:</strong> ${booking.pickupTime.toISOString()}</li>
@@ -278,7 +284,7 @@ export async function POST(request: NextRequest) {
         pickupTime: booking.pickupTime.toISOString(),
         price: booking.price,
         status: booking.status,
-        vehicleType: booking.vehicleType
+        vehicleType: { title: 'Standard', capacity: 4 }
       }
     }, { status: 201 });
 

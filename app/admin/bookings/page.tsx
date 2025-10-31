@@ -29,8 +29,8 @@ export default function AdminBookings(){
   const [selectedBookings, setSelectedBookings] = useState<number[]>([]);
 
   const groups = {
-    pending: rides.filter(r=> r.status==='PENDING' && !r.paid),
-    paid: rides.filter(r=> r.status==='PAID'),
+    pending: rides.filter(r=> r.status==='PENDING' && r.paymentStatus!=='PAID'),
+    paid: rides.filter(r=> r.paymentStatus==='PAID'),
     processing: rides.filter(r=> r.status==='PROGRESSING'),
     confirmedActive: rides.filter(r=> (r.status==='CONFIRMED' || r.status==='DISPATCHED' || r.status==='ONGOING')),
     completed: rides.filter(r=> r.status==='COMPLETED'),
@@ -81,7 +81,7 @@ export default function AdminBookings(){
 
   // Export to CSV function
   const exportToCSV = () => {
-    const headers = ['ID', 'User', 'Pickup Address', 'Dropoff Address', 'Time', 'Price', 'Status', 'Paid', 'Payment Method'];
+    const headers = ['ID', 'User', 'Pickup Address', 'Dropoff Address', 'Time', 'Price', 'Status', 'Payment Status', 'Payment Method', 'Explanation'];
     const csvData = filteredList.map(ride => [
       ride.id,
       `${ride.user?.firstName} ${ride.user?.lastName}`,
@@ -90,8 +90,9 @@ export default function AdminBookings(){
       new Date(ride.pickupTime).toLocaleString(),
       ride.price,
       ride.status,
-      ride.paid ? 'Yes' : 'No',
-      ride.paymentMethod || 'N/A'
+      ride.paymentStatus,
+      ride.paymentMethod ? JSON.parse(ride.paymentMethod).method : 'N/A',
+      ride.explanation
     ]);
 
     if (typeof window !== 'undefined') {
@@ -151,7 +152,7 @@ export default function AdminBookings(){
     confirmedActive: groups.confirmedActive.length,
     completed: groups.completed.length,
     canceled: groups.canceled.length,
-    totalRevenue: rides.filter(r => r.paid).reduce((sum, r) => sum + (r.price || 0), 0),
+    totalRevenue: rides.filter(r => r.paymentStatus === 'PAID').reduce((sum, r) => sum + (r.price || 0), 0),
     todayBookings: rides.filter(r => {
       const today = new Date().toDateString();
       return new Date(r.createdAt).toDateString() === today;
@@ -294,8 +295,9 @@ export default function AdminBookings(){
                 <th className="px-2 py-2 font-semibold text-slate-700 w-20">🕐 Time</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-16">💰 Price</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-20">📊 Status</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-12">💳 Paid</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-12">💳 Payment Status</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-20">💳 Payment Method</th>
+                <th className="px-2 py-2 font-semibold text-slate-700 w-24">📝 Explanation</th>
                 <th className="px-2 py-2 font-semibold text-slate-700 w-32">⚡ Actions</th>
               </tr>
             </thead>
@@ -345,14 +347,17 @@ export default function AdminBookings(){
                      </span>
                    </td>
                    <td className="px-2 py-2">
-                     {r.paid ? (
+                     {r.paymentStatus === 'PAID' ? (
                        <span className="text-emerald-600 font-medium text-xs">✅</span>
                      ) : (
                        <span className="text-slate-500 text-xs">❌</span>
                      )}
                    </td>
                    <td className="px-2 py-2 text-slate-600 text-xs capitalize">
-                     {r.paymentMethod || 'N/A'}
+                     {r.paymentMethod ? JSON.parse(r.paymentMethod).method : 'N/A'}
+                   </td>
+                   <td className="px-2 py-2 text-slate-600 text-xs truncate" title={r.explanation}>
+                     {r.explanation}
                    </td>
                    <td className="px-2 py-2">
                      <div className="flex flex-col gap-1">
@@ -404,7 +409,7 @@ export default function AdminBookings(){
                  </tr>
                ))}
               {filteredList.length===0 && (
-                <tr><td colSpan={11} className="p-8 text-center text-slate-500">
+                <tr><td colSpan={12} className="p-8 text-center text-slate-500">
                   <div className="text-4xl mb-2">📭</div>
                   <div className="font-medium">No bookings match your filters</div>
                   <div className="text-sm mt-1">Try adjusting your search or date filters</div>

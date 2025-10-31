@@ -115,7 +115,9 @@ export async function POST(
     // Update booking status to cancelled
     const updatedBooking = await prisma.ride.update({
       where: { id: bookingId },
-      data: { status: 'CANCELED' }
+      data: {
+        status: 'CANCELED'
+      }
     });
 
     // Send email to admin
@@ -137,7 +139,7 @@ export async function POST(
             <li><strong>Original Price:</strong> ${booking.price} DKK</li>
             <li><strong>Cancellation Fee:</strong> ${cancellationFee} DKK</li>
             <li><strong>Refund Amount:</strong> ${refundAmount} DKK</li>
-            <li><strong>Paid:</strong> ${booking.paid ? 'Yes' : 'No'}</li>
+            <li><strong>Payment Status:</strong> ${['PAID', 'COMPLETED'].includes(booking.status) ? 'Paid' : 'Unpaid'}</li>
           </ul>
           <p>Please process the refund if payment was made.</p>`
         );
@@ -162,10 +164,10 @@ export async function POST(
           <li><strong>Cancellation Fee:</strong> ${cancellationFee} DKK</li>
           <li><strong>Refund Amount:</strong> ${refundAmount} DKK</li>
         </ul>
-        ${booking.paid ?
-          `<p><strong>Refund Information:</strong> Your refund of ${refundAmount} DKK will be processed within 3-5 business days. The refund will be processed to the original payment method.</p>` :
-          '<p>No payment was made for this booking.</p>'
-        }
+        ${['PAID', 'COMPLETED'].includes(booking.status) ?
+           `<p><strong>Refund Information:</strong> Your refund of ${refundAmount} DKK will be processed within 3-5 business days. The refund will be processed to the original payment method.</p>` :
+           '<p>No payment was made for this booking.</p>'
+         }
         <p>If you have any questions, please contact our support team.</p>
         <p>Best regards,<br>944 Trafik Team</p>`
       );

@@ -25,10 +25,11 @@ interface Ride {
   durationMin: number;
   price: number;
   status: string;
-  paid: boolean;
+  paymentStatus: string;
+  explanation: string;
+  paymentMethod?: string;
   createdAt: string;
   vehicleTypeId: number;
-  paymentMethod?: string;
 }
 
 interface Favorite {
@@ -367,7 +368,7 @@ export default function AccountClient() {
                             }`}>
                               {ride.status}
                             </span>
-                            {ride.paid && (
+                            {ride.paymentStatus === 'PAID' && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                 Paid
                               </span>
@@ -378,6 +379,9 @@ export default function AccountClient() {
                             <span>{ride.distanceKm.toFixed(1)} km</span>
                             <span>{ride.passengers} passenger{ride.passengers !== 1 ? 's' : ''}</span>
                           </div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            {ride.explanation}
+                          </div>
                           <div className="flex items-center gap-2 mt-1">
                             <div className="flex-1 min-w-0">
                               <p className="text-xs text-slate-500 truncate">
@@ -385,6 +389,11 @@ export default function AccountClient() {
                               </p>
                             </div>
                           </div>
+                          {ride.paymentMethod && (
+                            <div className="text-xs text-slate-400 mt-1">
+                              💳 {JSON.parse(ride.paymentMethod).method}
+                            </div>
+                          )}
                           <p className="text-xs text-slate-600 mt-1">
                             {ride.scheduled ? '📅 Scheduled' : '🚗 Immediate'}: {new Date(ride.pickupTime).toLocaleString()}
                           </p>

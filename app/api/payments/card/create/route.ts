@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/session";
 import { createPaymentIntent } from "@/lib/stripe";
 import { CardPaymentIntentSchema } from "@/lib/validation";
+import { prisma } from "@/lib/db";
 
 export async function POST(request: Request) {
   try {

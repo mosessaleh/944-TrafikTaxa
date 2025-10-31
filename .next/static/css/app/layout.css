@@ -1711,10 +1711,6 @@ video {
   --tw-bg-opacity: 1;
   background-color: rgb(34 211 238 / var(--tw-bg-opacity));
 }
-.bg-cyan-500 {
-  --tw-bg-opacity: 1;
-  background-color: rgb(6 182 212 / var(--tw-bg-opacity));
-}
 .bg-cyan-500\/20 {
   background-color: rgb(6 182 212 / 0.2);
 }
@@ -1777,10 +1773,6 @@ video {
 .bg-orange-50 {
   --tw-bg-opacity: 1;
   background-color: rgb(255 247 237 / var(--tw-bg-opacity));
-}
-.bg-orange-600 {
-  --tw-bg-opacity: 1;
-  background-color: rgb(234 88 12 / var(--tw-bg-opacity));
 }
 .bg-purple-50 {
   --tw-bg-opacity: 1;
@@ -2640,10 +2632,6 @@ body {
   --tw-bg-opacity: 1;
   background-color: rgb(21 128 61 / var(--tw-bg-opacity));
 }
-.hover\:bg-orange-700:hover {
-  --tw-bg-opacity: 1;
-  background-color: rgb(194 65 12 / var(--tw-bg-opacity));
-}
 .hover\:bg-red-200:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(254 202 202 / var(--tw-bg-opacity));
@@ -2667,18 +2655,10 @@ body {
 .hover\:bg-white\/20:hover {
   background-color: rgb(255 255 255 / 0.2);
 }
-.hover\:from-cyan-700:hover {
-  --tw-gradient-from: #0e7490 var(--tw-gradient-from-position);
-  --tw-gradient-to: rgb(14 116 144 / 0) var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-}
 .hover\:from-green-700:hover {
   --tw-gradient-from: #15803d var(--tw-gradient-from-position);
   --tw-gradient-to: rgb(21 128 61 / 0) var(--tw-gradient-to-position);
   --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-}
-.hover\:to-blue-700:hover {
-  --tw-gradient-to: #1d4ed8 var(--tw-gradient-to-position);
 }
 .hover\:to-emerald-700:hover {
   --tw-gradient-to: #047857 var(--tw-gradient-to-position);
@@ -2794,9 +2774,6 @@ body {
   --tw-scale-x: 0.98;
   --tw-scale-y: 0.98;
   transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
-}
-.disabled\:transform-none:disabled {
-  transform: none;
 }
 .disabled\:cursor-not-allowed:disabled {
   cursor: not-allowed;
