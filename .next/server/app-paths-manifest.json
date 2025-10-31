@@ -1,17 +1,6 @@
 {
-  "/pay/crypto/page": "app/pay/crypto/page.js",
-  "/account/page": "app/account/page.js",
-  "/pay/page": "app/pay/page.js",
   "/.well-known/appspecific/com.chrome.devtools.json/route": "app/.well-known/appspecific/com.chrome.devtools.json/route.js",
   "/api/profile/route": "app/api/profile/route.js",
-  "/api/bookings/route": "app/api/bookings/route.js",
-  "/api/payments/wallets/route": "app/api/payments/wallets/route.js",
-  "/api/payments/quote/route": "app/api/payments/quote/route.js",
-  "/api/crypto/pi/route": "app/api/crypto/pi/route.js",
-  "/api/crypto/tickers/route": "app/api/crypto/tickers/route.js",
-  "/history/page": "app/history/page.js",
-  "/api/payments/crypto/confirm/route": "app/api/payments/crypto/confirm/route.js",
-  "/bookings/page": "app/bookings/page.js",
-  "/admin/page": "app/admin/page.js",
-  "/admin/crypto/page": "app/admin/crypto/page.js"
+  "/account/page": "app/account/page.js",
+  "/api/bookings/route": "app/api/bookings/route.js"
 }

@@ -130,7 +130,7 @@ export default function AdminBookings(){
         await fetch('/api/admin/bookings/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, status: action })
+          body: JSON.stringify({ id, action })
         });
       }
       setSelectedBookings([]);
@@ -392,8 +392,8 @@ export default function AdminBookings(){
                        >
                          <option value="">Action</option>
                          <option value="CONFIRM">✅ Confirm</option>
-                         <option value="PICKED_UP">🚗 Picked Up</option>
-                         <option value="DELIVERED">📦 Delivered</option>
+                         <option value="DISPATCH">🚗 Dispatch</option>
+                         <option value="COMPLETE">📦 Complete</option>
                          <option value="CANCEL">❌ Cancel</option>
                          <option value="MARK_PAID">💳 Mark Paid</option>
                          <option value="REFUNDING">🔄 Refund in Progress</option>

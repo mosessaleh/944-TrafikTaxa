@@ -394,13 +394,12 @@ export default function AccountClient() {
                             <p className="font-semibold text-slate-800 text-sm">{ride.price} DKK</p>
                           </div>
                           <div className="flex flex-col gap-1">
-                            {(!ride.paymentMethod || ride.paymentMethod === null || ride.paymentMethod === '') &&
-                             ride.status !== 'CANCELED' && ride.status !== 'COMPLETED' && (
+                            {ride.status !== 'CANCELED' && (
                               <a
                                 href={`/pay?booking_id=${ride.id}`}
                                 className={`px-3 py-1 text-xs rounded transition-colors ${
                                   ride.status === 'PAID' || ride.status === 'CONFIRMED' ||
-                                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED'
+                                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED' || ride.status === 'COMPLETED'
                                     ? 'bg-gray-400 text-gray-200 cursor-not-allowed pointer-events-none'
                                     : 'bg-green-600 text-white hover:bg-green-700'
                                 }`}
@@ -408,12 +407,12 @@ export default function AccountClient() {
                                 Pay Now
                               </a>
                             )}
-                            {ride.status !== 'CANCELED' && ride.status !== 'COMPLETED' && (
+                            {ride.status !== 'CANCELED' && (
                               <button
                                 onClick={() => handleCancelBooking(ride.id)}
                                 disabled={ride.status === 'REFUNDING' || ride.status === 'REFUNDED'}
                                 className={`px-3 py-1 text-xs rounded transition-colors ${
-                                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED'
+                                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED' || ride.status === 'COMPLETED'
                                     ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                                     : 'bg-red-600 text-white hover:bg-red-700'
                                 }`}

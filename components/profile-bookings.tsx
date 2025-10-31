@@ -149,8 +149,7 @@ export default function ProfileBookings() {
             <p className="text-sm text-slate-600">
               {ride.scheduled ? 'Scheduled for' : 'Booked for'} {new Date(ride.pickupTime).toLocaleString()}
             </p>
-            {(!ride.paymentMethod || ride.paymentMethod === null || ride.paymentMethod === '') &&
-             ride.status !== 'CANCELED' && ride.status !== 'COMPLETED' && (
+            {ride.status !== 'CANCELED' && (
               <button
                 onClick={() => router.push(`/pay?booking_id=${ride.id}`)}
                 disabled={ride.status === 'PAID' || ride.status === 'CONFIRMED' ||
