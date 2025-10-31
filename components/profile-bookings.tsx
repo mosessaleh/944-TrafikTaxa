@@ -145,10 +145,26 @@ export default function ProfileBookings() {
               <p className="font-medium">{ride.distanceKm.toFixed(1)} km</p>
             </div>
           </div>
-          <div className="mt-3 pt-3 border-t border-slate-100">
+          <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
             <p className="text-sm text-slate-600">
               {ride.scheduled ? 'Scheduled for' : 'Booked for'} {new Date(ride.pickupTime).toLocaleString()}
             </p>
+            {(!ride.paymentMethod || ride.paymentMethod === null || ride.paymentMethod === '') &&
+             ride.status !== 'CANCELED' && ride.status !== 'COMPLETED' && (
+              <button
+                onClick={() => router.push(`/pay?booking_id=${ride.id}`)}
+                disabled={ride.status === 'PAID' || ride.status === 'CONFIRMED' ||
+                         ride.status === 'REFUNDING' || ride.status === 'REFUNDED'}
+                className={`px-3 py-1 text-sm rounded transition-colors ${
+                  ride.status === 'PAID' || ride.status === 'CONFIRMED' ||
+                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED'
+                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
+              >
+                Pay Now
+              </button>
+            )}
           </div>
         </div>
       ))}

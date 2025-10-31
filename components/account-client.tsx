@@ -28,6 +28,7 @@ interface Ride {
   paid: boolean;
   createdAt: string;
   vehicleTypeId: number;
+  paymentMethod?: string;
 }
 
 interface Favorite {
@@ -62,7 +63,6 @@ export default function AccountClient() {
 
         if (response.ok) {
           const data = await response.json();
-          console.log('Profile API response:', data);
           if (data.ok) {
             setMe(data.me);
           }
@@ -84,7 +84,6 @@ export default function AccountClient() {
   const { data: ridesData, error: ridesError, isLoading: ridesLoading, mutate: mutateRides } = useSWR(
     tab === 'history' && me ? '/api/bookings' : null,
     async (url) => {
-      console.log('Fetching bookings from:', url);
       const response = await fetch(url, {
         method: 'GET',
         credentials: 'include',
@@ -94,7 +93,6 @@ export default function AccountClient() {
         },
       });
 
-      console.log('Bookings response status:', response.status);
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -104,12 +102,10 @@ export default function AccountClient() {
           throw new Error('Email verification required');
         }
         const errorData = await response.json().catch(() => ({}));
-        console.error('Bookings API error:', errorData);
         throw new Error(errorData.error || `Failed to fetch bookings: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('Bookings data received:', data);
 
       if (!data.ok) {
         throw new Error(data.error || 'Failed to fetch bookings');
@@ -125,7 +121,6 @@ export default function AccountClient() {
       errorRetryInterval: 1000,
       shouldRetryOnError: false,
       onError: (error) => {
-        console.error('Bookings fetch error:', error);
       },
     }
   );
@@ -134,9 +129,6 @@ export default function AccountClient() {
   const { data: favsData, error: favsError, mutate: mutateFavs, isLoading: favsLoading } = useSWR(
     tab === 'favorites' && me ? '/api/favorites' : null,
     async (url) => {
-      console.log('Fetching favorites from:', url);
-      console.log('Current tab:', tab);
-      console.log('Current user:', me);
       const response = await fetch(url, {
         method: 'GET',
         credentials: 'include',
@@ -146,7 +138,6 @@ export default function AccountClient() {
         },
       });
 
-      console.log('Favorites response status:', response.status);
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -156,12 +147,10 @@ export default function AccountClient() {
           throw new Error('Email verification required');
         }
         const errorData = await response.json().catch(() => ({}));
-        console.error('Favorites API error:', errorData);
         throw new Error(errorData.error || `Failed to fetch favorites: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('Favorites data received:', data);
 
       if (!data.ok) {
         throw new Error(data.error || 'Failed to fetch favorites');
@@ -177,7 +166,6 @@ export default function AccountClient() {
       errorRetryInterval: 1000,
       shouldRetryOnError: false,
       onError: (error) => {
-        console.error('Favorites fetch error:', error);
       },
     }
   );
@@ -187,7 +175,6 @@ export default function AccountClient() {
       await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
       router.push('/');
     } catch (error) {
-      console.error('Logout error:', error);
     }
   };
 
@@ -214,7 +201,6 @@ export default function AccountClient() {
         alert(`Failed to cancel booking: ${errorData.error || 'Unknown error'}`);
       }
     } catch (error) {
-      console.error('Cancel booking error:', error);
       alert('Failed to cancel booking. Please try again.');
     }
   };
@@ -404,17 +390,38 @@ export default function AccountClient() {
                           </p>
                         </div>
                         <div className="flex items-center gap-3 ml-4">
-                          <div className="text-right">
+                          <div className="text-right mr-4">
                             <p className="font-semibold text-slate-800 text-sm">{ride.price} DKK</p>
                           </div>
-                          {(ride.status !== 'CANCELED' && ride.status !== 'cancelled') && (
-                            <button
-                              onClick={() => handleCancelBooking(ride.id)}
-                              className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            {(!ride.paymentMethod || ride.paymentMethod === null || ride.paymentMethod === '') &&
+                             ride.status !== 'CANCELED' && ride.status !== 'COMPLETED' && (
+                              <a
+                                href={`/pay?booking_id=${ride.id}`}
+                                className={`px-3 py-1 text-xs rounded transition-colors ${
+                                  ride.status === 'PAID' || ride.status === 'CONFIRMED' ||
+                                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED'
+                                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed pointer-events-none'
+                                    : 'bg-green-600 text-white hover:bg-green-700'
+                                }`}
+                              >
+                                Pay Now
+                              </a>
+                            )}
+                            {ride.status !== 'CANCELED' && ride.status !== 'COMPLETED' && (
+                              <button
+                                onClick={() => handleCancelBooking(ride.id)}
+                                disabled={ride.status === 'REFUNDING' || ride.status === 'REFUNDED'}
+                                className={`px-3 py-1 text-xs rounded transition-colors ${
+                                  ride.status === 'REFUNDING' || ride.status === 'REFUNDED'
+                                    ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                    : 'bg-red-600 text-white hover:bg-red-700'
+                                }`}
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -473,7 +480,6 @@ export default function AccountClient() {
                                   mutateFavs();
                                 }
                               } catch (error) {
-                                console.error('Failed to delete favorite:', error);
                               }
                             }
                           }}

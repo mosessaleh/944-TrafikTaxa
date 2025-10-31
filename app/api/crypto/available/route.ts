@@ -20,16 +20,19 @@ export async function GET() {
       if (w.isActive) rec.active += 1;
       map.set(key, rec);
     }
-    const symbols = Array.from(map.entries()).map(([symbol, v]) => ({
-      symbol,
-      total: v.total,
-      active: v.active,
-    }));
+    const symbols = Array.from(map.entries())
+      .filter(([, v]) => v.active > 0) // Only show symbols with active wallets
+      .map(([symbol, v]) => ({
+        id: symbol,
+        label: symbol.toUpperCase(),
+        total: v.total,
+        active: v.active,
+      }));
     return NextResponse.json({ symbols, source: "db" });
   } catch (_e) {
     // Fallback: common coins so UI doesn't break even if DB model isn't present
     const defaults = ["pi","btc","eth","usdt","usdc","bnb","xrp"].map(s => ({
-      symbol: s, total: 1, active: 1
+      id: s, label: s.toUpperCase(), total: 1, active: 1
     }));
     return NextResponse.json({ symbols: defaults, source: "fallback" });
   }

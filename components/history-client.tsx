@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 
 type Ride = {
-  id:number; status:string; pickupTime:string; pickupAddress:string; dropoffAddress:string; price:any; passengers:number; riderName:string;
+  id:number; status:string; pickupTime:string; pickupAddress:string; dropoffAddress:string; price:any; passengers:number; riderName:string; paymentMethod?:string;
 };
 
 export default function HistoryClient({ initialRides }:{ initialRides: Ride[] }){
@@ -53,8 +53,22 @@ export default function HistoryClient({ initialRides }:{ initialRides: Ride[] })
               <div className="text-sm">{r.pickupAddress} → {r.dropoffAddress}</div>
               <div className="text-xs text-gray-500">Rider: {r.riderName} • Passengers: {r.passengers}</div>
             </div>
-            <div className="text-right">
+            <div className="text-right flex flex-col items-end gap-2">
               <div className="text-2xl font-bold">{Number(r.price)} DKK</div>
+              {(!r.paymentMethod || r.paymentMethod === null || r.paymentMethod === '') &&
+               r.status !== 'CANCELED' && r.status !== 'COMPLETED' && (
+                <a
+                  href={`/pay?booking_id=${r.id}`}
+                  className={`px-3 py-1 text-sm rounded transition-colors ${
+                    r.status === 'PAID' || r.status === 'CONFIRMED' ||
+                    r.status === 'REFUNDING' || r.status === 'REFUNDED'
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed pointer-events-none'
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                  }`}
+                >
+                  Pay Now
+                </a>
+              )}
             </div>
           </div>
         ))}

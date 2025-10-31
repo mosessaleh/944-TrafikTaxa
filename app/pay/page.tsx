@@ -16,41 +16,72 @@ function PayIndexContent(){
   const amount = sp.get("amount_dkk") || "";
   const bookingId = sp.get("booking_id") || "";
 
-  console.log("PayIndex: Loaded with params", { amount, bookingId });
+
+  // State for booking data
+  const [bookingData, setBookingData] = useState<{price: number} | null>(null);
+  const [loadingBooking, setLoadingBooking] = useState(false);
 
   const [method, setMethod] = useState<string|null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchPaymentMethods = async () => {
+    const fetchData = async () => {
       try {
+        // Fetch booking data if bookingId is provided
+        if (bookingId) {
+          setLoadingBooking(true);
+          const bookingResponse = await fetch(`/api/bookings/${bookingId}`, {
+            credentials: 'include'
+          });
+          if (bookingResponse.ok) {
+            const bookingData = await bookingResponse.json();
+            if (bookingData.ride) {
+              setBookingData({ price: bookingData.ride.price });
+            }
+          } else if (bookingResponse.status === 401) {
+            alert('Please log in to continue.');
+            router.push('/login');
+            return;
+          } else if (bookingResponse.status === 404) {
+            alert('Booking not found.');
+            router.push('/');
+            return;
+          } else {
+            alert('You do not have permission to access this booking.');
+            router.push('/');
+            return;
+          }
+          setLoadingBooking(false);
+        }
+
+        // Fetch payment methods
         const response = await fetch('/api/payments/methods');
         const data = await response.json();
         if (data.success) {
           setPaymentMethods(data.paymentMethods);
         }
       } catch (error) {
-        console.error('Error fetching payment methods:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchPaymentMethods();
-  }, []);
+    fetchData();
+  }, [bookingId]);
 
   const handlePaymentMethod = async (selectedMethod: string) => {
-    if (!amount) {
-      console.error("PayIndex: No amount specified");
-      alert("No amount specified. Please go back and try booking again.");
+    if (!bookingId && !amount) {
+      alert("No booking information found. Please go back and try booking again.");
       return;
     }
 
     setMethod(selectedMethod);
 
-    const q = `?amount_dkk=${encodeURIComponent(amount)}${bookingId ? `&booking_id=${encodeURIComponent(bookingId)}` : ''}`;
-    console.log("PayIndex: Redirecting to payment method", { selectedMethod, query: q });
+    // Use booking price from database if available, otherwise use URL parameter
+    const paymentAmount = bookingData?.price || (amount ? parseInt(amount) : 0);
+    const q = bookingId ? `?booking_id=${encodeURIComponent(bookingId)}` : `?amount_dkk=${encodeURIComponent(paymentAmount.toString())}`;
+
 
     if (selectedMethod === "paypal" || selectedMethod === "revolut") {
       router.push(`/pay/${selectedMethod}${q}`);
@@ -66,7 +97,7 @@ function PayIndexContent(){
         router.push(`/bookings/${bookingId}?payment=invoice`);
       } else {
         // For new bookings, redirect to booking creation with invoice method
-        router.push(`/book?payment_method=invoice&amount_dkk=${encodeURIComponent(amount)}`);
+        router.push(`/book?payment_method=invoice&amount_dkk=${encodeURIComponent(paymentAmount.toString())}`);
       }
     } else {
       router.push(`/pay/${selectedMethod}${q}`);
@@ -77,11 +108,16 @@ function PayIndexContent(){
     <div className="max-w-3xl mx-auto p-6 grid gap-6">
       <h1 className="text-2xl font-bold">Choose Payment Method</h1>
 
-      {amount && (
+      {(bookingData || amount) && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
           <div className="text-center">
             <div className="text-lg font-semibold text-blue-900">Amount to Pay</div>
-            <div className="text-2xl font-bold text-blue-800">{amount} DKK</div>
+            <div className="text-2xl font-bold text-blue-800">
+              {loadingBooking ? "Loading..." : (bookingData?.price || amount)} DKK
+            </div>
+            {bookingId && (
+              <div className="text-sm text-blue-600 mt-1">Booking #{bookingId}</div>
+            )}
           </div>
         </div>
       )}

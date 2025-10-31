@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requireAdmin } from '@/lib/auth';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const me = await getUserFromCookie();
-    if (!me || me.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const me = await requireAdmin();
 
     const paymentMethodId = parseInt(params.id);
     if (isNaN(paymentMethodId)) {
@@ -27,20 +24,20 @@ export async function POST(
     }
 
     // Toggle active status
+    console.log(`Toggling payment method ${paymentMethodId} from ${paymentMethod.isActive} to ${!paymentMethod.isActive}`);
     const updatedMethod = await (prisma as any).paymentMethod.update({
       where: { id: paymentMethodId },
       data: { isActive: !paymentMethod.isActive }
     });
+    console.log('Payment method updated successfully:', updatedMethod);
 
-    return NextResponse.json({
-      success: true,
-      paymentMethod: updatedMethod
-    });
+    // Redirect back to admin payments page
+    return NextResponse.redirect(new URL('/admin/payments', request.url));
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error toggling payment method:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error?.message || 'Unknown error' },
       { status: 500 }
     );
   }

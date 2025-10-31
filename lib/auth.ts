@@ -91,6 +91,7 @@ export async function getUserFromCookie(){
 
 export async function requireAdmin(){
   const u = await getUserFromCookie();
-  if (!u || u.role !== 'ADMIN') throw Object.assign(new Error('Forbidden'), { status: 403 });
+  if (!u) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+  if (u.role !== 'ADMIN') throw Object.assign(new Error('Forbidden'), { status: 403 });
   return u;
 }

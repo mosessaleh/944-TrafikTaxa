@@ -92,7 +92,7 @@ export type ConfirmCardPaymentInput = z.infer<typeof ConfirmCardPaymentSchema>;
 // Crypto Payment Schema
 export const CryptoPaymentSchema = z.object({
   amountDkk: z.number().positive(),
-  symbol: z.enum(['btc', 'eth', 'usdt', 'usdc']),
+  symbol: z.enum(['btc', 'eth', 'usdt', 'usdc', 'pi', 'bnb', 'xrp']),
   walletId: z.string().min(1),
   network: z.string().min(1),
   address: z.string().min(1),

@@ -21,7 +21,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, ...booking });
+    return NextResponse.json({ ok: true, ride: booking });
   } catch (e: any) {
     console.error('Error fetching booking:', e);
     return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });

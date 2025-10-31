@@ -1,12 +1,12 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getCurrentUser } from "@/lib/session";
+import { getUserFromCookie } from "@/lib/auth";
 
 type Params = { params: { symbol: string } };
 
 export async function PUT(request: Request, { params }: Params) {
-  const me = await getCurrentUser();
+  const me = await getUserFromCookie();
   if (!me || me.role !== "ADMIN") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
@@ -21,7 +21,7 @@ export async function PUT(request: Request, { params }: Params) {
 }
 
 export async function DELETE(request: Request, { params }: Params) {
-  const me = await getCurrentUser();
+  const me = await getUserFromCookie();
   if (!me || me.role !== "ADMIN") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }

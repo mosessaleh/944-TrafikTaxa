@@ -16,7 +16,7 @@ function ActionBtn({id, action, label, icon}:{id:number, action:string, label:st
 }
 
 function TabBtn({active,label,onClick}:{active:boolean,label:string,onClick:()=>void}){
-  return <button onClick={onClick} className={`px-4 py-2 rounded-2xl border font-medium transition-all duration-200 ${active? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg':'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:shadow-md'}`} suppressHydrationWarning>{label}</button>;
+  return <button onClick={onClick} className={`px-4 py-2 rounded-2xl border font-medium transition-all duration-200 ${active? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg':'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:shadow-md'}`}>{label}</button>;
 }
 
 export default function AdminBookings(){
@@ -94,18 +94,20 @@ export default function AdminBookings(){
       ride.paymentMethod || 'N/A'
     ]);
 
-    const csvContent = [headers, ...csvData].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bookings-${currentTab}-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    if (typeof window !== 'undefined') {
+      const csvContent = [headers, ...csvData].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bookings-${currentTab}-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
   };
 
   useEffect(() => {
-    const hash = typeof window !== 'undefined' ? location.hash?.slice(1) : '';
+    const hash = typeof window !== 'undefined' ? window.location.hash?.slice(1) : '';
     const validTab = hash && groups[hash as keyof typeof groups] ? hash as keyof typeof groups : 'pending';
     setCurrentTab(validTab);
   }, [data]);
@@ -113,7 +115,7 @@ export default function AdminBookings(){
   function switchTab(k: keyof typeof groups){
     setCurrentTab(k);
     if (typeof window !== 'undefined') {
-      location.hash = k;
+      window.location.hash = k;
     }
   }
 
@@ -132,7 +134,9 @@ export default function AdminBookings(){
         });
       }
       setSelectedBookings([]);
-      location.reload();
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
     } catch (error) {
       alert('Error performing bulk action');
     }
@@ -328,6 +332,8 @@ export default function AdminBookings(){
                    <td className="px-2 py-2">
                      <span className={`px-1 py-0.5 rounded-full text-xs font-medium ${
                        r.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' :
+                       r.status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-800' :
+                       r.status === 'PICKED_UP' ? 'bg-blue-100 text-blue-800' :
                        r.status === 'CANCELED' ? 'bg-red-100 text-red-800' :
                        r.status === 'PROGRESSING' ? 'bg-blue-100 text-blue-800' :
                        r.status === 'CONFIRMED' ? 'bg-cyan-100 text-cyan-800' :
@@ -335,7 +341,7 @@ export default function AdminBookings(){
                        r.status === 'REFUNDED' ? 'bg-green-100 text-green-800' :
                        'bg-slate-100 text-slate-800'
                      }`}>
-                       {r.status}
+                       {r.status.replace('_', ' ')}
                      </span>
                    </td>
                    <td className="px-2 py-2">
@@ -369,7 +375,9 @@ export default function AdminBookings(){
                                  const data = await response.json();
                                  console.log('Response data:', data);
                                  if (response.ok) {
-                                   location.reload();
+                                   if (typeof window !== 'undefined') {
+                                     window.location.reload();
+                                   }
                                  } else {
                                    alert(`Error: ${data.error || 'Unknown error'}`);
                                  }
@@ -384,6 +392,8 @@ export default function AdminBookings(){
                        >
                          <option value="">Action</option>
                          <option value="CONFIRM">✅ Confirm</option>
+                         <option value="PICKED_UP">🚗 Picked Up</option>
+                         <option value="DELIVERED">📦 Delivered</option>
                          <option value="CANCEL">❌ Cancel</option>
                          <option value="MARK_PAID">💳 Mark Paid</option>
                          <option value="REFUNDING">🔄 Refund in Progress</option>

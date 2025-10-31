@@ -7,7 +7,7 @@ const mapSymbolToId: Record<string, string> = {
   pi: "pi-network",
   eth: "ethereum",
   bnb: "binancecoin",
-  xrp: "ripple",
+  xrp: "ripple"
 };
 
 export const revalidate = 30;
@@ -27,21 +27,35 @@ export async function GET(request: Request) {
 
   // Fetch price in DKK for the symbol
   let priceDkk: number | undefined;
-  if (symbol === "pi") {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || ""}/api/crypto/pi?vs=dkk`, { cache: "no-store" });
-    const json = await res.json();
-    priceDkk = json?.data?.dkk;
-  } else {
-    const res = await fetch(`http://localhost:3000/api/crypto/tickers?ids=${id}&vs=dkk`, { cache: "no-store" });
-    const json = await res.json();
-    priceDkk = json?.data?.[id]?.dkk;
+  try {
+    if (symbol === "pi") {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/crypto/pi?vs=dkk`, { cache: "no-store" });
+      if (!res.ok) {
+        console.error('PI API failed:', await res.text());
+        throw new Error('PI API failed');
+      }
+      const json = await res.json();
+      priceDkk = json?.data?.dkk;
+    } else {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/crypto/tickers?ids=${id}&vs=dkk`, { cache: "no-store" });
+      if (!res.ok) {
+        console.error('Tickers API failed:', await res.text());
+        throw new Error('Tickers API failed');
+      }
+      const json = await res.json();
+      priceDkk = json?.data?.[id]?.dkk;
+    }
+  } catch (error) {
+    console.error('Error fetching price:', error);
+    return NextResponse.json({ error: "Failed to fetch cryptocurrency price" }, { status: 502 });
   }
 
   if (typeof priceDkk !== "number" || priceDkk <= 0) {
     return NextResponse.json({ error: "Failed to get price" }, { status: 502 });
   }
 
-  const amountCoin = amountDkk / priceDkk;
+  // Add 25 DKK fee for crypto transactions
+  const amountCoin = (amountDkk + 25) / priceDkk;
   const out = {
     symbol,
     amountDkk,
