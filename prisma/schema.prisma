@@ -1,0 +1,286 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================
+// Enums
+// =====================
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum RideStatus {
+  PENDING
+  PAID
+  PROGRESSING
+  CONFIRMED
+  DISPATCHED
+  ONGOING
+  PICKED_UP
+  DELIVERED
+  COMPLETED
+  CANCELED
+  REFUNDING
+  REFUNDED
+}
+
+enum VehicleKey {
+  SEDAN5
+  SEVEN_NO_BAG
+  VAN
+  LIMO
+  // Allow dynamic keys for new vehicle types
+}
+
+// =====================
+// Models
+// =====================
+
+model User {
+  id                  Int       @id @default(autoincrement())
+  email               String    @unique
+  hashedPassword      String
+  firstName           String
+  lastName            String
+  phone               String
+  address             String
+  role                Role      @default(USER)
+  emailVerified       Boolean   @default(false)
+  emailVerifyCode     String?
+  emailVerifyExpires  DateTime?
+  pendingEmail        String?
+  pendingEmailCode    String?
+  pendingEmailExpires DateTime?
+  resetToken          String?
+  resetExpires        DateTime?
+  createdAt           DateTime  @default(now())
+  canPayByInvoice     Boolean   @default(false)
+
+  rides      Ride[]
+  favorites  FavoriteAddress[]
+  complaints Complaint[]
+  invoices   Invoice[]
+}
+
+model VehicleType {
+  id         Int        @id @default(autoincrement())
+  key        String     @unique
+  title      String
+  capacity   Int        @default(4)
+  active     Boolean    @default(true)
+  // multiplier يضاعف السعر الأساسي (حسب قواعد النهار/الليل)
+  multiplier Float      @default(1.0)
+  note       String?
+
+  rides Ride[]
+}
+
+model FavoriteAddress {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  label     String
+  address             String    @default("")
+  lat       Float?
+  lon       Float?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Settings {
+  id           Int     @id @default(1)
+  // Company info
+  brandName    String? @default("944 Trafik")
+  contactEmail String? @default("trafik@944.dk")
+  contactPhone String? @default("26444944")
+  addressCity  String? @default("Frederikssund")
+  // Day (06:00–18:00)
+  dayBase      Float   @default(40)
+  dayPerKm     Float   @default(12.75)
+  dayPerMin    Float   @default(5.75)
+  // Night & Holidays
+  nightBase    Float   @default(60)
+  nightPerKm   Float   @default(16)
+  nightPerMin  Float   @default(7)
+  // Business hours
+  workStart    String  @default("06:00")
+  workEnd      String  @default("18:00")
+}
+
+model Ride {
+  id             Int        @id @default(autoincrement())
+  user           User       @relation(fields: [userId], references: [id])
+  userId         Int
+  riderName      String
+  passengers     Int        @default(1)
+  pickupAddress  String
+  dropoffAddress String
+  scheduled      Boolean    @default(false)
+  pickupTime     DateTime
+  distanceKm     Float?
+  durationMin    Int?
+  price          Int
+  status         String     @default("PENDING")
+  explanation    String     @default("Waiting for payment")
+  paymentStatus  String     @default("UNPAID")
+  createdAt      DateTime   @default(now())
+  paymentMethod  String?
+
+  vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
+  vehicleTypeId Int
+
+  complaints Complaint[]
+  invoices   Invoice[]
+
+  @@index([userId])
+  @@index([vehicleTypeId])
+}
+
+
+// === Added by assistant (crypto payments) ===
+model CryptoWallet {
+  id        String   @id @default(cuid())
+  symbol    String   // 'usdt' | 'usdc' | 'btc' | 'pi'
+  network   String   // e.g., TRC20, ERC20, BTC
+  address   String
+  isActive  Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime?
+
+  @@index([symbol, isActive])
+}
+
+model CryptoPayment {
+  id         String   @id @default(cuid())
+  userId     String?
+  symbol     String
+  network    String
+  addressId  String?
+  address    String
+  amountDkk  Float
+  amountCoin Float
+  status     String   @default("pending") // pending, confirmed, rejected
+  createdAt  DateTime @default(now())
+}
+
+
+// === Added by assistant (card payments) ===
+model CardPayment {
+  id        String   @id @default(cuid())
+  userId    String?
+  amountDkk Float
+  status    String   @default("paid") // paid, refunded, failed
+  createdAt DateTime @default(now())
+}
+
+// === Added by assistant (PayPal payments) ===
+model PayPalPayment {
+  id            String   @id @default(cuid())
+  userId        String?
+  amountDkk     Float
+  status        String   @default("paid") // paid, refunded, failed
+  paypalOrderId String
+  createdAt     DateTime @default(now())
+}
+
+// === Added by assistant (Revolut payments) ===
+model RevolutPayment {
+  id         String   @id @default(cuid())
+  userId     String?
+  amountDkk  Float
+  status     String   @default("paid") // paid, refunded, failed
+  paymentId  String
+  createdAt  DateTime @default(now())
+}
+
+// === Added by assistant (Payment Methods) ===
+model PaymentMethod {
+  id                Int      @id @default(autoincrement())
+  key               String   @unique // 'card', 'crypto', 'paypal', 'revolut', 'invoice'
+  title             String
+  description       String?
+  isActive          Boolean  @default(true)
+  // Development mode settings
+  devPublicKey      String?
+  devSecretKey      String?
+  devWebhookSecret  String?
+  // Production mode settings
+  prodPublicKey     String?
+  prodSecretKey     String?
+  prodWebhookSecret String?
+  // Additional settings for different payment providers
+  devClientId       String? // For PayPal, Revolut
+  prodClientId      String? // For PayPal, Revolut
+  devApiUrl         String? // For Revolut
+  prodApiUrl        String? // For Revolut
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// === Added by assistant (Audit Logging) ===
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  event     String
+  userId    String?
+  ipAddress String?
+  userAgent String?
+  metadata  Json     @default("{}")
+  severity  String   @default("low") // low, medium, high, critical
+  timestamp DateTime @default(now())
+
+  @@index([event])
+  @@index([userId])
+  @@index([ipAddress])
+  @@index([timestamp])
+  @@index([severity])
+}
+
+// === Added by assistant (Complaints System) ===
+model Complaint {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  rideId        Int
+  complaint     Json     // Changed to Json to store array of conversation messages
+  status        String   @default("OPEN") // OPEN, CLOSED, ACCEPTED
+  adminDecision String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+  ride Ride @relation(fields: [rideId], references: [id])
+
+  @@index([userId])
+  @@index([rideId])
+  @@index([status])
+}
+
+// === Invoice Model ===
+model Invoice {
+  id            Int      @id @default(autoincrement())
+  invoiceNumber String   @unique
+  userId        Int
+  rideId        Int
+  dueDate       DateTime
+  paymentStatus String   @default("UNPAID") // UNPAID, PAID, OVERDUE
+  status        Int      @default(1) // 1 = active, 0 = cancelled
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("invoice")
+
+  ride Ride @relation(fields: [rideId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([rideId])
+  @@index([paymentStatus])
+  @@index([status])
+}

@@ -1,0 +1,14 @@
+-- CreateTable
+CREATE TABLE `Settings` (
+    `id` INTEGER NOT NULL DEFAULT 1,
+    `dayBase` DOUBLE NOT NULL DEFAULT 40,
+    `dayPerKm` DOUBLE NOT NULL DEFAULT 12.75,
+    `dayPerMin` DOUBLE NOT NULL DEFAULT 5.75,
+    `nightBase` DOUBLE NOT NULL DEFAULT 60,
+    `nightPerKm` DOUBLE NOT NULL DEFAULT 16,
+    `nightPerMin` DOUBLE NOT NULL DEFAULT 7,
+    `workStart` VARCHAR(191) NOT NULL DEFAULT '06:00',
+    `workEnd` VARCHAR(191) NOT NULL DEFAULT '18:00',
+
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

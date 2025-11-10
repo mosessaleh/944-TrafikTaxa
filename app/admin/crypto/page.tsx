@@ -1,0 +1,233 @@
+
+"use client";
+import useSWR, { mutate } from "swr";
+import { useEffect, useMemo, useState } from "react";
+import { SYMBOLS, getCoinGeckoId, getNetworks, getCoinLogoUrl } from "@/lib/crypto";
+import toast from "react-hot-toast";
+import ErrorBoundary from "@/components/error-boundary";
+
+type WalletRow = { id: string; symbol: string; network: string; address: string; isActive: boolean; createdAt: string };
+type WalletsResp = { wallets: WalletRow[] };
+type PricesResp = { source: string; last_updated: string; vs: string[]; data: Record<string, { usd?: number; dkk?: number }> };
+
+async function fetcher(url: string) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function Modal({ open, onClose, children }:{ open:boolean; onClose:()=>void; children: React.ReactNode }){
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border bg-white p-6" onClick={e=>e.stopPropagation()}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export default function AdminCryptoPage(){
+  const { data: walletsData, error: walletsErr, isLoading: walletsLoading } = useSWR<WalletsResp>("/api/admin/crypto/symbols", fetcher, { refreshInterval: 30_000 });
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const ids = useMemo(()=>{
+    const list = (walletsData?.wallets || []).map(w => getCoinGeckoId(w.symbol)).filter(Boolean) as string[];
+    const unique = Array.from(new Set(list));
+    return unique.join(",");
+  }, [walletsData]);
+
+  const { data: prices } = useSWR<PricesResp>(ids ? `/api/crypto/tickers?ids=${encodeURIComponent(ids)}&vs=usd,dkk` : null, fetcher, { refreshInterval: 60_000 });
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [delOpen, setDelOpen] = useState(false);
+
+  const [newSymbol, setNewSymbol] = useState<string>("usdt");
+  const [newNetwork, setNewNetwork] = useState<string>("TRC20");
+  const [newAddress, setNewAddress] = useState<string>("");
+
+  useEffect(()=>{
+    const nets = getNetworks(newSymbol);
+    if (nets.length) setNewNetwork(nets[0]);
+  }, [newSymbol]);
+
+  const rows = (walletsData?.wallets || []).sort((a,b)=>a.symbol.localeCompare(b.symbol));
+
+  const priceOf = (symbol: string) => {
+    const id = getCoinGeckoId(symbol);
+    if (!id) return { usd: undefined, dkk: undefined };
+    const row = (prices?.data as any)?.[id] || {};
+    return { usd: row.usd, dkk: row.dkk };
+  };
+
+  async function addCurrency(){
+    console.log('Adding currency:', { symbol: newSymbol, network: newNetwork, address: newAddress });
+    const res = await fetch("/api/admin/crypto/wallets", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ symbol: newSymbol, network: newNetwork, address: newAddress })
+    });
+    console.log('Response status:', res.status);
+    const responseText = await res.text();
+    console.log('Response text:', responseText);
+    if (!res.ok){
+      toast.error(responseText);
+      return;
+    }
+    setAddOpen(false); setNewAddress("");
+    mutate("/api/admin/crypto/symbols");
+  }
+
+  async function setActive(active:boolean){
+    if (!selected) return;
+    const res = await fetch(`/api/admin/crypto/wallets/${encodeURIComponent(selected)}`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ active })
+    });
+    if (!res.ok){ toast.error(await res.text()); return; }
+    setEditOpen(false);
+    mutate("/api/admin/crypto/symbols");
+  }
+
+  async function deleteWallet(){
+    if (!selected) return;
+    const res = await fetch(`/api/admin/crypto/wallets/${encodeURIComponent(selected)}`, { method: "DELETE" });
+    if (!res.ok){ toast.error(await res.text()); return; }
+    setDelOpen(false); setSelected(null);
+    mutate("/api/admin/crypto/symbols");
+  }
+
+  return (
+    <ErrorBoundary>
+      <div className="p-6 space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Crypto — Wallets & Prices</h1>
+          <p className="text-sm text-gray-500">Source: {prices?.source || "—"} • Last: {prices?.last_updated ? new Date(prices.last_updated).toLocaleString() : "—"}</p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button className="px-3 py-2 rounded-xl border" onClick={()=>setAddOpen(true)}>Add</button>
+          <button className="px-3 py-2 rounded-xl border disabled:opacity-40" disabled={!selected} onClick={()=>setEditOpen(true)}>Edit</button>
+          <button className="px-3 py-2 rounded-xl border disabled:opacity-40" disabled={!selected} onClick={()=>setDelOpen(true)}>Delete</button>
+        </div>
+
+        <div className="overflow-x-auto rounded-2xl border">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left">Coin</th>
+                <th className="px-4 py-3 text-left">Network</th>
+                <th className="px-4 py-3 text-left">Address</th>
+                <th className="px-4 py-3 text-left">Active</th>
+                <th className="px-4 py-3 text-left">Price (USD)</th>
+                <th className="px-4 py-3 text-left">Price (DKK)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {walletsLoading && (
+                <tr><td className="px-4 py-3" colSpan={6}>Loading...</td></tr>
+              )}
+              {walletsErr && (
+                <tr><td className="px-4 py-3 text-red-600" colSpan={6}>Failed to load wallets.</td></tr>
+              )}
+              {!walletsLoading && !walletsErr && rows.map(row => {
+                const p = priceOf(row.symbol);
+                const isSelected = selected === row.id;
+                return (
+                  <tr key={row.id} className={`border-t ${isSelected ? "bg-blue-50" : ""}`} onClick={()=>setSelected(row.id)}>
+                    <td className="px-4 py-3 font-semibold flex items-center gap-2">
+                      <img src={getCoinLogoUrl(row.symbol)} alt={row.symbol} className="w-6 h-6 rounded-full" />
+                      {row.symbol.toUpperCase()}
+                    </td>
+                    <td className="px-4 py-3">{row.network}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{row.address}</td>
+                    <td className="px-4 py-3">{row.isActive ? "Yes" : "No"}</td>
+                    <td className="px-4 py-3">{p.usd !== undefined ? `$${p.usd}` : "—"}</td>
+                    <td className="px-4 py-3">{p.dkk !== undefined ? `${p.dkk} kr` : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <Modal open={addOpen} onClose={()=>setAddOpen(false)}>
+          <div className="grid gap-4">
+            <h3 className="text-lg font-semibold">Add</h3>
+
+            <label className="grid gap-1">
+              <span className="text-sm text-gray-500">Name</span>
+              <select value={newSymbol} onChange={e=>setNewSymbol(e.target.value)} className="rounded-xl border px-3 py-2">
+                {SYMBOLS.map(s => (<option key={s.id} value={s.id}>{s.label}</option>))}
+              </select>
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-sm text-gray-500">الشبكة</span>
+              <select value={newNetwork} onChange={e=>setNewNetwork(e.target.value)} className="rounded-xl border px-3 py-2">
+                {getNetworks(newSymbol).map(n => (<option key={n} value={n}>{n}</option>))}
+              </select>
+            </label>
+
+            <label className="grid gap-1">
+              <span className="text-sm text-gray-500">Wallet address</span>
+              <input value={newAddress} onChange={e=>setNewAddress(e.target.value)} className="rounded-xl border px-3 py-2" placeholder="Your wallet address" />
+            </label>
+
+            <div className="flex gap-2 justify-end">
+              <button className="px-3 py-2 rounded-xl border" onClick={()=>setAddOpen(false)}>Cancel</button>
+              <button className="px-3 py-2 rounded-xl border bg-black text-white" onClick={addCurrency}>Save</button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal open={editOpen} onClose={()=>setEditOpen(false)}>
+          <div className="grid gap-4">
+            <h3 className="text-lg font-semibold">Edit Wallet</h3>
+            {selected && (() => {
+              const wallet = rows.find(r => r.id === selected);
+              return wallet ? (
+                <div className="text-sm space-y-1">
+                  <div>Coin: <span className="font-semibold">{wallet.symbol.toUpperCase()}</span></div>
+                  <div>Network: <span className="font-semibold">{wallet.network}</span></div>
+                  <div>Address: <span className="font-mono text-xs">{wallet.address}</span></div>
+                  <div>Active: <span className="font-semibold">{wallet.isActive ? "Yes" : "No"}</span></div>
+                </div>
+              ) : null;
+            })()}
+            <div className="grid gap-2">
+              <button className="px-3 py-2 rounded-xl border" onClick={()=>setActive(true)}>Activate</button>
+              <button className="px-3 py-2 rounded-xl border" onClick={()=>setActive(false)}>Deactivate</button>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button className="px-3 py-2 rounded-xl border" onClick={()=>setEditOpen(false)}>Close</button>
+            </div>
+          </div>
+        </Modal>
+
+        <Modal open={delOpen} onClose={()=>setDelOpen(false)}>
+          <div className="grid gap-4">
+            <h3 className="text-lg font-semibold text-red-600">Delete Wallet</h3>
+            {selected && (() => {
+              const wallet = rows.find(r => r.id === selected);
+              return wallet ? (
+                <div className="text-sm space-y-1">
+                  <p>This will remove this wallet:</p>
+                  <div>Coin: <span className="font-semibold">{wallet.symbol.toUpperCase()}</span></div>
+                  <div>Network: <span className="font-semibold">{wallet.network}</span></div>
+                  <div>Address: <span className="font-mono text-xs">{wallet.address}</span></div>
+                </div>
+              ) : null;
+            })()}
+            <div className="flex gap-2 justify-end">
+              <button className="px-3 py-2 rounded-xl border" onClick={()=>setDelOpen(false)}>Cancel</button>
+              <button className="px-3 py-2 rounded-xl border bg-red-600 text-white" onClick={deleteWallet}>Delete</button>
+            </div>
+          </div>
+        </Modal>
+      </div>
+    </ErrorBoundary>
+  );
+}
