@@ -6,17 +6,18 @@ function CardPaymentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const bookingId = searchParams.get("booking_id");
+  const invoiceId = searchParams.get("invoice_id");
 
   const [amount, setAmount] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
 
   useEffect(() => {
-    console.log("CardPayment: Initializing payment", { bookingId });
+    console.log("CardPayment: Initializing payment", { bookingId, invoiceId });
 
-    if (!bookingId) {
-      console.error("CardPayment: No booking ID specified");
-      setError("No booking specified");
+    if (!bookingId && !invoiceId) {
+      console.error("CardPayment: No booking or invoice ID specified");
+      setError("No booking or invoice specified");
       setLoading(false);
       return;
     }
@@ -25,8 +26,33 @@ function CardPaymentContent() {
       try {
         console.log("CardPayment: Fetching booking details");
 
-        // Fetch booking details to get the amount
-        const bookingResponse = await fetch(`/api/bookings/${bookingId}`, {
+        let actualBookingId = bookingId;
+        let bookingData;
+
+        if (invoiceId && !bookingId) {
+          // If we have invoice ID but no booking ID, fetch invoice data to get booking ID
+          console.log("CardPayment: Fetching invoice data to get booking ID");
+          const invoiceResponse = await fetch(`/api/invoices/${invoiceId}/data`, {
+            credentials: "include",
+          });
+
+          if (!invoiceResponse.ok) {
+            throw new Error("Failed to fetch invoice details");
+          }
+
+          const invoiceData = await invoiceResponse.json();
+          console.log("CardPayment: Invoice data received", invoiceData);
+          
+          if (!invoiceData.invoice || !invoiceData.invoice.rideId) {
+            throw new Error("Invoice data incomplete");
+          }
+
+          actualBookingId = invoiceData.invoice.rideId.toString();
+          console.log("CardPayment: Extracted booking ID from invoice", actualBookingId);
+        }
+
+        // Fetch booking details using the actual booking ID
+        const bookingResponse = await fetch(`/api/bookings/${actualBookingId}`, {
           credentials: "include",
         });
 
@@ -34,7 +60,7 @@ function CardPaymentContent() {
           throw new Error("Failed to fetch booking details");
         }
 
-        const bookingData = await bookingResponse.json();
+        bookingData = await bookingResponse.json();
         console.log("CardPayment: Booking data received", bookingData);
 
         // The API returns { ok: true, ride: {...} }
@@ -57,27 +83,41 @@ function CardPaymentContent() {
     };
 
     initializePayment();
-  }, [bookingId]);
+  }, [bookingId, invoiceId]);
 
   const handlePayment = async () => {
-    if (!bookingId || !amount) return;
+    if (!amount) return;
+    
+    // Determine the actual booking ID to use
+    const actualBookingId = invoiceId && !bookingId ?
+      (await getBookingIdFromInvoice()) :
+      bookingId;
+    
+    if (!actualBookingId) {
+      setError("No valid booking ID found");
+      return;
+    }
 
     setLoading(true);
     setError("");
 
     try {
       // Confirm mock payment with the API
-      console.log("CardPayment: Processing mock payment");
+      console.log("CardPayment: Processing mock payment for booking", actualBookingId);
       const confirmResponse = await fetch('/api/payments/card/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ paymentIntentId: `pi_mock_${Date.now()}_success` })
+        body: JSON.stringify({
+          paymentIntentId: `pi_mock_${Date.now()}_success`,
+          bookingId: parseInt(actualBookingId), // تحويل إلى number
+          ...(invoiceId && { invoiceId: parseInt(invoiceId) }) // شرطي فقط إذا كان invoiceId موجود
+        })
       });
 
       if (confirmResponse.ok) {
         console.log("CardPayment: Mock payment confirmed, redirecting");
-        router.push(`/pay/card/success?mock=true&booking_id=${bookingId}`);
+        router.push(`/pay/card/success?mock=true&booking_id=${actualBookingId}&invoice_id=${invoiceId || ''}`);
       } else {
         throw new Error('Mock payment confirmation failed');
       }
@@ -85,6 +125,24 @@ function CardPaymentContent() {
       console.error("CardPayment: Payment failed", err);
       setError(err.message || "Payment failed");
       setLoading(false);
+    }
+  };
+
+  const getBookingIdFromInvoice = async (): Promise<string | null> => {
+    try {
+      const invoiceResponse = await fetch(`/api/invoices/${invoiceId}/data`, {
+        credentials: "include",
+      });
+
+      if (!invoiceResponse.ok) {
+        throw new Error("Failed to fetch invoice details");
+      }
+
+      const invoiceData = await invoiceResponse.json();
+      return invoiceData.invoice?.rideId?.toString() || null;
+    } catch (err) {
+      console.error("Failed to get booking ID from invoice:", err);
+      return null;
     }
   };
 

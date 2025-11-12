@@ -26,194 +26,212 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const { paymentIntentId } = parsed.data;
-    console.log("card/confirm: Payment intent ID", paymentIntentId);
+    const { paymentIntentId, bookingId, invoiceId } = parsed.data;
+    console.log("card/confirm: Parsed data", { paymentIntentId, bookingId, invoiceId });
+
+    let amountDkk = 0;
+    let booking = null;
 
     // Handle mock payments for admin users
     if (paymentIntentId.startsWith('pi_mock_')) {
       console.log("card/confirm: Processing mock payment for admin user");
 
-      // Mock payment - simulate success
-      // For admin users, get the actual booking amount from database
-      console.log("card/confirm: Finding unpaid booking for user to get amount");
-
-      const booking = await prisma.ride.findFirst({
-        where: { userId: me.id, status: 'PENDING' },
-        orderBy: { createdAt: 'desc' }
-      });
+      if (bookingId) {
+        // Find booking by ID
+        booking = await prisma.ride.findUnique({
+          where: { id: bookingId },
+          include: { user: true, vehicleType: true }
+        });
+      } else if (invoiceId) {
+        // Find booking from invoice
+        const invoice = await prisma.invoice.findUnique({
+          where: { id: invoiceId },
+          include: { ride: { include: { user: true, vehicleType: true } } }
+        });
+        if (invoice) {
+          booking = invoice.ride;
+        }
+      } else {
+        // Fallback: find first unpaid booking
+        booking = await prisma.ride.findFirst({
+          where: { userId: me.id, paymentStatus: 'UNPAID' },
+          orderBy: { createdAt: 'desc' },
+          include: { user: true, vehicleType: true }
+        });
+      }
 
       if (!booking) {
         console.error("card/confirm: No unpaid booking found for user");
         return NextResponse.json({ error: "No unpaid booking found" }, { status: 400 });
       }
 
-      const amountDkk = booking.price; // Use actual booking price
+      amountDkk = booking.price;
       console.log("card/confirm: Mock amount from booking", amountDkk, "bookingId:", booking.id);
 
-      // Save payment record
-      console.log("card/confirm: Creating payment record with userId:", me.id.toString(), "amountDkk:", amountDkk);
-      const payment = await prisma.cardPayment.create({
-        data: {
-          userId: me.id.toString(),
-          amountDkk: amountDkk, // Use actual booking amount
-          status: "paid",
-        },
-      });
-      console.log("card/confirm: Mock payment record created", { paymentId: payment.id, userId: me.id.toString() });
+    } else {
+      // Real Stripe payment processing
+      console.log("card/confirm: Processing real Stripe payment");
 
-      // Update booking status to paid and confirmed
-      console.log("card/confirm: Updating booking status", { bookingId: booking.id });
+      const paymentIntent = await retrievePaymentIntent(paymentIntentId);
+      console.log("card/confirm: Payment intent status", paymentIntent.status);
 
-      await prisma.ride.update({
-        where: { id: booking.id },
-        data: {
-          status: 'CONFIRMED'
+      if (paymentIntent.status !== 'succeeded') {
+        console.error("card/confirm: Payment not completed", { status: paymentIntent.status });
+        return NextResponse.json({ error: "Payment not completed" }, { status: 400 });
+      }
+
+      amountDkk = paymentIntent.amount / 100; // Convert from øre to DKK
+
+      if (bookingId) {
+        booking = await prisma.ride.findUnique({
+          where: { id: bookingId },
+          include: { user: true, vehicleType: true }
+        });
+      } else if (invoiceId) {
+        const invoice = await prisma.invoice.findUnique({
+          where: { id: invoiceId },
+          include: { ride: { include: { user: true, vehicleType: true } } }
+        });
+        if (invoice) {
+          booking = invoice.ride;
         }
-      });
-
-      // Send confirmation emails
-      const bookingDetails = {
-        pickupAddress: booking.pickupAddress,
-        dropoffAddress: booking.dropoffAddress,
-        pickupTime: booking.pickupTime,
-        passengers: booking.passengers,
-        vehicleType: 'Standard',
-        price: booking.price,
-        id: booking.id
-      };
-
-      console.log("card/confirm: Sending confirmation emails");
-      await notifyUserBookingConfirmation(me.email, me.firstName, bookingDetails).catch((e) => {
-        console.error("card/confirm: Failed to send booking confirmation email", e);
-      });
-      await notifyUserPaymentReceived(me.email, me.firstName, {
-        amount: amountDkk,
-        method: 'Mock Card Payment',
-        transactionId: paymentIntentId,
-        bookingId: booking.id.toString(),
-      }).catch((e) => {
-        console.error("card/confirm: Failed to send payment confirmation email", e);
-      });
-
-      await notifyAdmin(`New Booking Payment - Admin Mode (Mock)`, `
-        <p>A new booking has been created in admin mode with mock payment:</p>
-        <ul>
-          <li><strong>User:</strong> ${me.firstName} ${me.lastName} (${me.email})</li>
-          <li><strong>Booking ID:</strong> ${booking.id}</li>
-          <li><strong>Amount:</strong> ${amountDkk} DKK</li>
-          <li><strong>Payment Method:</strong> Mock Card Payment</li>
-        </ul>
-      `).catch((e) => {
-        console.error("card/confirm: Failed to send admin notification", e);
-      });
-
-      console.log("card/confirm: Mock payment confirmation complete");
-      return NextResponse.json({
-        ok: true,
-        paymentId: payment.id,
-        amount: amountDkk,
-      });
+      }
     }
 
-    // Real Stripe payment processing
-    console.log("card/confirm: Processing real Stripe payment");
-
-    // Verify payment with Stripe
-    console.log("card/confirm: Retrieving payment intent from Stripe");
-    const paymentIntent = await retrievePaymentIntent(paymentIntentId);
-
-    console.log("card/confirm: Payment intent status", paymentIntent.status);
-
-    if (paymentIntent.status !== 'succeeded') {
-      console.error("card/confirm: Payment not completed", { status: paymentIntent.status });
-      return NextResponse.json({ error: "Payment not completed" }, { status: 400 });
+    if (!booking) {
+      console.error("card/confirm: No booking found for payment confirmation");
+      return NextResponse.json({ error: "Booking not found" }, { status: 400 });
     }
 
-    // Extract metadata
-    const amountDkk = paymentIntent.amount / 100; // Convert from øre to DKK
-    const bookingId = paymentIntent.metadata?.bookingId;
-    console.log("card/confirm: Extracted data", { amountDkk, bookingId });
+    // Check authorization
+    if (booking.userId !== me.id && me.role !== 'ADMIN') {
+      console.error("card/confirm: Access denied for booking", { bookingId: booking.id, userId: me.id });
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
 
-    // Save payment record
+    // === STEP 1: Create payment record in database ===
     console.log("card/confirm: Creating payment record in database");
     const payment = await prisma.cardPayment.create({
       data: {
         userId: me.id.toString(),
-        amountDkk,
+        amountDkk: amountDkk,
         status: "paid",
       },
     });
-    console.log("card/confirm: Payment record created", { paymentId: payment.id });
+    console.log("card/confirm: Payment record created successfully", { 
+      paymentId: payment.id, 
+      amountDkk: amountDkk,
+      userId: me.id,
+      bookingId: booking.id
+    });
 
-    // Update booking status to paid and confirmed
-    if (bookingId && me.email) {
-      console.log("card/confirm: Updating booking status", { bookingId });
-
-      const booking = await prisma.ride.findUnique({
-        where: { id: parseInt(bookingId) }
-      });
-
-      if (booking) {
-        console.log("card/confirm: Found booking, updating to paid and confirmed");
-
-        await prisma.ride.update({
-          where: { id: booking.id },
-          data: {
-            status: 'CONFIRMED'
-          }
-        });
-
-        // Send confirmation emails
-        const bookingDetails = {
-          pickupAddress: booking.pickupAddress,
-          dropoffAddress: booking.dropoffAddress,
-          pickupTime: booking.pickupTime,
-          passengers: booking.passengers,
-          vehicleType: 'Standard',
-          price: booking.price,
-          id: booking.id
-        };
-
-        console.log("card/confirm: Sending confirmation emails");
-        await notifyUserBookingConfirmation(me.email, me.firstName, bookingDetails).catch((e) => {
-          console.error("card/confirm: Failed to send booking confirmation email", e);
-        });
-        await notifyUserPaymentReceived(me.email, me.firstName, {
-          amount: amountDkk,
-          method: 'Credit/Debit Card',
-          transactionId: paymentIntentId,
-          bookingId: booking.id.toString(),
-        }).catch((e) => {
-          console.error("card/confirm: Failed to send payment confirmation email", e);
-        });
-
-        await notifyAdmin(`New Booking Payment`, `
-          <p>A new booking has been created with successful payment:</p>
-          <ul>
-            <li><strong>User:</strong> ${me.firstName} ${me.lastName} (${me.email})</li>
-            <li><strong>Booking ID:</strong> ${booking.id}</li>
-            <li><strong>Amount:</strong> ${amountDkk} DKK</li>
-            <li><strong>Payment Method:</strong> Card Payment</li>
-            <li><strong>Transaction ID:</strong> ${paymentIntentId}</li>
-          </ul>
-        `).catch((e) => {
-          console.error("card/confirm: Failed to send admin notification", e);
-        });
-      } else {
-        console.warn("card/confirm: Booking not found", { bookingId });
+    // === STEP 2: Update booking status ===
+    console.log("card/confirm: Updating booking status to CONFIRMED and PAID");
+    await prisma.ride.update({
+      where: { id: booking.id },
+      data: {
+        status: 'CONFIRMED',
+        paymentStatus: 'PAID',
+        paymentMethod: 'card'
       }
-    } else {
-      console.warn("card/confirm: No booking ID or user email for booking update");
+    });
+    console.log("card/confirm: Booking status updated successfully");
+
+    // === STEP 3: Create/Update invoice as receipt ===
+    console.log("card/confirm: Checking/creating invoice as receipt");
+    let invoice = await prisma.invoice.findFirst({
+      where: { rideId: booking.id }
+    });
+    
+    if (!invoice) {
+      // إنشاء فاتورة كإيصال لأن طريقة الدفع ليست "invoice"
+      console.log("card/confirm: Creating receipt invoice");
+      const invoiceNumber = `REC${booking.id.toString().padStart(6, '0')}`;
+      const dueDate = new Date();
+      dueDate.setDate(dueDate.getDate() + 8); // 8 أيام
+      
+      invoice = await prisma.invoice.create({
+        data: {
+          invoiceNumber: invoiceNumber,
+          userId: booking.userId,
+          rideId: booking.id,
+          dueDate: dueDate,
+          paymentStatus: 'PAID', // مدفوعة فوراً
+          status: 1
+        }
+      });
+      console.log("card/confirm: Receipt invoice created successfully", { invoiceId: invoice.id });
+    } else if (invoice.paymentStatus !== 'PAID') {
+      // تحديث الفاتورة الموجودة إلى مدفوعة فقط إذا لم تكن مدفوعة
+      console.log("card/confirm: Updating existing invoice status to PAID");
+      await prisma.invoice.update({
+        where: { id: invoice.id },
+        data: { paymentStatus: 'PAID' }
+      });
+      console.log("card/confirm: Existing invoice status updated successfully");
     }
 
-    console.log("card/confirm: Payment confirmation complete");
+    // === STEP 4: Send confirmation emails (optional but recommended) ===
+    const bookingDetails = {
+      pickupAddress: booking.pickupAddress,
+      dropoffAddress: booking.dropoffAddress,
+      pickupTime: booking.pickupTime,
+      passengers: booking.passengers,
+      vehicleType: booking.vehicleType?.title || 'Standard',
+      price: booking.price,
+      id: booking.id
+    };
+
+    console.log("card/confirm: Sending confirmation emails");
+    try {
+      await notifyUserBookingConfirmation(me.email, me.firstName, bookingDetails);
+      console.log("card/confirm: Booking confirmation email sent");
+    } catch (e) {
+      console.error("card/confirm: Failed to send booking confirmation email", e);
+    }
+
+    try {
+      await notifyUserPaymentReceived(me.email, me.firstName, {
+        amount: amountDkk,
+        method: paymentIntentId.startsWith('pi_mock_') ? 'Mock Card Payment' : 'Credit/Debit Card',
+        transactionId: paymentIntentId,
+        bookingId: booking.id.toString(),
+        invoiceId: invoice.id.toString(),
+      });
+      console.log("card/confirm: Payment confirmation email sent");
+    } catch (e) {
+      console.error("card/confirm: Failed to send payment confirmation email", e);
+    }
+
+    try {
+      await notifyAdmin(`New Booking Payment`, `
+        <p>A new booking has been created with successful payment:</p>
+        <ul>
+          <li><strong>User:</strong> ${me.firstName} ${me.lastName} (${me.email})</li>
+          <li><strong>Booking ID:</strong> ${booking.id}</li>
+          <li><strong>Amount:</strong> ${amountDkk} DKK</li>
+          <li><strong>Payment Method:</strong> ${paymentIntentId.startsWith('pi_mock_') ? 'Mock Card Payment' : 'Card Payment'}</li>
+          <li><strong>Transaction ID:</strong> ${paymentIntentId}</li>
+        </ul>
+      `);
+      console.log("card/confirm: Admin notification sent");
+    } catch (e) {
+      console.error("card/confirm: Failed to send admin notification", e);
+    }
+
+    console.log("card/confirm: Payment confirmation completed successfully");
     return NextResponse.json({
       ok: true,
       paymentId: payment.id,
+      invoiceId: invoice.id,
       amount: amountDkk,
+      bookingId: booking.id,
     });
   } catch (e: any) {
     console.error("card/confirm failed:", e?.message || e);
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return NextResponse.json({ 
+      error: "Internal error",
+      details: process.env.NODE_ENV === 'development' ? e?.message : undefined
+    }, { status: 500 });
   }
 }

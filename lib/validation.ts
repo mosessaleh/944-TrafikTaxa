@@ -84,7 +84,8 @@ export type CardPaymentIntentInput = z.infer<typeof CardPaymentIntentSchema>;
 // Confirm Card Payment Schema
 export const ConfirmCardPaymentSchema = z.object({
   paymentIntentId: z.string().min(1),
-  bookingId: z.number().int().positive().optional()
+  bookingId: z.number().int().positive().optional(),
+  invoiceId: z.number().int().positive().optional()
 });
 
 export type ConfirmCardPaymentInput = z.infer<typeof ConfirmCardPaymentSchema>;

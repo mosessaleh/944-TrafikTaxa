@@ -57,7 +57,7 @@ export async function getUserFromCookie(){
       return null;
     }
 
-    const user = await (prisma as any).user.findUnique({
+    const user = await prisma.user.findUnique({
       where: { id: dec.id },
       select: {
         id: true,

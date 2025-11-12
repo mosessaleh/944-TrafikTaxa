@@ -125,6 +125,16 @@ export async function notifyUserBookingConfirmation(to: string, firstName: strin
 
 export async function notifyUserPaymentReceived(to: string, firstName: string, paymentDetails: any) {
   const subject = "Payment Received - Thank You! 💳";
+  
+  // تحديد رابط الفاتورة
+  const baseUrl = process.env.NODE_ENV === 'production'
+    ? process.env.NEXT_PUBLIC_BASE_URL || 'https://944.dk'
+    : 'http://localhost:3000';
+  
+  const invoiceUrl = paymentDetails.invoiceId
+    ? `${baseUrl}/invoices/${paymentDetails.invoiceId}`
+    : `${baseUrl}/bookings`;
+  
   const content = `
     <p>Dear ${firstName},</p>
     <p>We've successfully received your payment for the taxi booking.</p>
@@ -134,20 +144,25 @@ export async function notifyUserPaymentReceived(to: string, firstName: string, p
       <p><strong>Payment Method:</strong> ${paymentDetails.method}</p>
       <p><strong>Transaction ID:</strong> ${paymentDetails.transactionId}</p>
       <p><strong>Booking ID:</strong> #${paymentDetails.bookingId}</p>
+      ${paymentDetails.invoiceId ? `<p><strong>Invoice ID:</strong> #${paymentDetails.invoiceId}</p>` : ''}
     </div>
     <p>Your booking is now fully confirmed. Our driver will pick you up at the scheduled time.</p>
-    <p>A receipt has been added to your account history.</p>
+    ${paymentDetails.invoiceId ? `<p>Your receipt/invoice has been created and is ready for viewing. Click the button below to view and print your invoice.</p>` : `<p>A receipt has been added to your account history.</p>`}
     <p>Safe travels!</p>
   `;
-  const html = createEmailTemplate("Payment Received", content, "View Receipt", "https://944.dk/bookings");
+  const html = createEmailTemplate("Payment Received", content, "View Invoice/Receipt", invoiceUrl);
   return notifyUserEmail(to, subject, html);
 }
 
-export async function notifyUserInvoiceReady(to: string, firstName: string, invoiceDetails: any, invoicePath?: string) {
+export async function notifyUserInvoiceReady(to: string, firstName: string, invoiceDetails: any, invoiceId?: number) {
   const subject = "Your Invoice is Ready 📄";
+  const baseUrl = process.env.NODE_ENV === 'production'
+    ? process.env.NEXT_PUBLIC_BASE_URL || 'https://944.dk'
+    : 'http://localhost:3000';
+  
   const content = `
     <p>Dear ${firstName},</p>
-    <p>Your invoice for the taxi booking has been prepared and is attached to this email.</p>
+    <p>Your invoice for the taxi booking is now ready for viewing.</p>
     <div style="background-color: #f0f8ff; border-left: 4px solid #007bff; padding: 20px; margin: 20px 0;">
       <h3 style="margin: 0 0 10px 0; color: #333;">Invoice Details:</h3>
       <p><strong>Invoice Number:</strong> INV-${invoiceDetails.bookingId.toString().padStart(6, '0')}</p>
@@ -155,23 +170,20 @@ export async function notifyUserInvoiceReady(to: string, firstName: string, invo
       <p><strong>Amount:</strong> ${invoiceDetails.price} DKK</p>
       <p><strong>Due Date:</strong> ${new Date(Date.now() + 8 * 24 * 60 * 60 * 1000).toLocaleDateString('en-DK')}</p>
     </div>
-    <p>Please find your invoice attached to this email. Payment is due within 8 days.</p>
+    <p>You can view, print, and pay your invoice online. Click the button below to access your invoice.</p>
+    <p>Payment is due within 8 days from the invoice date.</p>
     <p>If you have any questions about this invoice, please contact us.</p>
     <p>Thank you for choosing 944 Trafik!</p>
   `;
-  const html = createEmailTemplate("Your Invoice is Ready", content);
+  const html = createEmailTemplate(
+    "Your Invoice is Ready",
+    content,
+    "View Invoice",
+    `${baseUrl}/invoices/${invoiceId || invoiceDetails.bookingId}`
+  );
 
-  // Prepare attachments if invoice path is provided
-  let attachments;
-  if (invoicePath) {
-    attachments = [{
-      filename: `INV-${invoiceDetails.bookingId.toString().padStart(6, '0')}.pdf`,
-      path: invoicePath,
-      contentType: 'application/pdf'
-    }];
-  }
-
-  return notifyUserEmail(to, subject, html, attachments);
+  // No PDF attachments - invoice is viewed online
+  return notifyUserEmail(to, subject, html);
 }
 
 export async function notifyAdmin(subject: string, body: string) {

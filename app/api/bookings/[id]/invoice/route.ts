@@ -39,15 +39,32 @@ export async function GET(
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Check if payment method is invoice
+    // Check if payment method is invoice OR if we have created a receipt invoice
     if (booking.paymentMethod !== 'invoice') {
-      return NextResponse.json({ error: 'Invoice not available for this booking' }, { status: 404 });
+      // Check if a receipt invoice exists for this booking (we create receipts for all payments now)
+      const existingInvoice = await prisma.invoice.findFirst({
+        where: { rideId: booking.id }
+      });
+      
+      if (!existingInvoice) {
+        return NextResponse.json({ error: 'Invoice not available for this booking' }, { status: 404 });
+      }
     }
+
+    // Get existing invoice for this booking
+    const existingInvoice = await prisma.invoice.findFirst({
+      where: { rideId: booking.id }
+    });
 
     // Create invoices directory structure: public/invoices/userId/invoiceNumber/
     const invoicesDir = path.join(process.cwd(), 'public', 'invoices');
     const userInvoicesDir = path.join(invoicesDir, booking.userId.toString());
-    const invoiceNumber = `INV-${booking.id.toString().padStart(6, '0')}`;
+    
+    // Use the existing invoice number if it exists, otherwise create one
+    const invoiceNumber = existingInvoice?.invoiceNumber || (booking.paymentMethod === 'invoice' ?
+      `INV-${booking.id.toString().padStart(6, '0')}` :
+      `REC-${booking.id.toString().padStart(6, '0')}`); // REC for receipts
+    
     const invoiceDir = path.join(userInvoicesDir, invoiceNumber);
 
     if (!fs.existsSync(invoicesDir)) {

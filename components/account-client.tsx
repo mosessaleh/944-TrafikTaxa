@@ -9,20 +9,26 @@ import ProfileEditClient from './profile-edit-client';
 // Invoice Actions Component
 function InvoiceActions({ bookingId }: { bookingId: number }) {
   const [invoiceStatus, setInvoiceStatus] = useState<'loading' | 'available' | 'not_available'>('loading');
+  const [invoiceId, setInvoiceId] = useState<number | null>(null);
 
   useEffect(() => {
     const checkInvoice = async () => {
       try {
-        const response = await fetch(`/api/bookings/${bookingId}/invoice`, {
-          method: 'HEAD',
+        // First, get the invoice ID by checking the invoices API
+        const invoiceResponse = await fetch(`/api/bookings/${bookingId}/invoice-id`, {
+          method: 'GET',
           credentials: 'include',
         });
-        if (response.ok) {
+        
+        if (invoiceResponse.ok) {
+          const invoiceData = await invoiceResponse.json();
+          setInvoiceId(invoiceData.invoiceId);
           setInvoiceStatus('available');
         } else {
           setInvoiceStatus('not_available');
         }
       } catch (error) {
+        console.error('Error checking invoice:', error);
         setInvoiceStatus('not_available');
       }
     };
@@ -32,37 +38,30 @@ function InvoiceActions({ bookingId }: { bookingId: number }) {
 
   if (invoiceStatus === 'loading') {
     return (
-      <div className="mt-2 text-sm text-slate-600">
-        Checking invoice status...
+      <div className="text-sm text-slate-600">
+        Checking receipt/invoice status...
       </div>
     );
   }
 
-  if (invoiceStatus === 'available') {
+  if (invoiceStatus === 'available' && invoiceId) {
     return (
-      <div className="mt-2 flex gap-3 text-sm">
+      <div className="flex gap-3 text-sm">
         <a
-          href={`/api/bookings/${bookingId}/invoice`}
+          href={`/invoices/${invoiceId}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-blue-600 hover:text-blue-800 underline"
+          className="text-blue-600 hover:text-blue-800 underline font-medium"
         >
-          📄 View Invoice
-        </a>
-        <a
-          href={`/api/bookings/${bookingId}/invoice?download=1`}
-          download={`INV-${bookingId.toString().padStart(6, '0')}.html`}
-          className="text-green-600 hover:text-green-800 underline"
-        >
-          ⬇️ Download Invoice
+          📄 View Receipt/Invoice
         </a>
       </div>
     );
   }
 
   return (
-    <div className="mt-2 text-sm text-amber-600">
-      Invoice not issued yet
+    <div className="text-sm text-amber-600">
+      Receipt/Invoice not available yet
     </div>
   );
 }
@@ -825,9 +824,19 @@ export default function AccountClient() {
                                       <p className="text-sm font-medium text-emerald-700">
                                         {ride.paymentMethod}
                                       </p>
-                                      {ride.paymentMethod === 'invoice' && (
-                                        <InvoiceActions bookingId={ride.id} />
-                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Invoice Actions - Show for all paid bookings since we create receipts */}
+                                {ride.paymentStatus === 'PAID' && (
+                                  <div>
+                                    <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                                      <span>📄</span>
+                                      Receipt/Invoice
+                                    </h4>
+                                    <div className="bg-blue-50 rounded-lg p-3">
+                                      <InvoiceActions bookingId={ride.id} />
                                     </div>
                                   </div>
                                 )}
@@ -1012,19 +1021,12 @@ export default function AccountClient() {
                         </div>
                         <div className="flex gap-2">
                           <a
-                            href={`/api/bookings/${invoice.rideId}/invoice`}
+                            href={`/invoices/${invoice.id}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
                           >
                             View Invoice
-                          </a>
-                          <a
-                            href={`/api/bookings/${invoice.rideId}/invoice?download=1`}
-                            download={`${invoice.invoiceNumber}.html`}
-                            className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-                          >
-                            Download
                           </a>
                         </div>
                       </div>

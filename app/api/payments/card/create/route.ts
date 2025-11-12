@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/session";
+import { getUserFromCookie } from "@/lib/auth";
 import { createPaymentIntent } from "@/lib/stripe";
 import { CardPaymentIntentSchema } from "@/lib/validation";
 import { prisma } from "@/lib/db";
@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   try {
     console.log("card/create: Starting payment intent creation");
 
-    const me = await getCurrentUser();
+    const me = await getUserFromCookie();
     if (!me) {
       console.error("card/create: User not authenticated");
       return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });

@@ -272,7 +272,7 @@ model Invoice {
   paymentStatus String   @default("UNPAID") // UNPAID, PAID, OVERDUE
   status        Int      @default(1) // 1 = active, 0 = cancelled
   createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime?
 
   @@map("invoice")
 

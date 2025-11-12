@@ -235,4 +235,85 @@ body{ @apply antialiased; }
   .success-state {
     @apply border-green-300 bg-green-50;
   }
+
+  /* A4 Print Styles for Invoice */
+  .invoice-page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 0 auto;
+    background: white;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  }
+
+  .invoice-content {
+    padding: 20mm;
+    font-family: 'Arial', sans-serif;
+    line-height: 1.4;
+  }
+
+  .print-only {
+    display: none;
+  }
+
+  .no-print {
+    display: block;
+  }
+}
+
+/* Print Media Styles */
+@media print {
+  /* Hide everything except the invoice */
+  body * {
+    visibility: hidden;
+  }
+  
+  .invoice-page,
+  .invoice-page * {
+    visibility: visible;
+  }
+  
+  .invoice-page {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    background: white;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  /* A4 Page Setup */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  /* Ensure proper text rendering in print */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Page breaks */
+  .invoice-section {
+    page-break-inside: avoid;
+  }
+
+  /* Remove hover effects in print */
+  button,
+  .hover\:shadow-lg:hover,
+  .hover\:scale-105:hover {
+    transform: none !important;
+    box-shadow: none !important;
+  }
 }
