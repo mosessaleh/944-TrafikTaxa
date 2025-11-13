@@ -8,12 +8,39 @@ const nextConfig = {
     removeConsole: process.env.NODE_ENV === 'production',
   },
 
-  // Image optimization
+  // CDN Configuration
+  assetPrefix: process.env.ASSET_PREFIX || '',
+  
+  // Enhanced Image optimization with CDN support
   images: {
     formats: ['image/webp', 'image/avif'],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
-    minimumCacheTTL: 60,
+    minimumCacheTTL: 31536000, // 1 year for production
+    dangerouslyAllowSVG: true,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
+    
+    // CDN domains for external images (if needed)
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: '**.cloudflare.com',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: '**.vercel.app',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'images.ctfassets.net',
+        port: '',
+        pathname: '/**',
+      },
+    ],
   },
 
   // Compression and caching
@@ -25,7 +52,7 @@ const nextConfig = {
   //   webpackBuildWorker: true,
   // },
 
-  // Headers for security and performance
+  // Enhanced headers for CDN and performance
   async headers() {
     return [
       {
@@ -47,14 +74,13 @@ const nextConfig = {
             key: 'Permissions-Policy',
             value: 'camera=(), microphone=(), geolocation=(), payment=()',
           },
-        ],
-      },
-      {
-        source: '/api/(.*)',
-        headers: [
           {
-            key: 'Cache-Control',
-            value: 'public, max-age=300, s-maxage=600, stale-while-revalidate=86400',
+            key: 'X-DNS-Prefetch-Control',
+            value: 'on',
+          },
+          {
+            key: 'Strict-Transport-Security',
+            value: 'max-age=31536000; includeSubDomains; preload',
           },
         ],
       },
@@ -64,6 +90,41 @@ const nextConfig = {
           {
             key: 'Cache-Control',
             value: 'public, max-age=31536000, immutable',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'public, s-maxage=31536000, immutable',
+          },
+        ],
+      },
+      {
+        source: '/images/(.*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+          {
+            key: 'CDN-Cache-Control',
+            value: 'public, s-maxage=31536000',
+          },
+        ],
+      },
+      {
+        source: '/(.*\\.(?:js|css|png|jpg|jpeg|gif|svg|webp|avif|ico|woff|woff2|ttf|eot))$',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=31536000, immutable',
+          },
+        ],
+      },
+      {
+        source: '/api/(.*)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=300, s-maxage=600, stale-while-revalidate=86400',
           },
         ],
       },

@@ -40,3 +40,19 @@ coverage
 /.firebase/firestore
 /.firebase/auth
 public/invoices
+
+# Documentation with sensitive details
+docs/API_DOCUMENTATION.md
+docs/PRACTICAL_EXAMPLES.md
+docs/DEVELOPER_GUIDE.md
+PROJECT_ANALYSIS_AND_EVALUATION.md
+*.security
+*.confidential
+*.internal
+
+# Sensitive configuration files
+config/environment.ts
+config/secrets.ts
+security-keys/
+audit-logs/
+development-logs/

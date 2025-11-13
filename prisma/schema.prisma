@@ -67,6 +67,14 @@ model User {
   favorites  FavoriteAddress[]
   complaints Complaint[]
   invoices   Invoice[]
+
+  // Optimized indexes for common queries
+  @@index([role])
+  @@index([emailVerified])
+  @@index([canPayByInvoice])
+  @@index([role, emailVerified])          // For admin queries
+  @@index([createdAt])                     // For user listing
+  @@index([emailVerified, canPayByInvoice]) // For user access queries
 }
 
 model VehicleType {
@@ -140,8 +148,20 @@ model Ride {
   complaints Complaint[]
   invoices   Invoice[]
 
+  // Optimized indexes for common queries
   @@index([userId])
   @@index([vehicleTypeId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([pickupTime])
+  @@index([createdAt])
+  @@index([userId, status])                    // For user ride filtering
+  @@index([userId, createdAt])                 // For user history
+  @@index([status, pickupTime])                // For admin dashboard queries
+  @@index([vehicleTypeId, status])             // For vehicle type filtering
+  @@index([paymentStatus, status])             // For payment status filtering
+  @@index([scheduled, pickupTime])             // For scheduled rides
+  @@index([status, paymentStatus])             // For comprehensive status filtering
 }
 
 
@@ -257,9 +277,15 @@ model Complaint {
   user User @relation(fields: [userId], references: [id])
   ride Ride @relation(fields: [rideId], references: [id])
 
+  // Optimized indexes for complaint queries
   @@index([userId])
   @@index([rideId])
   @@index([status])
+  @@index([createdAt])
+  @@index([adminDecision])
+  @@index([userId, status])                // For user complaint filtering
+  @@index([status, createdAt])             // For admin complaint listing
+  @@index([createdAt, status])             // For complaint reporting
 }
 
 // === Invoice Model ===
@@ -274,13 +300,39 @@ model Invoice {
   createdAt     DateTime @default(now())
   updatedAt     DateTime?
 
+  // === New fields for payment receipt tracking ===
+  paymentMethod   String?      // 'card', 'crypto', 'paypal', 'revolut', 'cash', 'admin_confirmed'
+  paymentRef      String?      // Payment reference number (transaction ID, admin ID, etc.)
+  paymentDate     DateTime?    // Date when payment was received
+  paymentAmount   Float?       // Actual payment amount received
+  paymentNotes    String?      // Additional notes about the payment
+  confirmedBy     Int?         // Admin ID who confirmed the payment
+  confirmedAt     DateTime?    // When the payment was confirmed by admin
+  receiptNumber   String?      // Generated receipt number
+
   @@map("invoice")
 
   ride Ride @relation(fields: [rideId], references: [id])
   user User @relation(fields: [userId], references: [id])
 
+  // Optimized indexes for invoice queries
   @@index([userId])
   @@index([rideId])
   @@index([paymentStatus])
   @@index([status])
+  @@index([dueDate])
+  @@index([userId, paymentStatus])           // For user invoice filtering
+  @@index([userId, status])                  // For user active invoices
+  @@index([paymentStatus, dueDate])          // For overdue invoice queries
+  @@index([status, paymentStatus])           // For comprehensive status filtering
+  @@index([createdAt, paymentStatus])        // For invoice history and reporting
+  
+  // New indexes for payment receipt tracking
+  @@index([paymentMethod])
+  @@index([paymentRef])
+  @@index([paymentDate])
+  @@index([confirmedBy])
+  @@index([receiptNumber])
+  @@index([paymentStatus, paymentDate])      // For payment date filtering
+  @@index([confirmedBy, confirmedAt])        // For admin confirmation tracking
 }

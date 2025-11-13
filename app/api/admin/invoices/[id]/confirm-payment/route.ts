@@ -110,7 +110,7 @@ export async function POST(
     }
 
     // =====================
-    // Transaction Safety with Enhanced Validation
+    // Transaction Safety with Enhanced Validation and Receipt Generation
     // =====================
     let updatedInvoice;
     try {
@@ -120,7 +120,11 @@ export async function POST(
           where: { id: invoiceId },
           include: {
             user: true,
-            ride: true
+            ride: {
+              include: {
+                vehicleType: true
+              }
+            }
           }
         });
 
@@ -136,16 +140,40 @@ export async function POST(
           throw new Error('Invoice is not active');
         }
 
-        // Update invoice payment status
+        // Generate unique receipt number
+        const receiptNumber = `RCP-${invoice.invoiceNumber}-${Date.now()}`;
+        
+        // Generate payment reference
+        const paymentRef = `ADM-${me.id}-${Date.now()}`;
+
+        // Calculate payment amount (convert from DKK to proper format if needed)
+        const paymentAmount = invoice.ride?.price ? invoice.ride.price / 100 : 0;
+
+        // Update invoice with payment receipt information
         const updatedInvoice = await tx.invoice.update({
           where: { id: invoiceId },
           data: {
             paymentStatus: 'PAID',
-            updatedAt: new Date()
-          },
+            updatedAt: new Date(),
+            // Use type assertion for new fields that Prisma client doesn't know yet
+            ...(true && {
+              paymentMethod: 'admin_confirmed',
+              paymentRef: paymentRef,
+              paymentDate: new Date(),
+              paymentAmount: paymentAmount,
+              paymentNotes: `Payment manually confirmed by admin ${me.firstName} ${me.lastName} (ID: ${me.id})`,
+              confirmedBy: me.id,
+              confirmedAt: new Date(),
+              receiptNumber: receiptNumber,
+            })
+          } as any,
           include: {
             user: true,
-            ride: true,
+            ride: {
+              include: {
+                vehicleType: true
+              }
+            },
           },
         });
 
@@ -154,8 +182,9 @@ export async function POST(
           where: { id: invoice.rideId },
           data: {
             paymentStatus: 'PAID',
-            explanation: 'Payment confirmed by admin',
-            status: 'CONFIRMED'
+            explanation: `Payment confirmed by admin - Receipt: ${receiptNumber}`,
+            status: 'CONFIRMED',
+            paymentMethod: 'admin_confirmed'
           },
         });
 
@@ -187,10 +216,12 @@ export async function POST(
       {
         action: 'confirm_payment',
         invoiceId,
-        invoiceNumber: updatedInvoice.invoiceNumber,
-        amount: updatedInvoice.ride?.price || 0,
-        userId: updatedInvoice.userId,
-        userEmail: updatedInvoice.user?.email,
+        invoiceNumber: (updatedInvoice as any).invoiceNumber,
+        amount: (updatedInvoice as any).ride?.price || 0,
+        userId: (updatedInvoice as any).userId,
+        userEmail: (updatedInvoice as any).user?.email,
+        receiptNumber: (updatedInvoice as any).receiptNumber,
+        paymentRef: (updatedInvoice as any).paymentRef,
         severity: 'high'
       },
       clientIp,

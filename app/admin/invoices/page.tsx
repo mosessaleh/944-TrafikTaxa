@@ -12,6 +12,15 @@ interface Invoice {
   dueDate: string;
   status: number;
   paymentStatus: string;
+  // === New fields for payment receipt tracking ===
+  paymentMethod?: string;
+  paymentRef?: string;
+  paymentDate?: string;
+  paymentAmount?: number;
+  paymentNotes?: string;
+  confirmedBy?: number;
+  confirmedAt?: string;
+  receiptNumber?: string;
   user: {
     id: number;
     firstName: string;
@@ -264,7 +273,13 @@ export default function AdminInvoicesPage() {
                       Due Date
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                      Payment Info
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                       Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                      Receipt
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
                       Actions
@@ -321,6 +336,31 @@ export default function AdminInvoicesPage() {
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
+                          <div>
+                            {invoice.paymentMethod ? (
+                              <div className="text-sm text-slate-900">
+                                <div className="font-medium capitalize">
+                                  {invoice.paymentMethod.replace('_', ' ')}
+                                </div>
+                                {invoice.paymentRef && (
+                                  <div className="text-xs text-slate-500">
+                                    Ref: {invoice.paymentRef}
+                                  </div>
+                                )}
+                                {invoice.paymentDate && (
+                                  <div className="text-xs text-slate-500">
+                                    {new Date(invoice.paymentDate).toLocaleDateString()}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-sm text-slate-500">
+                                Not paid
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                             invoice.paymentStatus === 'PAID'
                               ? 'bg-green-100 text-green-800'
@@ -328,6 +368,24 @@ export default function AdminInvoicesPage() {
                           }`}>
                             {invoice.paymentStatus}
                           </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {invoice.receiptNumber ? (
+                            <div className="text-sm">
+                              <div className="text-slate-900 font-mono">
+                                {invoice.receiptNumber}
+                              </div>
+                              {invoice.confirmedAt && (
+                                <div className="text-xs text-slate-500">
+                                  Confirmed: {new Date(invoice.confirmedAt).toLocaleDateString()}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-slate-500">
+                              No receipt
+                            </div>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="relative">
