@@ -46,7 +46,7 @@ export async function middleware(req: NextRequest) {
   const isDev = process.env.NODE_ENV === 'development';
   const csp = [
     "default-src 'self'",
-    "img-src 'self' data: https://*.tile.openstreetmap.org https://*.stripe.com https://*.paypal.com",
+    "img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://*.stripe.com https://*.paypal.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe + Google Analytics
     ...(isDev ? ["script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com"]
@@ -74,4 +74,4 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico|api/dev/.*).*)']
-};
+}

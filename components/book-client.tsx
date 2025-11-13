@@ -1,6 +1,16 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useSWR, { mutate } from 'swr';
+// Add Leaflet CSS dynamically
+if (typeof window !== 'undefined') {
+  const existingLink = document.querySelector('link[href*="leaflet.css"]');
+  if (!existingLink) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/leaflet.css';
+    document.head.appendChild(link);
+  }
+}
 import AddressAutocomplete, { Suggestion } from '@/components/address-autocomplete';
 
 function Field({label, children}:{label:string; children:React.ReactNode}){
@@ -47,6 +57,9 @@ export default function BookClient(){
 
   // Booking state
   const [bookingLoading, setBookingLoading] = useState(false);
+  // Map state
+  const [mapInstance, setMapInstance] = useState<any>(null);
+  const mapRef = useRef<any>(null);
 
   // Favorites state
   const [saveModal, setSaveModal] = useState<{open:boolean; target: FavApply|null; name:string; address:string}>({open:false, target:null, name:'', address:''});
@@ -81,6 +94,116 @@ export default function BookClient(){
     passengers: 1,
     vehicleTypeId: vehicleId || undefined
   }), [pickupSel, dropoffSel, whenType, when, vehicleId]);
+
+  // Initialize Leaflet and map
+  const initializeMap = async () => {
+    if (typeof window === 'undefined') return null;
+    
+    // Load Leaflet from local file
+    if (!(window as any).L) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = '/leaflet.js';
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    }
+    
+    const L = (window as any).L;
+    
+    // Fix default icon paths for Leaflet
+    L.Icon.Default.mergeOptions({
+      iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+      iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+      shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+    });
+
+    const mapDiv = document.getElementById('trip-map');
+    if (!mapDiv) return null;
+
+    const map = L.map(mapDiv).setView([55.6761, 12.5683], 12); // Default to Copenhagen
+    
+    // Use CartoDB tiles which have better CORS support
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap contributors © CARTO',
+      crossOrigin: true,
+      maxZoom: 19
+    }).addTo(map);
+
+    return { map, L };
+  };
+
+  // Update map with markers and route
+  const updateMapWithLocations = async () => {
+    if (!pickupSel || !dropoffSel || !pickupSel.lat || !pickupSel.lon || !dropoffSel.lat || !dropoffSel.lon) return;
+    
+    try {
+      if (!mapInstance) {
+        const initialized = await initializeMap();
+        if (initialized) setMapInstance(initialized);
+      }
+
+      if (mapInstance) {
+        const { map, L } = mapInstance;
+        
+        // Clear existing layers
+        map.eachLayer((layer: any) => {
+          if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+            map.removeLayer(layer);
+          }
+        });
+
+        // Add pickup marker (green)
+        const pickupMarker = L.marker([pickupSel.lat, pickupSel.lon], {
+          icon: L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="background-color: #22c55e; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          })
+        }).addTo(map);
+        pickupMarker.bindPopup(`<strong>Pickup:</strong><br>${pickupSel.text}`);
+
+        // Add dropoff marker (red)
+        const dropoffMarker = L.marker([dropoffSel.lat, dropoffSel.lon], {
+          icon: L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          })
+        }).addTo(map);
+        dropoffMarker.bindPopup(`<strong>Destination:</strong><br>${dropoffSel.text}`);
+
+        // Fit map to show both markers
+        const group = new L.FeatureGroup([pickupMarker, dropoffMarker]);
+        map.fitBounds(group.getBounds().pad(0.1));
+
+        // Add route line (using straight line for now, could be enhanced with routing API)
+        const routeCoordinates = [
+          [pickupSel.lat, pickupSel.lon],
+          [dropoffSel.lat, dropoffSel.lon]
+        ];
+
+        const routeLine = L.polyline(routeCoordinates, {
+          color: '#3b82f6',
+          weight: 4,
+          opacity: 0.8,
+          dashArray: '10, 5'
+        }).addTo(map);
+      }
+    } catch (error) {
+      console.error('Error updating map:', error);
+    }
+  };
+
+  // Update map when locations are selected
+  useEffect(() => {
+    if (bothSelected && pickupSel && dropoffSel && pickupSel.lat && pickupSel.lon && dropoffSel.lat && dropoffSel.lon) {
+      updateMapWithLocations();
+    }
+  }, [bothSelected, pickupSel, dropoffSel]);
 
   useEffect(() => {
     if(qTimer.current) clearTimeout(qTimer.current);
@@ -155,8 +278,6 @@ export default function BookClient(){
     }
   }
 
-
-
   // Favorites functions
   async function saveFavorite(){
     try{
@@ -208,11 +329,9 @@ export default function BookClient(){
     </button>
   );
 
-
   return (
     <>
       <div className="grid gap-8">
-
 
       {!me && !profileError && (
         <div className="card-feature border-amber-200 bg-gradient-to-r from-amber-50 to-yellow-50">
@@ -421,6 +540,14 @@ export default function BookClient(){
                 </div>
               ) : (
                 <div className="text-slate-500">Select pickup & dropoff addresses to get a quote</div>
+              )}
+              {/* OpenStreetMap for trip visualization */}
+              {bothSelected && pickupSel && dropoffSel && (pickupSel.lat && pickupSel.lon && dropoffSel.lat && dropoffSel.lon) && (
+                <div className="mt-4">
+                  <div className="h-64 w-full rounded-xl overflow-hidden border border-slate-200">
+                    <div id="trip-map" className="h-full w-full"></div>
+                  </div>
+                </div>
               )}
               {qLoading && (
                 <div className="flex items-center justify-center gap-2 mt-2 text-cyan-600">
