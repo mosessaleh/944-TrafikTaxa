@@ -69,7 +69,6 @@ export default function AddressAutocomplete({
         value={value}
         onChange={e=> onChange(e.target.value)}
         onKeyDown={onKey}
-        onBlur={()=> setTimeout(()=> setOpen(false), 100)}
         placeholder={placeholder||label}
         autoComplete="off"
         className="w-full px-3 py-2 rounded-xl border bg-white"

@@ -15,7 +15,12 @@ export default function AdminSettingsClient(){
     const payload:any = Object.fromEntries(fd.entries());
     // cast numbers
     ['dayBase','dayPerKm','dayPerMin','nightBase','nightPerKm','nightPerMin'].forEach(k=> payload[k]=Number(payload[k]));
-    const res = await f('/api/admin/settings',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    // Send in the expected shape for the API: { settings: { ... } }
+    const res = await f('/api/admin/settings',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ settings: payload })
+    });
     if(res?.ok) mutate();
   }
 

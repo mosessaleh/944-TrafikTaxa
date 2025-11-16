@@ -134,65 +134,87 @@ export default function BookClient(){
     return { map, L };
   };
 
-  // Update map with markers and route
+  // Update map with markers and detailed route (OpenRouteService via /api/route)
   const updateMapWithLocations = async () => {
     if (!pickupSel || !dropoffSel || !pickupSel.lat || !pickupSel.lon || !dropoffSel.lat || !dropoffSel.lon) return;
     
     try {
-      if (!mapInstance) {
+      // Ensure we always have a usable map instance in this call
+      let instance = mapInstance;
+      if (!instance) {
         const initialized = await initializeMap();
-        if (initialized) setMapInstance(initialized);
+        if (!initialized) return;
+        instance = initialized;
+        setMapInstance(initialized);
       }
 
-      if (mapInstance) {
-        const { map, L } = mapInstance;
-        
-        // Clear existing layers
-        map.eachLayer((layer: any) => {
-          if (layer instanceof L.Marker || layer instanceof L.Polyline) {
-            map.removeLayer(layer);
+      const { map, L } = instance;
+      
+      // Clear existing markers and polylines (keep base tile layer)
+      map.eachLayer((layer: any) => {
+        if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+          map.removeLayer(layer);
+        }
+      });
+
+      // Add pickup marker (green)
+      const pickupMarker = L.marker([pickupSel.lat, pickupSel.lon], {
+        icon: L.divIcon({
+          className: 'custom-marker',
+          html: `<div style="background-color: #22c55e; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        })
+      }).addTo(map);
+      pickupMarker.bindPopup(`<strong>Pickup:</strong><br>${pickupSel.text}`);
+
+      // Add dropoff marker (red)
+      const dropoffMarker = L.marker([dropoffSel.lat, dropoffSel.lon], {
+        icon: L.divIcon({
+          className: 'custom-marker',
+          html: `<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        })
+      }).addTo(map);
+      dropoffMarker.bindPopup(`<strong>Destination:</strong><br>${dropoffSel.text}`);
+
+      // Fit map to show both markers
+      const group = new L.FeatureGroup([pickupMarker, dropoffMarker]);
+      map.fitBounds(group.getBounds().pad(0.1));
+
+      // Default route = straight line (fallback)
+      let routeLatLngs: [number, number][] = [
+        [pickupSel.lat, pickupSel.lon],
+        [dropoffSel.lat, dropoffSel.lon]
+      ];
+
+      // Try to fetch detailed route geometry from our routing API
+      try {
+        const resp = await fetch(
+          `/api/route?startLat=${pickupSel.lat}&startLon=${pickupSel.lon}&endLat=${dropoffSel.lat}&endLon=${dropoffSel.lon}`,
+          { cache: 'no-store' }
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.ok && data.route?.geometry?.coordinates?.length) {
+            // OpenRouteService returns [lon, lat], Leaflet expects [lat, lon]
+            routeLatLngs = data.route.geometry.coordinates.map(
+              (c: [number, number]) => [c[1], c[0]] as [number, number]
+            );
           }
-        });
-
-        // Add pickup marker (green)
-        const pickupMarker = L.marker([pickupSel.lat, pickupSel.lon], {
-          icon: L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="background-color: #22c55e; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-          })
-        }).addTo(map);
-        pickupMarker.bindPopup(`<strong>Pickup:</strong><br>${pickupSel.text}`);
-
-        // Add dropoff marker (red)
-        const dropoffMarker = L.marker([dropoffSel.lat, dropoffSel.lon], {
-          icon: L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-          })
-        }).addTo(map);
-        dropoffMarker.bindPopup(`<strong>Destination:</strong><br>${dropoffSel.text}`);
-
-        // Fit map to show both markers
-        const group = new L.FeatureGroup([pickupMarker, dropoffMarker]);
-        map.fitBounds(group.getBounds().pad(0.1));
-
-        // Add route line (using straight line for now, could be enhanced with routing API)
-        const routeCoordinates = [
-          [pickupSel.lat, pickupSel.lon],
-          [dropoffSel.lat, dropoffSel.lon]
-        ];
-
-        const routeLine = L.polyline(routeCoordinates, {
-          color: '#3b82f6',
-          weight: 4,
-          opacity: 0.8,
-          dashArray: '10, 5'
-        }).addTo(map);
+        }
+      } catch (routeErr) {
+        console.warn('Route API failed, falling back to straight line:', routeErr);
       }
+
+      // Draw route polyline (detailed if API succeeded, straight if not)
+      L.polyline(routeLatLngs, {
+        color: '#3b82f6',
+        weight: 4,
+        opacity: 0.8,
+        dashArray: '10, 5'
+      }).addTo(map);
     } catch (error) {
       console.error('Error updating map:', error);
     }
