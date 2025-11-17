@@ -72,15 +72,15 @@ export default function LiveTracking({ bookingId, className = '' }: LiveTracking
   const getStatusText = (status: string) => {
     switch (status) {
       case 'confirmed':
-        return 'تم التأكيد';
+        return 'Confirmed';
       case 'dispatched':
-        return 'تم إرسال السائق';
+        return 'Driver dispatched';
       case 'ongoing':
-        return 'الرحلة جارية';
+        return 'Trip in progress';
       case 'completed':
-        return 'تمت الرحلة';
+        return 'Trip completed';
       default:
-        return 'في الانتظار';
+        return 'Pending';
     }
   };
 
@@ -88,39 +88,39 @@ export default function LiveTracking({ bookingId, className = '' }: LiveTracking
     <div className={`bg-white rounded-lg shadow-md p-4 ${className}`}>
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-gray-800">
-          تتبع الرحلة المباشر
+          Live trip tracking
         </h3>
         <div className="flex items-center gap-2">
           <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
           <span className="text-sm text-gray-600">
-            {isConnected ? 'متصل' : 'غير متصل'}
+            {isConnected ? 'Online' : 'Offline'}
           </span>
         </div>
       </div>
-
+ 
       {/* Status */}
       <div className="mb-4">
         <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(status)}`}>
           {getStatusText(status)}
         </div>
       </div>
-
+ 
       {/* Driver Info */}
       {driverInfo && (
         <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-          <h4 className="font-medium text-gray-800 mb-2">معلومات السائق</h4>
+          <h4 className="font-medium text-gray-800 mb-2">Driver information</h4>
           <div className="space-y-1 text-sm text-gray-600">
-            <p><span className="font-medium">الاسم:</span> {driverInfo.name}</p>
+            <p><span className="font-medium">Name:</span> {driverInfo.name}</p>
             {driverInfo.phone && (
-              <p><span className="font-medium">الهاتف:</span> {driverInfo.phone}</p>
+              <p><span className="font-medium">Phone:</span> {driverInfo.phone}</p>
             )}
             {driverInfo.eta > 0 && (
-              <p><span className="font-medium">الوقت المقدر:</span> {driverInfo.eta} دقيقة</p>
+              <p><span className="font-medium">Estimated time:</span> {driverInfo.eta} minutes</p>
             )}
           </div>
         </div>
       )}
-
+ 
       {/* Map Placeholder */}
       <div className="mb-4">
         <div className="bg-gray-200 rounded-lg h-48 flex items-center justify-center">
@@ -128,23 +128,23 @@ export default function LiveTracking({ bookingId, className = '' }: LiveTracking
             <div className="text-center">
               <div className="text-2xl mb-2">📍</div>
               <p className="text-sm text-gray-600">
-                الموقع: {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
+                Location: {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
               </p>
             </div>
           ) : (
             <div className="text-center text-gray-500">
               <div className="text-2xl mb-2">🗺️</div>
-              <p>جاري تحديث الموقع...</p>
+              <p>Updating location...</p>
             </div>
           )}
         </div>
       </div>
-
+ 
       {/* Connection Status */}
       {!isConnected && (
         <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
           <p className="text-sm text-yellow-800">
-            ⚠️ فقد الاتصال. جاري إعادة الاتصال...
+            ⚠️ Connection lost. Reconnecting...
           </p>
         </div>
       )}

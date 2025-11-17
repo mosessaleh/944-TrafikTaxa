@@ -61,9 +61,8 @@ export async function GET(
     const userInvoicesDir = path.join(invoicesDir, booking.userId.toString());
     
     // Use the existing invoice number if it exists, otherwise create one
-    const invoiceNumber = existingInvoice?.invoiceNumber || (booking.paymentMethod === 'invoice' ?
-      `INV-${booking.id.toString().padStart(6, '0')}` :
-      `REC-${booking.id.toString().padStart(6, '0')}`); // REC for receipts
+    // All invoice numbers use the unified TUR-000023 format
+    const invoiceNumber = existingInvoice?.invoiceNumber || `TUR-${booking.id.toString().padStart(6, '0')}`;
     
     const invoiceDir = path.join(userInvoicesDir, invoiceNumber);
 

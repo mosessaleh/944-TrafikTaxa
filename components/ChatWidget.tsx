@@ -10,7 +10,7 @@ interface ChatWidgetProps {
   className?: string;
 }
 
-export default function ChatWidget({ bookingId, driverName = 'السائق', className = '' }: ChatWidgetProps) {
+export default function ChatWidget({ bookingId, driverName = 'Driver', className = '' }: ChatWidgetProps) {
   const { sendChatMessage, chatMessages, isConnected } = useRealtime();
   const [message, setMessage] = useState('');
   const [isOpen, setIsOpen] = useState(false);
@@ -46,7 +46,7 @@ export default function ChatWidget({ bookingId, driverName = 'السائق', cla
   };
 
   const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString('ar-SA', {
+    return new Date(timestamp).toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -59,7 +59,7 @@ export default function ChatWidget({ bookingId, driverName = 'السائق', cla
         <button
           onClick={() => setIsOpen(true)}
           className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-lg transition-colors duration-200"
-          aria-label="فتح الدردشة"
+          aria-label="Open chat"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -78,9 +78,9 @@ export default function ChatWidget({ bookingId, driverName = 'السائق', cla
           {/* Header */}
           <div className="bg-blue-600 text-white p-4 rounded-t-lg flex items-center justify-between">
             <div>
-              <h3 className="font-medium">دردشة مع {driverName}</h3>
+              <h3 className="font-medium">Chat with {driverName}</h3>
               <p className="text-sm opacity-90">
-                {isConnected ? 'متصل' : 'غير متصل'}
+                {isConnected ? 'Online' : 'Offline'}
               </p>
             </div>
             <button
@@ -98,7 +98,7 @@ export default function ChatWidget({ bookingId, driverName = 'السائق', cla
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {bookingMessages.length === 0 ? (
               <div className="text-center text-gray-500 text-sm">
-                <p>ابدأ المحادثة مع السائق</p>
+                <p>Start a conversation with the driver</p>
               </div>
             ) : (
               bookingMessages.map((msg) => (
@@ -134,7 +134,7 @@ export default function ChatWidget({ bookingId, driverName = 'السائق', cla
                 type="text"
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder={isConnected ? "اكتب رسالتك..." : "غير متصل..."}
+                placeholder={isConnected ? "Type your message..." : "Offline..."}
                 disabled={!isConnected}
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 maxLength={500}
@@ -143,7 +143,7 @@ export default function ChatWidget({ bookingId, driverName = 'السائق', cla
                 type="submit"
                 disabled={!message.trim() || !isConnected}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg transition-colors duration-200"
-                aria-label="إرسال الرسالة"
+                aria-label="Send message"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -152,7 +152,7 @@ export default function ChatWidget({ bookingId, driverName = 'السائق', cla
             </div>
             {!isConnected && (
               <p className="text-xs text-red-600 mt-2">
-                يجب أن تكون متصلاً لإرسال الرسائل
+                You must be online to send messages
               </p>
             )}
           </form>

@@ -151,7 +151,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
 
   return (
     <>
-      {/* تنسيقات مطبوعة/شاشة (منع صفحة ثانية) */}
+      {/* Print/screen styles (avoid creating a second page) */}
       <style jsx global>{`
         .num { font-variant-numeric: tabular-nums; }
 
@@ -194,7 +194,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
         }
       `}</style>
 
-      {/* أزرار الواجهة (خارج الورقة) */}
+      {/* UI buttons (outside the invoice sheet) */}
       <div className="hide-for-print mb-6 flex justify-start gap-3">
         <button
           onClick={handlePrint}
@@ -214,14 +214,14 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
         )}
       </div>
 
-      {/* ورقة الفاتورة */}
+      {/* Invoice sheet */}
       <div className="invoice-root max-w-4xl mx-auto">
         <div className="invoice-page bg-white shadow-xl rounded-2xl border border-gray-100 overflow-hidden">
 
-          {/* الترويسة: الشعار يمين وفوق رقم الفاتورة */}
+          {/* Header: logo on the right, invoice number below */}
           <div className="bg-white border-b border-gray-200 px-6 sm:px-8 py-6">
             <div className="flex items-start justify-between gap-6">
-              {/* معلومات الشركة يسار (بدون تغيير نصوص) */}
+              {/* Company information on the left */}
               <div className="text-[13px] text-gray-600 leading-5">
                 <p className="font-semibold text-gray-800">944 Trafik</p>
                 <p>Frederikssund, Denmark</p>
@@ -229,9 +229,9 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                 <p>Email: trafik@944.dk</p>
               </div>
 
-              {/* يمين: الشعار ثم رقم الفاتورة تحته */}
+              {/* Right: logo and invoice number below it */}
               <div className="text-right flex flex-col items-end">
-                {/* نستخدم <img> عادي لتفادي مشاكل next/image مع SVG (خطأ 400: The requested resource isn't a valid image) */}
+                {/* Use a plain <img> to avoid next/image issues with SVG (400: The requested resource isn't a valid image) */}
                 <img
                   src="/logo.svg"
                   alt="944 Trafik - Professional Taxi Service in Denmark"
@@ -241,10 +241,10 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
             </div>
           </div>
 
-          {/* صندوق مزدوج: يسار (رقم الفاتورة + الحالة تحت بعض) — يمين (التاريخ + الاستحقاق تحت بعض بمحاذاة اليمين) */}
+          {/* Two-column box: left (invoice number + status) — right (date + due date) */}
           <div className="bg-gray-50 border-b border-gray-200 px-6 sm:px-8 py-3">
             <div className="grid grid-cols-2 items-start gap-4 text-xs text-gray-700">
-              {/* يسار: رقم الفاتورة + الحالة */}
+              {/* Left: invoice number + status */}
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
                   <span className="uppercase tracking-wide text-[10px] text-gray-500">Invoice No.</span>
@@ -267,7 +267,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                 </div>
               </div>
 
-              {/* يمين: التاريخ + تاريخ الاستحقاق بمحاذاة اليمين */}
+              {/* Right: date + due date aligned to the right */}
               <div className="flex flex-col gap-1 text-right">
                 <div className="flex items-center gap-2 justify-end">
                   <span className="uppercase tracking-wide text-[10px] text-gray-500">Date</span>
@@ -281,7 +281,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
             </div>
           </div>
 
-          {/* المحتوى */}
+          {/* Content */}
           <div className="invoice-content p-6 sm:p-8">
             {/* From / Bill To */}
             <div className="grid sm:grid-cols-2 gap-6 mb-6">
@@ -375,7 +375,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
               </div>
             </div>
 
-            {/* Payment Info / Status (نفس النصوص كما هي) */}
+            {/* Payment Info / Status (same texts as before) */}
             {invoice.paymentStatus !== 'PAID' ? (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 mb-6">
                 <h3 className="text-sm font-semibold text-gray-800 mb-2">Bank Information for Payment</h3>

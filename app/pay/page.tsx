@@ -40,7 +40,7 @@ function PayIndexContent(){
             const bookingData = await bookingResponse.json();
             if (bookingData.ride) {
               setBookingData({ price: bookingData.ride.price });
-              // التحقق من طريقة الدفع في قاعدة البيانات
+              // Verify payment method stored in the database
               setHasInvoicePaymentMethod(bookingData.ride.paymentMethod === 'invoice');
             }
           } else if (bookingResponse.status === 401) {
@@ -68,7 +68,7 @@ function PayIndexContent(){
             const invoiceData = await invoiceResponse.json();
             if (invoiceData.invoice && invoiceData.invoice.ride) {
               setBookingData({ price: invoiceData.invoice.ride.price });
-              // التحقق من طريقة الدفع في قاعدة البيانات
+              // Verify payment method stored in the database
               setHasInvoicePaymentMethod(invoiceData.invoice.ride.paymentMethod === 'invoice');
             }
           } else if (invoiceResponse.status === 401) {
@@ -136,16 +136,16 @@ function PayIndexContent(){
           if (response.ok) {
             const result = await response.json();
             console.log('✅ Invoice payment method updated successfully:', result);
-            alert('🎉 تم إنشاء الفاتورة بنجاح! سيتم توجيهك إلى صفحة الحجز.');
+            alert('🎉 Invoice created successfully! You will be redirected to the booking page.');
             router.push(`/bookings/${bookingId}?payment=invoice`);
           } else {
-            const errorData = await response.json().catch(() => ({ error: 'خطأ غير محدد' }));
-            console.error('❌ خطأ في تحديث طريقة الدفع:', errorData);
-            alert(`❌ خطأ في إنشاء الفاتورة: ${errorData.error || 'خطأ غير محدد'}`);
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('❌ Error updating payment method:', errorData);
+            alert(`❌ Error creating invoice: ${errorData.error || 'Unknown error'}`);
           }
         } catch (networkError) {
-          console.error('❌ خطأ في الشبكة:', networkError);
-          alert('❌ خطأ في الشبكة. يرجى المحاولة مرة أخرى.');
+          console.error('❌ Network error:', networkError);
+          alert('❌ Network error. Please try again.');
         }
       } else if (invoiceId) {
         router.push(`/invoices/${invoiceId}?payment=invoice`);
@@ -153,8 +153,8 @@ function PayIndexContent(){
         router.push(`/book?payment_method=invoice&amount_dkk=${encodeURIComponent(paymentAmount.toString())}`);
       }
     } else {
-      // لجميع طرق الدفع الأخرى (بطاقة، كريبتو، PayPal، Revolut)
-      // سيتم إنشاء فاتورة كإيصال عند نجاح الدفع
+      // For all other payment methods (card, crypto, PayPal, Revolut)
+      // an invoice will be created as a receipt after successful payment
       router.push(`/pay/${selectedMethod}?${params.toString()}`);
     }
   };
@@ -187,10 +187,10 @@ function PayIndexContent(){
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {paymentMethods.filter(method => {
-            // إخفاء خيار "Pay by Invoice" فقط إذا كان التحقق الآمن من قاعدة البيانات يؤكد
-            // أن طريقة الدفع في الحجز هي "invoice" (يمنع التلاعب بالرابط)
+            // Hide "Pay by Invoice" only when the database confirms
+            // that the booking payment method is already "invoice" (prevents URL tampering)
             if (method.key === "invoice" && hasInvoicePaymentMethod) {
-              console.log('🛡️ إخفاء خيار "Pay by Invoice" لأن الحجز تم بطريقة الدفع بالفاتورة');
+              console.log('🛡️ Hiding "Pay by Invoice" because the booking already uses invoice payment method');
               return false;
             }
             return method.isActive;

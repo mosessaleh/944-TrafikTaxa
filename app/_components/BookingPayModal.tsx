@@ -7,7 +7,7 @@ type Wallet = { id: string; symbol: string; network: string; address: string; is
 type PricesResp = { source: string; last_updated: string; vs: string[]; data: Record<string, { dkk?: number }> };
 type SymbolsResp = { symbols: { symbol: string; total: number; active: number }[] };
 
-const CRYPTO_FEE_DKK = 25; // رسوم إضافية عند الدفع بالعملات الرقمية
+const CRYPTO_FEE_DKK = 25; // Extra fee when paying with cryptocurrencies
 
 function getCapturedAmount(): number | null {
   const w: any = window as any;
@@ -139,27 +139,27 @@ export default function BookingPayModal({
   }, [selectedSymbol]);
 
   async function payByCard(){
-    if (!amountNum || amountNum<=0) { toast.error("تعذّر تحديد مبلغ الرحلة"); return; }
+    if (!amountNum || amountNum<=0) { toast.error("Could not determine the trip amount"); return; }
     setLoading(true);
     try{
       // Redirect to Stripe payment page instead of using mock
       window.location.href = `/pay/card?amount_dkk=${encodeURIComponent(amountNum.toString())}`;
     } catch (err: any) {
-      toast.error("خطأ في التوجيه لصفحة الدفع");
+      toast.error("Failed to redirect to payment page");
       setLoading(false);
     }
   }
 
   async function confirmCrypto(){
     if (!amountCryptoDkk || amountCryptoDkk<=0 || !selectedWallet || !selectedSymbol) {
-      const errorMsg = "اختر العملة والمحفظة، ولم نتمكن من تحديد المبلغ";
+      const errorMsg = "Select a currency and wallet; the amount could not be determined";
       toast.error(errorMsg);
       // Announce error to screen readers
       const announcement = document.createElement('div');
       announcement.setAttribute('aria-live', 'assertive');
       announcement.setAttribute('aria-atomic', 'true');
       announcement.className = 'sr-only';
-      announcement.textContent = `خطأ: ${errorMsg}`;
+      announcement.textContent = `Error: ${errorMsg}`;
       document.body.appendChild(announcement);
       setTimeout(() => document.body.removeChild(announcement), 3000);
       return;
@@ -167,19 +167,19 @@ export default function BookingPayModal({
     const id = getCoinGeckoId(selectedSymbol)!;
     const dkk = (prices?.data as any)?.[id]?.dkk;
     if (!dkk || dkk<=0) {
-      const errorMsg = "تعذّر جلب سعر العملة";
+      const errorMsg = "Failed to fetch currency price";
       toast.error(errorMsg);
       // Announce error to screen readers
       const announcement = document.createElement('div');
       announcement.setAttribute('aria-live', 'assertive');
       announcement.setAttribute('aria-atomic', 'true');
       announcement.className = 'sr-only';
-      announcement.textContent = `خطأ: ${errorMsg}`;
+      announcement.textContent = `Error: ${errorMsg}`;
       document.body.appendChild(announcement);
       setTimeout(() => document.body.removeChild(announcement), 3000);
       return;
     }
-    const amountCoin = amountCryptoDkk / dkk; // يشمل الرسوم 25 DKK
+    const amountCoin = amountCryptoDkk / dkk; // includes the 25 DKK fee
     setLoading(true);
     try{
       const res = await fetch("/api/payments/crypto/confirm", {
@@ -189,7 +189,7 @@ export default function BookingPayModal({
           walletId: selectedWallet.id,
           network: selectedWallet.network,
           address: selectedWallet.address,
-          amountDkk: amountCryptoDkk, // سجّل المبلغ بالكرونة شامل الرسوم
+          amountDkk: amountCryptoDkk, // store amount in DKK including the fee
           amountCoin: amountCoin
         })
       });
@@ -201,7 +201,7 @@ export default function BookingPayModal({
         announcement.setAttribute('aria-live', 'assertive');
         announcement.setAttribute('aria-atomic', 'true');
         announcement.className = 'sr-only';
-        announcement.textContent = `خطأ في الدفع: ${errorMsg}`;
+        announcement.textContent = `Payment error: ${errorMsg}`;
         document.body.appendChild(announcement);
         setTimeout(() => document.body.removeChild(announcement), 3000);
         return;
@@ -231,18 +231,18 @@ export default function BookingPayModal({
       >
         {step === "method" && (
           <div className="grid gap-4">
-            <h2 id="modal-title" className="text-lg font-semibold">اختيار طريقة الدفع</h2>
+            <h2 id="modal-title" className="text-lg font-semibold">Choose payment method</h2>
             <div id="modal-description" className="sr-only">
-              اختر طريقة الدفع لإكمال حجز الرحلة. يمكنك الدفع بالبطاقة أو العملات الرقمية.
+              Choose how you want to pay for your trip. You can pay by card or with cryptocurrencies.
             </div>
-
+ 
             <div className="text-sm text-gray-500">
-              مبلغ الرحلة (DKK): <span className="font-semibold">{amountNum || "—"}</span>
+              Trip amount (DKK): <span className="font-semibold">{amountNum || "—"}</span>
             </div>
             {!!amountNum && (
               <div className="text-xs text-gray-500">
-                <span className="font-semibold">تنبيه:</span> في حال اختيار <span className="font-semibold">العملات الرقمية</span> تتم إضافة <span className="font-semibold">{CRYPTO_FEE_DKK} kr</span> كرسوم خدمة.
-                المجموع للدفع بالكريبتو: <span className="font-semibold">{amountCryptoDkk} kr</span>.
+                <span className="font-semibold">Note:</span> If you choose <span className="font-semibold">cryptocurrencies</span>, an extra <span className="font-semibold">{CRYPTO_FEE_DKK} kr</span> service fee is added.
+                Total for crypto payment: <span className="font-semibold">{amountCryptoDkk} kr</span>.
               </div>
             )}
             {!amountNum && (
@@ -251,7 +251,7 @@ export default function BookingPayModal({
                 role="alert"
                 aria-live="assertive"
               >
-                تعذّر تحديد مبلغ الرحلة تلقائيًا من الصفحة.
+                Could not automatically determine the trip amount from the page.
               </div>
             )}
 
@@ -282,7 +282,7 @@ export default function BookingPayModal({
                 onClick={onClose}
                 aria-label="Close payment window"
               >
-                إلغاء
+                Cancel
               </button>
             </div>
           </div>
@@ -290,13 +290,13 @@ export default function BookingPayModal({
 
         {step === "card" && (
           <div className="grid gap-4">
-            <h2 id="modal-title" className="text-lg font-semibold">الدفع بالبطاقة</h2>
+            <h2 id="modal-title" className="text-lg font-semibold">Pay by card</h2>
             <div id="modal-description" className="sr-only">
-              أكمل الدفع باستخدام البطاقة الائتمانية أو الماستركارد.
+              Complete your payment using a credit or debit card.
             </div>
-            <div className="text-sm text-gray-500">المبلغ المستحق: {amountNum || "—"} DKK</div>
+            <div className="text-sm text-gray-500">Amount to pay: {amountNum || "—"} DKK</div>
             <div className="p-4 rounded-xl border bg-gray-50 animate-fade-in">
-              <div className="text-sm text-gray-500">نموذج محاكاة — سنستبدله ببوابة دفع لاحقًا</div>
+              <div className="text-sm text-gray-500">Demo only — this will be replaced with a real payment gateway later.</div>
               <button
                 disabled={loading || !amountNum}
                 onClick={payByCard}
@@ -306,23 +306,23 @@ export default function BookingPayModal({
                 {loading ? (
                   <>
                     <div className="loading-spinner mr-2"></div>
-                    جارٍ المعالجة...
+                    Processing...
                   </>
                 ) : (
-                  "ادفع الآن"
+                  "Pay now"
                 )}
               </button>
               <div id="pay-button-description" className="sr-only">
-                اضغط لإكمال الدفع بالبطاقة. المبلغ: {amountNum || "—"} كرونة دانمركية.
+                Press to complete the card payment. Amount: {amountNum || "—"} DKK.
               </div>
             </div>
             <div className="flex justify-between">
               <button
                 className="px-3 py-2 rounded-xl border"
                 onClick={()=>setStep("method")}
-                aria-label="العودة إلى اختيار طريقة الدفع"
+                aria-label="Back to payment method selection"
               >
-                رجوع
+                Back
               </button>
             </div>
           </div>
@@ -330,12 +330,12 @@ export default function BookingPayModal({
 
         {step === "crypto" && (
           <div className="grid gap-4">
-            <h2 id="modal-title" className="text-lg font-semibold">الدفع بالعملات الرقمية</h2>
+            <h2 id="modal-title" className="text-lg font-semibold">Pay with cryptocurrency</h2>
             <div id="modal-description" className="sr-only">
-              اختر العملة الرقمية وانسخ العنوان لإكمال الدفع.
+              Choose a cryptocurrency and copy the address to complete the payment.
             </div>
             <div className="text-sm text-gray-500">
-              المبلغ المستحق: {amountNum || "—"} DKK + رسوم {CRYPTO_FEE_DKK} kr = <span className="font-semibold">{amountCryptoDkk || "—"} DKK</span>
+              Amount due: {amountNum || "—"} DKK + fee {CRYPTO_FEE_DKK} kr = <span className="font-semibold">{amountCryptoDkk || "—"} DKK</span>
             </div>
 
             {symErr && (
@@ -347,21 +347,21 @@ export default function BookingPayModal({
                 {symErr}
               </div>
             )}
-            {!symbols && !symErr && <div className="text-sm text-gray-500">جارِ تحميل خيارات العملات…</div>}
-
-            <div className="overflow-x-auto rounded-2xl border animate-fade-in" role="table" aria-label="قائمة العملات الرقمية المتاحة">
+            {!symbols && !symErr && <div className="text-sm text-gray-500">Loading cryptocurrency options…</div>}
+ 
+            <div className="overflow-x-auto rounded-2xl border animate-fade-in" role="table" aria-label="Available cryptocurrencies">
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-3 py-2 text-left" scope="col">العملة</th>
-                    <th className="px-3 py-2 text-left" scope="col">المبلغ المطلوب (تقريبي)</th>
+                    <th className="px-3 py-2 text-left" scope="col">Currency</th>
+                    <th className="px-3 py-2 text-left" scope="col">Required amount (approx.)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(symbols?.symbols || []).map(row => {
                     const id = getCoinGeckoId(row.symbol);
                     const dkk = id ? (prices?.data as any)?.[id]?.dkk : undefined;
-                    const need = amountCryptoDkk && dkk ? (amountCryptoDkk / dkk) : undefined; // يشمل الرسوم
+                    const need = amountCryptoDkk && dkk ? (amountCryptoDkk / dkk) : undefined; // includes the fee
                     const selected = selectedSymbol === row.symbol;
                     return (
                       <tr
@@ -371,7 +371,7 @@ export default function BookingPayModal({
                         role="button"
                         tabIndex={0}
                         aria-selected={selected}
-                        aria-label={`اختر ${row.symbol.toUpperCase()} - المبلغ المطلوب: ${need ? need.toFixed(8) : "غير متوفر"}`}
+                        aria-label={`Select ${row.symbol.toUpperCase()} - required amount: ${need ? need.toFixed(8) : "Not available"}`}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
@@ -391,9 +391,9 @@ export default function BookingPayModal({
 
             {!!selectedSymbol && (
               <div className="grid gap-2">
-                <div className="text-sm text-gray-500">اختر شبكة/محفظة — انسخ العنوان وحوّل يدويًا:</div>
+                <div className="text-sm text-gray-500">Choose network/wallet — copy the address and send manually:</div>
                 <div className="grid md:grid-cols-2 gap-2 animate-fade-in" role="radiogroup" aria-labelledby="wallet-selection-label">
-                  <div id="wallet-selection-label" className="sr-only">اختر محفظة للدفع</div>
+                  <div id="wallet-selection-label" className="sr-only">Choose a wallet to pay with</div>
                   {wallets.map(w => (
                     <button
                       key={w.id}
@@ -407,7 +407,7 @@ export default function BookingPayModal({
                       <div className="font-mono break-all" id={`wallet-${w.id}-description`}>{w.address}</div>
                     </button>
                   ))}
-                  {!wallets.length && <div className="text-sm text-gray-500 animate-fade-in">لا توجد محافظ مفعّلة لهذه العملة.</div>}
+                  {!wallets.length && <div className="text-sm text-gray-500 animate-fade-in">No active wallets are configured for this currency.</div>}
                 </div>
               </div>
             )}
@@ -416,9 +416,9 @@ export default function BookingPayModal({
               <button
                 className="px-3 py-2 rounded-xl border"
                 onClick={()=>setStep("method")}
-                aria-label="العودة إلى اختيار طريقة الدفع"
+                aria-label="Back to payment method selection"
               >
-                رجوع
+                Back
               </button>
               <button
                 disabled={!selectedWallet || !amountCryptoDkk || loading}
@@ -429,14 +429,14 @@ export default function BookingPayModal({
                 {loading ? (
                   <>
                     <div className="loading-spinner mr-2"></div>
-                    جارٍ التأكيد...
+                    Confirming...
                   </>
                 ) : (
-                  "تم تحويل العملات الرقمية"
+                  "I have completed the crypto transfer"
                 )}
               </button>
               <div id="confirm-crypto-description" className="sr-only">
-                اضغط بعد إكمال التحويل لتأكيد الدفع بالعملات الرقمية.
+                Press after completing the transfer to confirm the crypto payment.
               </div>
             </div>
           </div>

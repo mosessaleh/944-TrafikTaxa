@@ -3,7 +3,7 @@ import { getUserFromCookie } from '@/lib/auth';
 
 export default async function AdminLayout({ children }:{ children: React.ReactNode }){
   const me = await getUserFromCookie();
-  // إظهار التبويبات فقط لو المستخدم أدمن — وإلا سيشاهد رسالة الحظر من الصفحة نفسها
+  // Show tabs only if the user is an admin — otherwise each page will render its own access restriction
   const isAdmin = !!me && me.role === 'ADMIN';
   return (
     <div className="grid gap-6">

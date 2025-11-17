@@ -99,7 +99,8 @@ export async function GET(
       status: invoice.status,
       dueDate: invoice.dueDate.toISOString(),
       createdAt: invoice.createdAt.toISOString(),
-      updatedAt: invoice.updatedAt.toISOString(),
+      // Use updatedAt if present, otherwise fall back to createdAt to avoid null-related crashes
+      updatedAt: (invoice.updatedAt ?? invoice.createdAt).toISOString(),
       user: {
         id: user.id,
         email: user.email,

@@ -17,23 +17,37 @@ function PaymentSuccessContent() {
   useEffect(() => {
     // Handle mock payments for admin users
     if (isMock) {
-      // For mock payments, fetch the actual booking amount
+      // For mock payments, fetch the actual booking amount from the booking API
       const fetchBookingAmount = async () => {
+        let resolvedAmount: number | null = null;
+ 
         if (bookingId) {
           try {
             const response = await fetch(`/api/bookings/${bookingId}`);
             if (response.ok) {
-              const booking = await response.json();
-              setAmount(booking.price?.toString() || "100");
-            } else {
-              setAmount("100"); // Fallback
+              const data = await response.json();
+              // Normalize booking shape: API may return { ride: {...} } or booking directly
+              const booking = (data && typeof data === 'object' && 'ride' in data)
+                ? (data as any).ride
+                : data;
+              if (booking && typeof (booking as any).price === "number") {
+                resolvedAmount = (booking as any).price;
+              }
+              // Store booking details for UI / amount display
+              setBookingDetails(booking);
             }
           } catch (err) {
-            setAmount("100"); // Fallback
+            // ignore and keep resolvedAmount as null
           }
-        } else {
-          setAmount("100"); // Fallback
         }
+ 
+        if (resolvedAmount !== null) {
+          setAmount(resolvedAmount.toString());
+        } else {
+          // If we can't determine the amount reliably, leave it empty and only show generic success text
+          setAmount("");
+        }
+ 
         setStatus("success");
       };
       fetchBookingAmount();
@@ -115,6 +129,16 @@ function PaymentSuccessContent() {
     confirmPayment();
   }, [paymentIntent, isMock]);
 
+  // Determine the amount to display in the message: prefer bookingDetails.price, fallback to amount state
+  const displayAmount =
+    bookingDetails && typeof (bookingDetails as any).price === "number"
+      ? (bookingDetails as any).price
+      : bookingDetails && (bookingDetails as any).ride && typeof (bookingDetails as any).ride.price === "number"
+      ? (bookingDetails as any).ride.price
+      : amount
+      ? Number(amount)
+      : undefined;
+
   if (status === "loading") {
     return (
       <div className="max-w-2xl mx-auto p-6">
@@ -169,8 +193,16 @@ function PaymentSuccessContent() {
           <div className="text-green-600 text-6xl mb-4 animate-bounce-in">✅</div>
           <h1 className="text-2xl font-bold mb-4 text-green-800">Payment Successful!</h1>
           <p className="text-gray-600 mb-6">
-            Your payment of <strong className="text-green-700">{amount} DKK</strong> has been processed successfully.
-            {isMock && <span className="text-orange-600 font-semibold block mt-2"> (Mock Payment - Admin Mode)</span>}
+            {displayAmount !== undefined
+              ? (
+                <>
+                  Your payment of <strong className="text-green-700">{displayAmount} DKK</strong> has been processed successfully.
+                </>
+              )
+              : (
+                <>Your payment has been processed successfully.</>
+              )}
+          {isMock && <span className="text-orange-600 font-semibold block mt-2">(Mock Payment - Admin Mode)</span>}
           </p>
 
           {bookingDetails && (

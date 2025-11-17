@@ -8,9 +8,8 @@ function getStripe() {
     if (!secretKey) {
       throw new Error('STRIPE_SECRET_KEY environment variable is required');
     }
-    stripe = new Stripe(secretKey, {
-      apiVersion: '2025-09-30.clover',
-    });
+    // Use Stripe client with the default API version configured on your dashboard
+    stripe = new Stripe(secretKey);
   }
   return stripe;
 }

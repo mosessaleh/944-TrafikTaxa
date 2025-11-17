@@ -112,8 +112,8 @@ export async function POST(
         userEmail: fullBooking.user.email
       });
 
-      // Create invoice
-      const invoiceNumber = `INV${fullBooking.id.toString().padStart(6, '0')}`;
+      // Create invoice number in agreed format TUR-000023
+      const invoiceNumber = `TUR-${fullBooking.id.toString().padStart(6, '0')}`;
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 8);
 

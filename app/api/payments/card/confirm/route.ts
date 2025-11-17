@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUserFromCookie } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { retrievePaymentIntent } from "@/lib/stripe";
+import { retrievePaymentIntent, stripe as getStripe } from "@/lib/stripe";
 import { ConfirmCardPaymentSchema } from "@/lib/validation";
 import { notifyUserPaymentReceived, notifyUserBookingConfirmation, notifyAdmin } from "@/lib/notify";
 
@@ -31,11 +31,11 @@ export async function POST(request: Request) {
 
     let amountDkk = 0;
     let booking = null;
-
-    // Handle mock payments for admin users
+ 
+    // Handle mock payments for admin users (development flow)
     if (paymentIntentId.startsWith('pi_mock_')) {
-      console.log("card/confirm: Processing mock payment for admin user");
-
+      console.log("card/confirm: Processing mock payment for admin user (Stripe test)");
+ 
       if (bookingId) {
         // Find booking by ID
         booking = await prisma.ride.findUnique({
@@ -59,29 +59,71 @@ export async function POST(request: Request) {
           include: { user: true, vehicleType: true }
         });
       }
-
+ 
       if (!booking) {
         console.error("card/confirm: No unpaid booking found for user");
         return NextResponse.json({ error: "No unpaid booking found" }, { status: 400 });
       }
-
+ 
+      // Use the booking price as the intended amount
       amountDkk = booking.price;
       console.log("card/confirm: Mock amount from booking", amountDkk, "bookingId:", booking.id);
-
+ 
+      // Create a real Stripe test PaymentIntent so it appears in the Stripe Dashboard (test mode)
+      try {
+        const stripeClient = getStripe();
+        console.log("card/confirm: Creating Stripe test PaymentIntent for mock payment");
+ 
+        const stripeIntent = await stripeClient.paymentIntents.create({
+          amount: Math.round(amountDkk * 100), // øre for DKK
+          currency: 'dkk',
+          // Limit to card payments only so Stripe does not require return_url for redirect methods
+          payment_method_types: ['card'],
+          payment_method: 'pm_card_visa', // Stripe test card
+          confirm: true,
+          metadata: {
+            userId: me.id.toString(),
+            bookingId: booking.id.toString(),
+            userEmail: me.email || '',
+            mock: 'true'
+          }
+        });
+ 
+        console.log("card/confirm: Stripe test PaymentIntent created", {
+          id: stripeIntent.id,
+          status: stripeIntent.status,
+          amount: stripeIntent.amount
+        });
+ 
+        if (stripeIntent.status !== 'succeeded') {
+          console.error("card/confirm: Stripe test payment not completed", { status: stripeIntent.status });
+          return NextResponse.json({ error: "Stripe test payment not completed" }, { status: 400 });
+        }
+ 
+        // Ensure amount is synchronized with Stripe (in case of rounding)
+        amountDkk = stripeIntent.amount / 100;
+      } catch (stripeError: any) {
+        console.error("card/confirm: Stripe test payment failed", stripeError);
+        return NextResponse.json(
+          { error: "Stripe test payment failed", details: stripeError?.message },
+          { status: 500 }
+        );
+      }
+ 
     } else {
       // Real Stripe payment processing
       console.log("card/confirm: Processing real Stripe payment");
-
+ 
       const paymentIntent = await retrievePaymentIntent(paymentIntentId);
       console.log("card/confirm: Payment intent status", paymentIntent.status);
-
+ 
       if (paymentIntent.status !== 'succeeded') {
         console.error("card/confirm: Payment not completed", { status: paymentIntent.status });
         return NextResponse.json({ error: "Payment not completed" }, { status: 400 });
       }
-
+ 
       amountDkk = paymentIntent.amount / 100; // Convert from øre to DKK
-
+ 
       if (bookingId) {
         booking = await prisma.ride.findUnique({
           where: { id: bookingId },

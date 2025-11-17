@@ -165,7 +165,7 @@ export default function AdminCryptoPage(){
             </label>
 
             <label className="grid gap-1">
-              <span className="text-sm text-gray-500">الشبكة</span>
+              <span className="text-sm text-gray-500">Network</span>
               <select value={newNetwork} onChange={e=>setNewNetwork(e.target.value)} className="rounded-xl border px-3 py-2">
                 {getNetworks(newSymbol).map(n => (<option key={n} value={n}>{n}</option>))}
               </select>

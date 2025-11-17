@@ -53,7 +53,7 @@ export default function BookingRedirector(){
         const res = await fetch(action, { method, body: fd as any });
         if (!res.ok) {
           const t = await res.text().catch(()=> "");
-          toast.error(t || "تعذّر إتمام الحجز.");
+          toast.error(t || "Failed to complete the booking.");
           return;
         }
         // Try read JSON to extract id/amount

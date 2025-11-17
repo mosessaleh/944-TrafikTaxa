@@ -135,7 +135,7 @@ export default function GlobalBookingModalManager(){
       if (!btn) return;
       if ((window as any).__bookingBypassHijack) return;
       const txt = (btn.textContent || "").trim().toLowerCase();
-      const isConfirm = /confirm\s*booking/.test(txt) || /تأكيد/.test(txt);
+      const isConfirm = /confirm\s*booking/.test(txt);
       if (!isConfirm) return;
       ev.preventDefault();
       ev.stopImmediatePropagation?.();

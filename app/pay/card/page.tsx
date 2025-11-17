@@ -110,8 +110,8 @@ function CardPaymentContent() {
         credentials: 'include',
         body: JSON.stringify({
           paymentIntentId: `pi_mock_${Date.now()}_success`,
-          bookingId: parseInt(actualBookingId), // تحويل إلى number
-          ...(invoiceId && { invoiceId: parseInt(invoiceId) }) // شرطي فقط إذا كان invoiceId موجود
+          bookingId: parseInt(actualBookingId), // convert to number
+          ...(invoiceId && { invoiceId: parseInt(invoiceId) }) // only include if invoiceId is present
         })
       });
 
