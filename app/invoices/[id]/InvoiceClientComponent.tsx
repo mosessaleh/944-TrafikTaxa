@@ -231,13 +231,11 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
 
               {/* يمين: الشعار ثم رقم الفاتورة تحته */}
               <div className="text-right flex flex-col items-end">
-                <Image
+                {/* نستخدم <img> عادي لتفادي مشاكل next/image مع SVG (خطأ 400: The requested resource isn't a valid image) */}
+                <img
                   src="/logo.svg"
                   alt="944 Trafik - Professional Taxi Service in Denmark"
-                  width={240}
-                  height={56}
                   className="h-14 w-auto"
-                  loading="lazy"
                 />
               </div>
             </div>

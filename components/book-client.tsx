@@ -95,49 +95,96 @@ export default function BookClient(){
     vehicleTypeId: vehicleId || undefined
   }), [pickupSel, dropoffSel, whenType, when, vehicleId]);
 
-  // Initialize Leaflet and map
-  const initializeMap = async () => {
-    if (typeof window === 'undefined') return null;
-    
-    // Load Leaflet from local file
-    if (!(window as any).L) {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = '/leaflet.js';
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
+    // Initialize Leaflet and map
+    const initializeMap = async () => {
+      if (typeof window === 'undefined') return null;
+  
+      // If we've already created a map instance, reuse it
+      if (mapRef.current) {
+        const L = (window as any).L;
+        return { map: mapRef.current, L };
+      }
+  
+      // Load Leaflet from local file (once)
+      if (!(window as any).L) {
+        await new Promise((resolve, reject) => {
+          // Avoid adding multiple script tags for Leaflet
+          const existingScript = document.querySelector('script[src*="leaflet.js"]') as HTMLScriptElement | null;
+          if (existingScript) {
+            if (existingScript.dataset.loaded === 'true') {
+              resolve(null);
+              return;
+            }
+            existingScript.addEventListener('load', () => resolve(null), { once: true });
+            existingScript.addEventListener('error', reject, { once: true });
+            return;
+          }
+  
+          const script = document.createElement('script');
+          script.src = '/leaflet.js';
+          script.async = true;
+          script.dataset.loaded = 'false';
+          script.onload = () => {
+            script.dataset.loaded = 'true';
+            resolve(null);
+          };
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+  
+      const L = (window as any).L;
+  
+      // After Leaflet is loaded, check again if a map was already created
+      if (mapRef.current) {
+        return { map: mapRef.current, L };
+      }
+  
+      // Fix default icon paths for Leaflet
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
       });
-    }
-    
-    const L = (window as any).L;
-    
-    // Fix default icon paths for Leaflet
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-      iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-      shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
-    });
-
-    const mapDiv = document.getElementById('trip-map');
-    if (!mapDiv) return null;
-
-    const map = L.map(mapDiv).setView([55.6761, 12.5683], 12); // Default to Copenhagen
-    
-    // Use CartoDB tiles which have better CORS support
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap contributors © CARTO',
-      crossOrigin: true,
-      maxZoom: 19
-    }).addTo(map);
-
-    return { map, L };
-  };
-
-  // Update map with markers and detailed route (OpenRouteService via /api/route)
+  
+      const mapDiv = document.getElementById('trip-map');
+      if (!mapDiv) return null;
+  
+      // Create the map only once for this container
+      const map = L.map(mapDiv).setView([55.6761, 12.5683], 12); // Default to Copenhagen
+      mapRef.current = map;
+  
+      // Use CartoDB tiles which have better CORS support
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        attribution: '© OpenStreetMap contributors © CARTO',
+        crossOrigin: true,
+        maxZoom: 19
+      }).addTo(map);
+  
+      return { map, L };
+    };
+ 
+  // Initialize base map once so the map container is always populated
+  useEffect(() => {
+    let cancelled = false;
+ 
+    const setup = async () => {
+      if (mapInstance) return;
+      const initialized = await initializeMap();
+      if (!cancelled && initialized) {
+        setMapInstance(initialized);
+      }
+    };
+ 
+    setup();
+ 
+    return () => {
+      cancelled = true;
+    };
+  }, [mapInstance]);
+ 
+  // Update map with any available markers and detailed route when both addresses are selected
   const updateMapWithLocations = async () => {
-    if (!pickupSel || !dropoffSel || !pickupSel.lat || !pickupSel.lon || !dropoffSel.lat || !dropoffSel.lon) return;
-    
     try {
       // Ensure we always have a usable map instance in this call
       let instance = mapInstance;
@@ -147,85 +194,109 @@ export default function BookClient(){
         instance = initialized;
         setMapInstance(initialized);
       }
-
+ 
       const { map, L } = instance;
-      
+ 
+      const hasPickup = !!(pickupSel && pickupSel.lat && pickupSel.lon);
+      const hasDropoff = !!(dropoffSel && dropoffSel.lat && dropoffSel.lon);
+ 
       // Clear existing markers and polylines (keep base tile layer)
       map.eachLayer((layer: any) => {
         if (layer instanceof L.Marker || layer instanceof L.Polyline) {
           map.removeLayer(layer);
         }
       });
-
-      // Add pickup marker (green)
-      const pickupMarker = L.marker([pickupSel.lat, pickupSel.lon], {
-        icon: L.divIcon({
-          className: 'custom-marker',
-          html: `<div style="background-color: #22c55e; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-          iconSize: [20, 20],
-          iconAnchor: [10, 10]
-        })
-      }).addTo(map);
-      pickupMarker.bindPopup(`<strong>Pickup:</strong><br>${pickupSel.text}`);
-
-      // Add dropoff marker (red)
-      const dropoffMarker = L.marker([dropoffSel.lat, dropoffSel.lon], {
-        icon: L.divIcon({
-          className: 'custom-marker',
-          html: `<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-          iconSize: [20, 20],
-          iconAnchor: [10, 10]
-        })
-      }).addTo(map);
-      dropoffMarker.bindPopup(`<strong>Destination:</strong><br>${dropoffSel.text}`);
-
-      // Fit map to show both markers
-      const group = new L.FeatureGroup([pickupMarker, dropoffMarker]);
-      map.fitBounds(group.getBounds().pad(0.1));
-
-      // Default route = straight line (fallback)
-      let routeLatLngs: [number, number][] = [
-        [pickupSel.lat, pickupSel.lon],
-        [dropoffSel.lat, dropoffSel.lon]
-      ];
-
-      // Try to fetch detailed route geometry from our routing API
-      try {
-        const resp = await fetch(
-          `/api/route?startLat=${pickupSel.lat}&startLon=${pickupSel.lon}&endLat=${dropoffSel.lat}&endLon=${dropoffSel.lon}`,
-          { cache: 'no-store' }
-        );
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.ok && data.route?.geometry?.coordinates?.length) {
-            // OpenRouteService returns [lon, lat], Leaflet expects [lat, lon]
-            routeLatLngs = data.route.geometry.coordinates.map(
-              (c: [number, number]) => [c[1], c[0]] as [number, number]
-            );
-          }
-        }
-      } catch (routeErr) {
-        console.warn('Route API failed, falling back to straight line:', routeErr);
+ 
+      const markers: any[] = [];
+ 
+      // Add pickup marker (green) if available
+      if (hasPickup && pickupSel) {
+        const pickupMarker = L.marker([pickupSel.lat, pickupSel.lon], {
+          icon: L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="background-color: #22c55e; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          })
+        }).addTo(map);
+        pickupMarker.bindPopup(`<strong>Pickup:</strong><br>${pickupSel.text}`);
+        markers.push(pickupMarker);
       }
-
-      // Draw route polyline (detailed if API succeeded, straight if not)
-      L.polyline(routeLatLngs, {
-        color: '#3b82f6',
-        weight: 4,
-        opacity: 0.8,
-        dashArray: '10, 5'
-      }).addTo(map);
+ 
+      // Add dropoff marker (red) if available
+      if (hasDropoff && dropoffSel) {
+        const dropoffMarker = L.marker([dropoffSel.lat, dropoffSel.lon], {
+          icon: L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+          })
+        }).addTo(map);
+        dropoffMarker.bindPopup(`<strong>Destination:</strong><br>${dropoffSel.text}`);
+        markers.push(dropoffMarker);
+      }
+ 
+      // Adjust map view based on available markers
+      if (markers.length === 1) {
+        map.setView(markers[0].getLatLng(), 14);
+      } else if (markers.length === 2) {
+        const group = new L.FeatureGroup(markers);
+        map.fitBounds(group.getBounds().pad(0.1));
+      } else if (!hasPickup && !hasDropoff) {
+        // No locations selected, reset to default view
+        map.setView([55.6761, 12.5683], 12);
+      }
+ 
+      // If both pickup and dropoff are available, draw route between them
+      if (hasPickup && hasDropoff && pickupSel && dropoffSel) {
+        // Default route = straight line (fallback)
+        let routeLatLngs: [number, number][] = [
+          [pickupSel.lat as number, pickupSel.lon as number],
+          [dropoffSel.lat as number, dropoffSel.lon as number]
+        ];
+ 
+        // Try to fetch detailed route geometry from our routing API
+        try {
+          const resp = await fetch(
+            `/api/route?startLat=${pickupSel.lat}&startLon=${pickupSel.lon}&endLat=${dropoffSel.lat}&endLon=${dropoffSel.lon}`,
+            { cache: 'no-store' }
+          );
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.ok && data.route?.geometry?.coordinates?.length) {
+              // OpenRouteService returns [lon, lat], Leaflet expects [lat, lon]
+              routeLatLngs = data.route.geometry.coordinates.map(
+                (c: [number, number]) => [c[1], c[0]] as [number, number]
+              );
+            }
+          }
+        } catch (routeErr) {
+          console.warn('Route API failed, falling back to straight line:', routeErr);
+        }
+ 
+        // Draw route polyline (detailed if API succeeded, straight if not)
+        L.polyline(routeLatLngs, {
+          color: '#3b82f6',
+          weight: 4,
+          opacity: 0.8,
+          dashArray: '10, 5'
+        }).addTo(map);
+      }
     } catch (error) {
       console.error('Error updating map:', error);
     }
   };
-
+ 
   // Update map when locations are selected
   useEffect(() => {
-    if (bothSelected && pickupSel && dropoffSel && pickupSel.lat && pickupSel.lon && dropoffSel.lat && dropoffSel.lon) {
-      updateMapWithLocations();
-    }
-  }, [bothSelected, pickupSel, dropoffSel]);
+    const hasPickup = !!(pickupSel && pickupSel.lat && pickupSel.lon);
+    const hasDropoff = !!(dropoffSel && dropoffSel.lat && dropoffSel.lon);
+ 
+    if (!hasPickup && !hasDropoff) return;
+ 
+    updateMapWithLocations();
+  }, [pickupSel, dropoffSel]);
 
   useEffect(() => {
     if(qTimer.current) clearTimeout(qTimer.current);
@@ -376,7 +447,54 @@ export default function BookClient(){
       )}
 
       <div className="grid lg:grid-cols-2 gap-6 lg:gap-8">
-        <div className="card">
+        {/* Price & Map card */}
+        <div className="card-feature bg-gradient-to-br from-emerald-50 via-white to-cyan-50 border-emerald-200 order-1 lg:order-2">
+          <div className="text-center">
+            <div className="inline-flex items-center justify-center w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl mb-4 shadow-lg">
+              <span className="text-xl md:text-2xl">💰</span>
+            </div>
+            <div className="text-sm font-medium text-emerald-700 mb-2">Estimated Price</div>
+            <div className="text-4xl md:text-6xl font-extrabold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent mb-3">
+              {quote ? formatDKK(quote.price) : formatDKK(0)}
+            </div>
+            <div className="text-slate-600">
+              {quote ? (
+                <div className="flex items-center justify-center gap-4 text-sm">
+                  <span className="flex items-center gap-1">
+                    <span>📍</span>
+                    ~{quote.distanceKm?.toFixed?.(2)} km
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span>⏱️</span>
+                    ~{quote.durationMin} min
+                  </span>
+                </div>
+              ) : (
+                <div className="text-slate-500">Select pickup & dropoff addresses to get a quote</div>
+              )}
+              {/* OpenStreetMap for trip visualization */}
+              <div className="mt-4">
+                <div className="h-64 w-full rounded-xl overflow-hidden border border-slate-200">
+                  <div id="trip-map" className="h-full w-full"></div>
+                </div>
+              </div>
+              {qLoading && (
+                <div className="flex items-center justify-center gap-2 mt-2 text-cyan-600">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-cyan-600 border-t-transparent"></div>
+                  Calculating price...
+                </div>
+              )}
+            </div>
+            {qErr && (
+              <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                ⚠️ {qErr}
+              </div>
+            )}
+          </div>
+        </div>
+ 
+        {/* Booking form card */}
+        <div className="card order-2 lg:order-1">
           <div className="card-body">
             <div className="mb-6">
               <h2 className="text-xl font-semibold text-slate-800 mb-4 flex items-center gap-2">
@@ -384,7 +502,7 @@ export default function BookClient(){
                 Trip Details
               </h2>
             </div>
-
+ 
             <div className="grid gap-4 md:gap-6">
               {/* Pickup Address */}
               <div className="space-y-3">
@@ -410,7 +528,7 @@ export default function BookClient(){
                   <span>⭐</span>
                 </button>
               </div>
-
+ 
               {/* Dropoff Address */}
               <div className="space-y-3">
                 <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
@@ -435,7 +553,7 @@ export default function BookClient(){
                   <span>⭐</span>
                 </button>
               </div>
-
+ 
               {/* Vehicle and Passenger Details */}
               <div className="grid gap-4 md:gap-6">
                 <div className="grid sm:grid-cols-2 gap-4 md:gap-6">
@@ -467,7 +585,7 @@ export default function BookClient(){
                     />
                   </div>
                 </div>
-
+ 
                 {/* Time Selection */}
                 <div className="grid sm:grid-cols-2 gap-4 md:gap-6">
                   <div className="space-y-3">
@@ -500,7 +618,7 @@ export default function BookClient(){
                   )}
                 </div>
               </div>
-
+ 
               {/* Book Button */}
               <div className="pt-4 md:pt-6 border-t border-slate-200">
                 <div className="flex flex-col gap-4">
@@ -538,54 +656,7 @@ export default function BookClient(){
             </div>
           </div>
         </div>
-
-        <div className="card-feature bg-gradient-to-br from-emerald-50 via-white to-cyan-50 border-emerald-200">
-          <div className="text-center">
-            <div className="inline-flex items-center justify-center w-12 h-12 md:w-16 md:h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl mb-4 shadow-lg">
-              <span className="text-xl md:text-2xl">💰</span>
-            </div>
-            <div className="text-sm font-medium text-emerald-700 mb-2">Estimated Price</div>
-            <div className="text-4xl md:text-6xl font-extrabold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent mb-3">
-              {quote ? formatDKK(quote.price) : formatDKK(0)}
-            </div>
-            <div className="text-slate-600">
-              {quote ? (
-                <div className="flex items-center justify-center gap-4 text-sm">
-                  <span className="flex items-center gap-1">
-                    <span>📍</span>
-                    ~{quote.distanceKm?.toFixed?.(2)} km
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span>⏱️</span>
-                    ~{quote.durationMin} min
-                  </span>
-                </div>
-              ) : (
-                <div className="text-slate-500">Select pickup & dropoff addresses to get a quote</div>
-              )}
-              {/* OpenStreetMap for trip visualization */}
-              {bothSelected && pickupSel && dropoffSel && (pickupSel.lat && pickupSel.lon && dropoffSel.lat && dropoffSel.lon) && (
-                <div className="mt-4">
-                  <div className="h-64 w-full rounded-xl overflow-hidden border border-slate-200">
-                    <div id="trip-map" className="h-full w-full"></div>
-                  </div>
-                </div>
-              )}
-              {qLoading && (
-                <div className="flex items-center justify-center gap-2 mt-2 text-cyan-600">
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-cyan-600 border-t-transparent"></div>
-                  Calculating price...
-                </div>
-              )}
-            </div>
-            {qErr && (
-              <div className="mt-3 px-3 py-2 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
-                ⚠️ {qErr}
-              </div>
-            )}
-          </div>
-        </div>
-
+ 
       </div>
       </div>
 
