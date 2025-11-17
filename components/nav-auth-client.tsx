@@ -1,6 +1,7 @@
 "use client";
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { getAdminPath } from '@/lib/admin-route';
 
 export function NavLinks(){
   const [me,setMe]=useState<any>(null);
@@ -16,7 +17,7 @@ export function NavLinks(){
       {me?.emailVerified && <Link href="/book" className="hover:underline">Book</Link>}
       {me?.emailVerified && <Link href="/bookings" className="hover:underline">History</Link>}
       {me && <Link href="/profile" className="hover:underline">Profile</Link>}
-      {me?.role === 'ADMIN' && <Link href="/admin" className="hover:underline">Admin</Link>}
+      {me?.role === 'ADMIN' && <Link href={getAdminPath()} className="hover:underline">Admin</Link>}
     </nav>
   );
 }

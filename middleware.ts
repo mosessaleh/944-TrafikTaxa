@@ -59,11 +59,34 @@ export async function middleware(req: NextRequest) {
     }
   }
 
-  const res = NextResponse.next({
+  let res = NextResponse.next({
     request: {
       headers: requestHeaders
     }
   });
+
+  // In production, hide the actual /admin route behind a configurable, less guessable slug.
+  // Example: set ADMIN_ROUTE_SLUG=portal-944-a17c and access via /portal-944-a17c instead of /admin.
+  if (process.env.NODE_ENV === 'production' && process.env.ADMIN_ROUTE_SLUG) {
+    const adminSlug = `/${process.env.ADMIN_ROUTE_SLUG}`;
+    const adminSlugPrefix = `${adminSlug}/`;
+
+    // Block direct access to /admin in production to reduce automated scanning noise
+    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+      return NextResponse.redirect(new URL('/', req.url));
+    }
+
+    // Allow access via the secret slug and internally rewrite to /admin
+    if (pathname === adminSlug || pathname.startsWith(adminSlugPrefix)) {
+      const url = req.nextUrl.clone();
+      url.pathname = pathname.replace(adminSlug, '/admin');
+      res = NextResponse.rewrite(url, {
+        request: {
+          headers: requestHeaders
+        }
+      });
+    }
+  }
 
   // Enhanced security headers
   res.headers.set('X-Frame-Options', 'DENY');

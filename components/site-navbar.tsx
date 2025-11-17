@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
+import { getAdminPath } from '@/lib/admin-route';
 
 export type NavUser = { id:number; firstName:string; lastName:string; role?: 'ADMIN'|'USER' } | null;
 
@@ -22,7 +23,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             <Link href="/pricing" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">💰 Pricing</Link>
             <Link href="/terms" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">📄 Terms</Link>
             {me && <Link href="/history" className="px-4 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200">📋 History</Link>}
-            {isAdmin && <Link href="/admin" className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200">⚙️ Admin</Link>}
+            {isAdmin && <Link href={getAdminPath()} className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200">⚙️ Admin</Link>}
           </nav>
         </div>
 
@@ -108,7 +109,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             )}
             {isAdmin && (
               <Link
-                href="/admin"
+                href={getAdminPath()}
                 className="block px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200"
                 onClick={() => setMobileMenuOpen(false)}
               >

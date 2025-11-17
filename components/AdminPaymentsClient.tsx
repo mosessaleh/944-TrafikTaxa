@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { getAdminPath } from '@/lib/admin-route';
 
 type AdminPaymentType = 'card' | 'crypto' | 'paypal' | 'revolut' | 'invoice';
 
@@ -152,7 +153,7 @@ export default function AdminPaymentsClient({ paymentMethods }: AdminPaymentsCli
           </p>
         </div>
         <Link
-          href="/admin"
+          href={getAdminPath()}
           className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
         >
           ← Back to Dashboard

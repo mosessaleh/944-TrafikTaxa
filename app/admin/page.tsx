@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
 import Link from 'next/link';
+import { getAdminPath } from '@/lib/admin-route';
 
 export default async function AdminHome(){
   const me = await getUserFromCookie();
@@ -283,31 +284,31 @@ export default async function AdminHome(){
       <div className="bg-white rounded-2xl border border-gray-200 p-6">
         <h3 className="text-xl font-bold text-gray-900 mb-4">Quick Actions</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Link href="/admin/bookings" className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+          <Link href={getAdminPath('/bookings')} className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
             <div className="text-2xl mb-2">📋</div>
             <div className="font-medium text-gray-900">Manage Bookings</div>
             <div className="text-sm text-gray-500">View & update rides</div>
           </Link>
 
-          <Link href="/admin/users" className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+          <Link href={getAdminPath('/users')} className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
             <div className="text-2xl mb-2">👥</div>
             <div className="font-medium text-gray-900">User Management</div>
             <div className="text-sm text-gray-500">Manage user accounts</div>
           </Link>
 
-          <Link href="/admin/vehicles" className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+          <Link href={getAdminPath('/vehicles')} className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
             <div className="text-2xl mb-2">🚗</div>
             <div className="font-medium text-gray-900">Vehicle Types</div>
             <div className="text-sm text-gray-500">Configure vehicles</div>
           </Link>
 
-          <Link href="/admin/crypto" className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+          <Link href={getAdminPath('/crypto')} className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
             <div className="text-2xl mb-2">₿</div>
             <div className="font-medium text-gray-900">Crypto Wallets</div>
             <div className="text-sm text-gray-500">Manage payments</div>
           </Link>
 
-          <Link href="/admin/payments" className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
+          <Link href={getAdminPath('/payments')} className="flex flex-col items-center p-4 rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors">
             <div className="text-2xl mb-2">💳</div>
             <div className="font-medium text-gray-900">Payment Methods</div>
             <div className="text-sm text-gray-500">Configure payment options</div>
