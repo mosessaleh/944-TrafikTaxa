@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server';
+import { validateRequestOrigin } from '@/lib/security-headers';
 
 export async function POST(req: Request){
   // كل الكود داخل try شامل، مع استيرادات ديناميكية لمنع أخطاء وقت تحميل الملف
   try{
+    const originCheck = validateRequestOrigin(req);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { ok:false, error:'Invalid request origin' },
+        { status: 403 }
+      );
+    }
+
     const bodyText = await req.text();
     let parsed: any;
     try { parsed = JSON.parse(bodyText || '{}'); } catch { return NextResponse.json({ ok:false, error:'Invalid JSON body' }, { status:400 }); }
@@ -39,17 +48,34 @@ export async function POST(req: Request){
       return NextResponse.json({ ok:false, error:'Invalid email or password' }, { status:401 });
     }
 
-    // إنشاء الجلسة ككوكي
-    const token = authMod.signToken({ id: user.id, role: user.role });
-    const res = NextResponse.json({ ok:true, user: { id:user.id, email:user.email, role:user.role, emailVerified:user.emailVerified, firstName:user.firstName, lastName:user.lastName } });
-    const secure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-    res.cookies.set('session', token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure,
-      path: '/',
-      maxAge: 60*60*24*7
-    });
+        // إنشاء الجلسة ككوكي
+        const token = authMod.signToken({ id: user.id, role: user.role });
+        const res = NextResponse.json({ ok:true, user: { id:user.id, email:user.email, role:user.role, emailVerified:user.emailVerified, firstName:user.firstName, lastName:user.lastName } });
+    
+        const isProd = process.env.NODE_ENV === 'production';
+        const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
+        const secure = isProd ? true : envSecure;
+        const name = isProd ? '__Host-session' : 'session';
+    
+        res.cookies.set(name, token, {
+          httpOnly: true,
+          sameSite: 'lax',
+          secure,
+          path: '/',
+          maxAge: 60*60*24*7
+        });
+    
+        // Clear legacy cookie name when migrating to __Host- prefix
+        if (name === '__Host-session') {
+          res.cookies.set('session', '', {
+            httpOnly: true,
+            sameSite: 'lax',
+            secure,
+            path: '/',
+            maxAge: 0,
+            expires: new Date(0)
+          });
+        }
 
     // تسجيل تسجيل دخول ناجح
     await AuditLogger.logLoginSuccess(user.id.toString(), rl.clientIpKey(req), req.headers.get('user-agent') || undefined);

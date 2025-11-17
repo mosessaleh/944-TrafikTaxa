@@ -45,3 +45,43 @@ export function withSecurityHeaders(resp: Response){
 
   return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
 }
+
+
+export type OriginValidationResult = {
+  ok: boolean;
+  reason?: string;
+};
+
+export function validateRequestOrigin(req: Request): OriginValidationResult {
+  // Only enforce strict Origin/Referer checks in production to avoid breaking local/dev tools
+  if (process.env.NODE_ENV !== 'production') {
+    return { ok: true };
+  }
+
+  const allowedOrigin = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
+  if (!allowedOrigin) {
+    // If not configured, do not block requests to avoid accidental outage
+    return { ok: true };
+  }
+
+  const origin = req.headers.get('origin');
+  const referer = req.headers.get('referer');
+  const header = origin || referer;
+
+  if (!header) {
+    return { ok: false, reason: 'Missing Origin/Referer header' };
+  }
+
+  try {
+    const requestUrl = new URL(header);
+    const allowedUrl = new URL(allowedOrigin);
+
+    if (requestUrl.protocol === allowedUrl.protocol && requestUrl.host === allowedUrl.host) {
+      return { ok: true };
+    }
+
+    return { ok: false, reason: 'Untrusted Origin/Referer' };
+  } catch {
+    return { ok: false, reason: 'Invalid Origin/Referer' };
+  }
+}

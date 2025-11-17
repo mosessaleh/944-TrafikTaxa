@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { hashPassword, signToken } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
+import { validateRequestOrigin } from '@/lib/security-headers';
 
 const Schema = z.object({
   email: z.string().email(),
@@ -15,6 +16,14 @@ const Schema = z.object({
 
 export async function POST(req: Request){
   try{
+    const originCheck = validateRequestOrigin(req);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { ok:false, error:'Invalid request origin' },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const parsed = Schema.safeParse(body);
     if (!parsed.success) {
@@ -49,8 +58,26 @@ export async function POST(req: Request){
 
     const token = signToken({ id: user.id, role: user.role });
     const res = NextResponse.json({ ok:true, mail: mail.ok, next: `/verify?email=${encodeURIComponent(user.email)}` });
-    const secure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-    res.cookies.set('session', token, { httpOnly:true, secure, sameSite:'lax', path:'/', maxAge:60*60*24*7 });
+
+    const isProd = process.env.NODE_ENV === 'production';
+    const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
+    const secure = isProd ? true : envSecure;
+    const name = isProd ? '__Host-session' : 'session';
+
+    res.cookies.set(name, token, { httpOnly:true, secure, sameSite:'lax', path:'/', maxAge:60*60*24*7 });
+
+    // Clear legacy cookie when migrating to __Host- prefix
+    if (name === '__Host-session') {
+      res.cookies.set('session', '', {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure,
+        path: '/',
+        maxAge: 0,
+        expires: new Date(0)
+      });
+    }
+
     return res;
   }catch(e:any){
     return NextResponse.json({ ok:false, error:e?.message||'Invalid' }, { status:400 });

@@ -3,9 +3,18 @@ import { getUserFromCookie } from "@/lib/auth";
 import { createPaymentIntent } from "@/lib/stripe";
 import { CardPaymentIntentSchema } from "@/lib/validation";
 import { prisma } from "@/lib/db";
+import { validateRequestOrigin } from "@/lib/security-headers";
 
 export async function POST(request: Request) {
   try {
+    const originCheck = validateRequestOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { error: "Invalid request origin" },
+        { status: 403 }
+      );
+    }
+
     console.log("card/create: Starting payment intent creation");
 
     const me = await getUserFromCookie();

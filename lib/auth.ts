@@ -14,33 +14,62 @@ export async function comparePassword(plain: string, hashed: string){ return cmp
 
 export function setSessionCookie(token: string){
   const jar = cookies();
-  const secure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-  jar.set('session', token, {
+  const isProd = process.env.NODE_ENV === 'production';
+  const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
+  const secure = isProd ? true : envSecure;
+  const name = isProd ? '__Host-session' : 'session';
+
+  jar.set(name, token, {
     httpOnly: true,
-    sameSite: 'strict', // Changed from 'lax' to 'strict' for better security
+    sameSite: 'lax',
     secure,
     path: '/',
     maxAge: 60*60*24*7,
     // Additional security options
     partitioned: false // Can be enabled for CHIPS support in the future
   });
+
+  // Clear any legacy cookie name when migrating to __Host- prefix
+  if (name === '__Host-session') {
+    jar.set('session', '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      path: '/',
+      maxAge: 0,
+      expires: new Date(0)
+    });
+  }
 }
 
 export function clearSessionCookie(){
   const jar = cookies();
-  const secure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-  jar.set('session', '', {
-    httpOnly: true,
-    sameSite: 'strict', // Changed from 'lax' to 'strict' for better security
-    secure,
-    path: '/',
-    maxAge: 0,
-    expires: new Date(0) // Explicitly expire the cookie
-  });
+  const isProd = process.env.NODE_ENV === 'production';
+  const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
+  const secure = isProd ? true : envSecure;
+
+  // Always clear both possible cookie names to avoid stale sessions
+  const names = isProd ? ['__Host-session', 'session'] : ['session', '__Host-session'];
+
+  for (const name of names) {
+    jar.set(name, '', {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure,
+      path: '/',
+      maxAge: 0,
+      expires: new Date(0) // Explicitly expire the cookie
+    });
+  }
 }
 
 export async function getUserFromCookie(){
-  const token = cookies().get('session')?.value;
+  const jar = cookies();
+  const isProd = process.env.NODE_ENV === 'production';
+  const primaryName = isProd ? '__Host-session' : 'session';
+  const fallbackName = primaryName === '__Host-session' ? 'session' : '__Host-session';
+
+  const token = jar.get(primaryName)?.value || jar.get(fallbackName)?.value;
   if (!token) return null;
 
   try{
