@@ -41,6 +41,9 @@ coverage
 /.firebase/auth
 public/invoices
 
+# TypeScript incremental build info
+*.tsbuildinfo
+ 
 # Documentation with sensitive details
 docs/API_DOCUMENTATION.md
 docs/PRACTICAL_EXAMPLES.md
