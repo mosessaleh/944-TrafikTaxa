@@ -3,6 +3,11 @@ import { prisma } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
 
 export async function POST(req: Request){
+  // Hard-disable this dev endpoint outside development to prevent abuse in production
+  if (process.env.NODE_ENV !== 'development') {
+    return NextResponse.json({ ok:false, error:'Not available' }, { status:404 });
+  }
+
   try{
     const { email, password, token } = await req.json();
     if (!token || token !== process.env.ADMIN_TOKEN) return NextResponse.json({ ok:false, error:'Forbidden' }, { status:403 });

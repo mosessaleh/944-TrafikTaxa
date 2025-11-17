@@ -1,15 +1,16 @@
 import { NextRequest } from 'next/server';
 import { RealtimeManager, SSEManager } from '@/lib/realtime';
+import { getUserFromCookie } from '@/lib/auth';
 
 // WebSocket handler for real-time communication (Node.js server only)
 // This endpoint will be handled by a custom server for WebSocket support
 export async function GET(req: NextRequest) {
-  // For now, return SSE fallback
-  const userId = req.headers.get('x-user-id'); // This would be set by middleware
-
-  if (!userId) {
+  // Secure SSE fallback using the real authenticated user instead of a spoofable header
+  const me = await getUserFromCookie();
+  if (!me) {
     return new Response('Authentication required', { status: 401 });
   }
+  const userId = me.id.toString();
 
   // Create SSE stream
   const stream = new ReadableStream({
@@ -33,8 +34,6 @@ export async function GET(req: NextRequest) {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Cache-Control',
     },
   });
 }

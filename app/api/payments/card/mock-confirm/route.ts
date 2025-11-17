@@ -4,6 +4,11 @@ import { notifyAdmin, notifyUserEmail } from "@/lib/notify";
 import { prisma } from "@/lib/db";
 
 export async function POST(request: Request) {
+  // Dev-only mock endpoint: hard-disabled in non-development environments
+  if (process.env.NODE_ENV !== 'development') {
+    return NextResponse.json({ error: "Not available" }, { status: 404 });
+  }
+
   const me = await getCurrentUser();
   if (!me) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
