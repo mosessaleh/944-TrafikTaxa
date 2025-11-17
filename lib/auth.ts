@@ -3,7 +3,13 @@ import { prisma } from '@/lib/db';
 import { sign, verify } from 'jsonwebtoken';
 import { comparePassword as cmp, hashPassword as hsh } from '@/lib/crypto';
 
-const SECRET = process.env.SECRET || 'change_me_dev_secret';
+const SECRET =
+  process.env.SECRET ||
+  (process.env.NODE_ENV === 'production'
+    ? (() => {
+        throw new Error('SECRET env var is required in production');
+      })()
+    : 'change_me_dev_secret');
 
 export function signToken(payload: Record<string, any>){
   return sign(payload, SECRET, { expiresIn: '7d' });

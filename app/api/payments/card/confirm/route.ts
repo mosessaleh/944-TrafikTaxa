@@ -4,9 +4,18 @@ import { prisma } from "@/lib/db";
 import { retrievePaymentIntent, stripe as getStripe } from "@/lib/stripe";
 import { ConfirmCardPaymentSchema } from "@/lib/validation";
 import { notifyUserPaymentReceived, notifyUserBookingConfirmation, notifyAdmin } from "@/lib/notify";
+import { validateRequestOrigin } from "@/lib/security-headers";
 
 export async function POST(request: Request) {
   try {
+    const originCheck = validateRequestOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { error: "Invalid request origin" },
+        { status: 403 }
+      );
+    }
+
     console.log("card/confirm: Starting payment confirmation");
 
     const me = await getUserFromCookie();

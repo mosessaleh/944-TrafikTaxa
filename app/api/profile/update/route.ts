@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
+import { validateRequestOrigin } from '@/lib/security-headers';
 
 const Schema = z.object({
   firstName: z.string().min(1),
@@ -14,6 +15,14 @@ const Schema = z.object({
 
 export async function POST(req: Request){
   try{
+    const originCheck = validateRequestOrigin(req);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { ok:false, error:'Invalid request origin' },
+        { status:403 }
+      );
+    }
+
     const me = await getUserFromCookie();
     if (!me) return NextResponse.json({ ok:false, error:'Unauthorized' }, { status:401 });
 

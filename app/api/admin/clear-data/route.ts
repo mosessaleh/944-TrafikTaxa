@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
+import { validateRequestOrigin } from '@/lib/security-headers';
 
 export async function POST(
   request: NextRequest,
 ) {
   try {
+    const originCheck = validateRequestOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { error: 'Invalid request origin' },
+        { status: 403 }
+      );
+    }
+
     const me = await getUserFromCookie();
     if (!me || me.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -136,6 +145,14 @@ export async function GET(
   request: NextRequest,
 ) {
   try {
+    const originCheck = validateRequestOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { error: 'Invalid request origin' },
+        { status: 403 }
+      );
+    }
+
     const me = await getUserFromCookie();
     if (!me || me.role !== 'ADMIN') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

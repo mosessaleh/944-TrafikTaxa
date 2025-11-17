@@ -20,6 +20,14 @@ export type CurrentUser = {
  * If absent or invalid, returns null.
  */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
+  // IMPORTANT:
+  // This helper is based on an unsigned "me" cookie and is NOT safe for
+  // authenticating production traffic. To prevent privilege escalation by
+  // forging the cookie, we hard-disable it in production.
+  if (process.env.NODE_ENV === 'production') {
+    return null;
+  }
+
   try {
     const raw = cookies().get('me')?.value;
     if (!raw) return null;

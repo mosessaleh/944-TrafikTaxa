@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/lib/session";
+import { getUserFromCookie } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { RevolutPaymentIntentSchema } from "@/lib/validation";
+import { validateRequestOrigin } from "@/lib/security-headers";
 
 export async function POST(request: Request) {
   try {
-    const me = await getCurrentUser();
+    const originCheck = validateRequestOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json(
+        { error: "Invalid request origin" },
+        { status: 403 }
+      );
+    }
+
+    const me = await getUserFromCookie();
     if (!me) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
 
     const raw = await request.json().catch(() => ({}));
@@ -15,11 +24,21 @@ export async function POST(request: Request) {
     }
 
     const { amountDkk } = parsed.data;
+    if (!amountDkk || amountDkk <= 0) {
+      return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
+    }
 
     // In development, simulate Revolut payment
     if (process.env.NODE_ENV === 'development') {
-      // Create mock Revolut payment URL
-      const mockPaymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/pay/revolut/success?payment_id=mock_revolut_${Date.now()}`;
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
+      if (!appUrl) {
+        return NextResponse.json(
+          { error: "App URL not configured for mock Revolut flow" },
+          { status: 500 }
+        );
+      }
+
+      const mockPaymentUrl = `${appUrl}/pay/revolut/success?payment_id=mock_revolut_${Date.now()}`;
 
       return NextResponse.json({
         ok: true,
@@ -28,13 +47,12 @@ export async function POST(request: Request) {
       });
     }
 
-    // TODO: Implement real Revolut integration
-    // For now, return mock response
-    return NextResponse.json({
-      ok: true,
-      paymentUrl: `${process.env.NEXT_PUBLIC_APP_URL}/pay/revolut/success?payment_id=revolut_${Date.now()}`,
-      paymentId: `revolut_${Date.now()}`,
-    });
+    // In non-development environments, do NOT create fake Revolut flows.
+    // Real Revolut integration must be implemented before enabling this.
+    return NextResponse.json(
+      { error: "Revolut integration is not implemented on this server" },
+      { status: 501 }
+    );
   } catch (e: any) {
     console.error("revolut/create failed:", e?.message || e);
     return NextResponse.json({
