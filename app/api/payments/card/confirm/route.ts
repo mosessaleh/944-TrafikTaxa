@@ -30,7 +30,8 @@ export async function POST(request: Request) {
     console.log("card/confirm: Parsed data", { paymentIntentId, bookingId, invoiceId });
 
     let amountDkk = 0;
-    let booking = null;
+    let booking: any = null;
+    let invoiceForAmount: any = null;
  
     // Handle mock payments for admin users (development flow)
     if (paymentIntentId.startsWith('pi_mock_')) {
@@ -113,31 +114,130 @@ export async function POST(request: Request) {
     } else {
       // Real Stripe payment processing
       console.log("card/confirm: Processing real Stripe payment");
- 
+
       const paymentIntent = await retrievePaymentIntent(paymentIntentId);
       console.log("card/confirm: Payment intent status", paymentIntent.status);
- 
+
       if (paymentIntent.status !== 'succeeded') {
         console.error("card/confirm: Payment not completed", { status: paymentIntent.status });
         return NextResponse.json({ error: "Payment not completed" }, { status: 400 });
       }
- 
-      amountDkk = paymentIntent.amount / 100; // Convert from øre to DKK
- 
-      if (bookingId) {
+
+      // Prefer booking/invoice identifiers from Stripe metadata (server-controlled)
+      const metadata = (paymentIntent as any).metadata || {};
+      const metaBookingId = metadata.bookingId ? Number(metadata.bookingId) : undefined;
+      const metaInvoiceId = metadata.invoiceId ? Number(metadata.invoiceId) : undefined;
+      const metaExpectedAmountDkk = metadata.expectedAmountDkk
+        ? Number(metadata.expectedAmountDkk)
+        : undefined;
+
+      const effectiveBookingId = Number.isFinite(metaBookingId) && metaBookingId! > 0
+        ? metaBookingId
+        : bookingId;
+
+      const effectiveInvoiceId = Number.isFinite(metaInvoiceId) && metaInvoiceId! > 0
+        ? metaInvoiceId
+        : invoiceId;
+
+      console.log("card/confirm: Effective linkage from metadata/body", {
+        bookingIdBody: bookingId,
+        invoiceIdBody: invoiceId,
+        bookingIdMeta: metaBookingId,
+        invoiceIdMeta: metaInvoiceId,
+        effectiveBookingId,
+        effectiveInvoiceId,
+      });
+
+      if (!effectiveBookingId && !effectiveInvoiceId) {
+        console.error("card/confirm: No booking/invoice linkage found in metadata or body");
+        return NextResponse.json(
+          { error: "Unable to link payment to booking/invoice" },
+          { status: 400 }
+        );
+      }
+
+      if (effectiveBookingId) {
         booking = await prisma.ride.findUnique({
-          where: { id: bookingId },
+          where: { id: effectiveBookingId },
           include: { user: true, vehicleType: true }
         });
-      } else if (invoiceId) {
-        const invoice = await prisma.invoice.findUnique({
-          where: { id: invoiceId },
+        if (!booking) {
+          console.error("card/confirm: Booking not found for effectiveBookingId", {
+            effectiveBookingId,
+          });
+          return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+        }
+      } else if (effectiveInvoiceId) {
+        invoiceForAmount = await prisma.invoice.findUnique({
+          where: { id: effectiveInvoiceId },
           include: { ride: { include: { user: true, vehicleType: true } } }
         });
-        if (invoice) {
-          booking = invoice.ride;
+        if (!invoiceForAmount) {
+          console.error("card/confirm: Invoice not found for effectiveInvoiceId", {
+            effectiveInvoiceId,
+          });
+          return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+        }
+        booking = invoiceForAmount.ride;
+        if (!booking) {
+          console.error("card/confirm: Invoice has no associated ride", {
+            effectiveInvoiceId,
+          });
+          return NextResponse.json(
+            { error: "Invoice has no associated ride" },
+            { status: 500 }
+          );
         }
       }
+
+      // Derive authoritative amount from DB: prefer invoice.paymentAmount, else ride.price
+      const dbAmountDkk =
+        invoiceForAmount &&
+        typeof invoiceForAmount.paymentAmount === "number" &&
+        invoiceForAmount.paymentAmount > 0
+          ? invoiceForAmount.paymentAmount
+          : booking.price;
+
+      const amountFromGatewayDkk = paymentIntent.amount / 100; // Convert from øre to DKK
+
+      console.log("card/confirm: Amounts for verification", {
+        dbAmountDkk,
+        amountFromGatewayDkk,
+        paymentIntentAmount: paymentIntent.amount,
+        metaExpectedAmountDkk,
+      });
+
+      // Assert server-side: the amount charged by Stripe must equal the DB amount
+      if (Math.round(dbAmountDkk * 100) !== paymentIntent.amount) {
+        console.error("card/confirm: Amount mismatch between DB and Stripe", {
+          dbAmountDkk,
+          dbAmountOre: Math.round(dbAmountDkk * 100),
+          stripeAmountOre: paymentIntent.amount,
+        });
+        return NextResponse.json(
+          { error: "Payment amount mismatch. Please contact support." },
+          { status: 400 }
+        );
+      }
+
+      // Optional secondary check against metadata.expectedAmountDkk (defense-in-depth)
+      if (
+        typeof metaExpectedAmountDkk === "number" &&
+        metaExpectedAmountDkk > 0 &&
+        Math.round(metaExpectedAmountDkk * 100) !== paymentIntent.amount
+      ) {
+        console.error("card/confirm: Metadata expectedAmountDkk mismatch", {
+          metaExpectedAmountDkk,
+          metaExpectedAmountOre: Math.round(metaExpectedAmountDkk * 100),
+          stripeAmountOre: paymentIntent.amount,
+        });
+        return NextResponse.json(
+          { error: "Payment amount mismatch (metadata). Please contact support." },
+          { status: 400 }
+        );
+      }
+
+      amountDkk = amountFromGatewayDkk;
     }
 
     if (!booking) {

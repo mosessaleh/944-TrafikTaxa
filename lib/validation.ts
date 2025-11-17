@@ -66,7 +66,7 @@ export const VerifyEmailSchema = z.object({
 
 export type VerifyEmailInput = z.infer<typeof VerifyEmailSchema>;
 
-// Card Payment Schema
+ // Card Payment Schema
 export const CardPaymentSchema = z.object({
   amountDkk: z.number().positive()
 });
@@ -75,9 +75,12 @@ export type CardPaymentInput = z.infer<typeof CardPaymentSchema>;
 
 // Card Payment Intent Schema
 export const CardPaymentIntentSchema = z.object({
-  amountDkk: z.number().positive(),
-  bookingId: z.number().int().positive().optional()
-});
+  bookingId: z.number().int().positive().optional(),
+  invoiceId: z.number().int().positive().optional()
+}).refine(
+  (data) => !!data.bookingId || !!data.invoiceId,
+  { message: "Either bookingId or invoiceId must be provided" }
+);
 
 export type CardPaymentIntentInput = z.infer<typeof CardPaymentIntentSchema>;
 

@@ -16,16 +16,30 @@ function getStripe() {
 
 export { getStripe as stripe };
 
-export async function createPaymentIntent(amount: number, currency: string = 'dkk', metadata?: Record<string, string>) {
+export async function createPaymentIntent(
+  amount: number,
+  currency: string = 'dkk',
+  metadata?: Record<string, string>,
+  idempotencyKey?: string
+) {
   const stripe = getStripe();
-  return await stripe.paymentIntents.create({
+
+  const params: Stripe.PaymentIntentCreateParams = {
     amount: Math.round(amount * 100), // Convert to smallest currency unit (øre for DKK)
     currency,
     metadata,
     automatic_payment_methods: {
       enabled: true,
     },
-  });
+  };
+
+  // Enable idempotency so repeated client calls for the same booking/invoice
+  // cannot create multiple different PaymentIntents with different amounts.
+  const options: Stripe.RequestOptions | undefined = idempotencyKey
+    ? { idempotencyKey }
+    : undefined;
+
+  return await stripe.paymentIntents.create(params, options);
 }
 
 export async function confirmPaymentIntent(paymentIntentId: string) {
