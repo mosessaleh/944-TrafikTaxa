@@ -10,7 +10,8 @@ export default function RegisterPage(){
     firstName: '',
     lastName: '',
     phone: '',
-    address: ''
+    address: '',
+    acceptTerms: false,
   });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -66,7 +67,7 @@ export default function RegisterPage(){
     }
   }
 
-  const updateField = (field: string, value: string) => {
+  const updateField = (field: string, value: string | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
@@ -177,6 +178,26 @@ export default function RegisterPage(){
               <p className="mt-1 text-sm text-red-600">{fieldErrors.address}</p>
             )}
           </div>
+
+          {/* Accept terms */}
+          <div className="mt-2 flex items-start gap-2">
+            <input
+              id="acceptTerms"
+              type="checkbox"
+              className="mt-1 h-4 w-4 rounded border-slate-300"
+              checked={formData.acceptTerms}
+              onChange={(e) => updateField('acceptTerms', e.target.checked)}
+            />
+            <label htmlFor="acceptTerms" className="text-sm text-slate-700">
+              I confirm that I am at least 15 years old and I have read and agree to the{' '}
+              <a href="/terms" className="text-cyan-600 hover:text-cyan-700 underline">
+                site rules and terms
+              </a>.
+            </label>
+          </div>
+          {fieldErrors.acceptTerms && (
+            <p className="mt-1 text-sm text-red-600">{fieldErrors.acceptTerms}</p>
+          )}
 
           {/* Submit Button */}
           <button

@@ -129,12 +129,16 @@ export const RevolutPaymentIntentSchema = z.object({
 
 export type RevolutPaymentIntentInput = z.infer<typeof RevolutPaymentIntentSchema>;
 
-// Optional: a ready-to-use schema (use it in your route if desired)
+ // Optional: a ready-to-use schema (use it in your route if desired)
 export const RegisterSchema = z.object({
   firstName: z.string().min(2),
   lastName: z.string().min(2),
   address: z.string().min(3),
   email: z.string().email(),
   password: z.string().min(8),
-  phone: z.string().min(6)
+  phone: z.string().min(6),
+  // User must explicitly accept the site rules & terms
+  acceptTerms: z.literal(true, {
+    errorMap: () => ({ message: 'You must accept the site rules and terms' }),
+  }),
 });

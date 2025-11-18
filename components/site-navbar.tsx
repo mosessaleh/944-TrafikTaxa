@@ -17,13 +17,47 @@ export default function SiteNavbar({ me }: { me: NavUser }){
           <Link href="/" className="flex items-center gap-3 group" aria-label="944 Trafik home">
             <img src="/logo.svg" alt="944 Trafik" className="h-10 w-auto drop-shadow-sm group-hover:scale-105 transition-transform duration-300" />
           </Link>
-          <nav className="hidden md:flex items-center gap-2">
-            <Link href="/" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">🏠 Home</Link>
-            <Link href="/book" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">🚗 Book Ride</Link>
-            <Link href="/pricing" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">💰 Pricing</Link>
-            <Link href="/terms" className="px-3 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm">📄 Terms</Link>
-            {me && <Link href="/history" className="px-4 py-2 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200">📋 History</Link>}
-            {isAdmin && <Link href={getAdminPath()} className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200">⚙️ Admin</Link>}
+          <nav className="hidden md:flex items-center gap-1 lg:gap-2">
+            <Link
+              href="/"
+              className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+            >
+              Home
+            </Link>
+            <Link
+              href="/book"
+              className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+            >
+              Book ride
+            </Link>
+            <Link
+              href="/pricing"
+              className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+            >
+              Pricing
+            </Link>
+            <Link
+              href="/terms"
+              className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+            >
+              Terms & rules
+            </Link>
+            {me && (
+              <Link
+                href="/history"
+                className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+              >
+                My trips
+              </Link>
+            )}
+            {isAdmin && (
+              <Link
+                href={getAdminPath()}
+                className="ml-1 px-3.5 py-2 rounded-lg bg-slate-900 text-xs sm:text-sm font-semibold text-white shadow-sm hover:bg-black hover:shadow-md transition-colors"
+              >
+                Admin panel
+              </Link>
+            )}
           </nav>
         </div>
 
@@ -46,8 +80,12 @@ export default function SiteNavbar({ me }: { me: NavUser }){
         <div className="hidden md:flex items-center gap-3">
           {!me && (
             <>
-              <Link href="/login" className="btn-ghost">👤 Login</Link>
-              <Link href="/register" className="btn-primary shadow-lg">✨ Get Started</Link>
+              <Link href="/login" className="btn-ghost text-sm">
+                Log in
+              </Link>
+              <Link href="/register" className="btn-primary shadow-md text-sm">
+                Create account
+              </Link>
             </>
           )}
           {me && (
@@ -72,48 +110,48 @@ export default function SiteNavbar({ me }: { me: NavUser }){
           <nav className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-4 space-y-2">
             <Link
               href="/"
-              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
+              className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              🏠 Home
+              Home
             </Link>
             <Link
               href="/book"
-              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
+              className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              🚗 Book Ride
+              Book ride
             </Link>
             <Link
               href="/pricing"
-              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
+              className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              💰 Pricing
+              Pricing
             </Link>
             <Link
               href="/terms"
-              className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200 text-sm"
+              className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              📄 Terms
+              Terms & rules
             </Link>
             {me && (
               <Link
                 href="/history"
-                className="block px-4 py-3 rounded-xl hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-all duration-200"
+                className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                📋 History
+                My trips
               </Link>
             )}
             {isAdmin && (
               <Link
                 href={getAdminPath()}
-                className="block px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-medium shadow-lg hover:shadow-xl transition-all duration-200"
+                className="block px-4 py-3 rounded-lg bg-slate-900 text-white font-medium shadow-sm hover:bg-black hover:shadow-md transition-colors text-sm"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                ⚙️ Admin
+                Admin panel
               </Link>
             )}
 
@@ -122,17 +160,17 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                 <div className="space-y-2">
                   <Link
                     href="/login"
-                    className="block w-full btn-ghost text-center"
+                    className="block w-full btn-ghost text-center text-sm"
                     onClick={() => setMobileMenuOpen(false)}
                   >
-                    👤 Login
+                    Log in
                   </Link>
                   <Link
                     href="/register"
-                    className="block w-full btn-primary text-center shadow-lg"
+                    className="block w-full btn-primary text-center shadow-md text-sm"
                     onClick={() => setMobileMenuOpen(false)}
                   >
-                    ✨ Get Started
+                    Create account
                   </Link>
                 </div>
               ) : (
@@ -145,11 +183,11 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                   </div>
                   <form action="/api/auth/logout" method="post">
                     <button
-                      className="w-full btn-ghost text-center"
+                      className="w-full btn-ghost text-center text-sm"
                       type="submit"
                       onClick={() => setMobileMenuOpen(false)}
                     >
-                      🚪 Logout
+                      Logout
                     </button>
                   </form>
                 </div>
