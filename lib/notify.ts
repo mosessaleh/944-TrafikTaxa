@@ -63,6 +63,14 @@ export async function notifyUserEmail(to: string, subject: string, body: string,
   }
 }
 
+/**
+ * Wrap arbitrary HTML body content inside the standard 944 Trafik
+ * email template (header with logo + footer with contact/signature).
+ */
+export function wrapWithBrandedTemplate(title: string, rawHtmlBody: string): string {
+  return createEmailTemplate(title, rawHtmlBody);
+}
+
 export async function notifyUserWelcome(to: string, firstName: string) {
   const subject = "Welcome to 944 Trafik! 🎉";
   const content = `

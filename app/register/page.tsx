@@ -165,9 +165,6 @@ export default function RegisterPage(){
 
           {/* Address Field */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Address
-            </label>
             <AddressAutocomplete
               label="Address"
               name="address"

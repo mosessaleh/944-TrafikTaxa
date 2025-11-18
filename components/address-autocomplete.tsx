@@ -63,7 +63,7 @@ export default function AddressAutocomplete({
 
   return (
     <div className="grid gap-1" ref={boxRef}>
-      <label className="text-sm text-gray-700">{label}</label>
+      <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
       <input
         name={name}
         value={value}
