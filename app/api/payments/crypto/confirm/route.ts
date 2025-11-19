@@ -2,23 +2,72 @@ import { NextResponse } from "next/server";
 import { getUserFromCookie } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { CryptoPaymentSchema } from "@/lib/validation";
-import { notifyAdmin, notifyUserEmail, notifyUserPaymentReceived } from "@/lib/notify";
+import { notifyAdmin, notifyUserPaymentReceived } from "@/lib/notify";
 
 export async function POST(request: Request) {
   try {
     const me = await getUserFromCookie();
-    if (!me) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+    if (!me) {
+      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+    }
 
     const raw = await request.json().catch(() => ({}));
     const parsed = CryptoPaymentSchema.safeParse(raw);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid payload", details: parsed.error.flatten() }, { status: 400 });
+      return NextResponse.json(
+        { error: "Invalid payload", details: parsed.error.flatten() },
+        { status: 400 }
+      );
     }
     const { symbol, walletId, network, address, amountDkk, amountCoin } = parsed.data;
 
-    // Get booking ID from query params or body
+    // Get booking ID from query params or body (required for crypto payments)
     const url = new URL(request.url);
-    const bookingId = url.searchParams.get('booking_id') || raw.bookingId;
+    const bookingIdParam = url.searchParams.get("booking_id") || raw.bookingId;
+
+    if (!bookingIdParam) {
+      return NextResponse.json(
+        { error: "Crypto payments are only allowed for scheduled bookings with a valid booking_id" },
+        { status: 400 }
+      );
+    }
+
+    const bookingId = parseInt(bookingIdParam, 10);
+    if (Number.isNaN(bookingId)) {
+      return NextResponse.json({ error: "Invalid booking_id" }, { status: 400 });
+    }
+
+    // Load the related booking to enforce business rules
+    const ride = await prisma.ride.findUnique({
+      where: { id: bookingId },
+      select: {
+        scheduled: true,
+        pickupTime: true,
+      },
+    });
+
+    if (!ride) {
+      return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+    }
+
+    const now = new Date();
+    const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+
+    // 1) Crypto only for scheduled bookings
+    if (!ride.scheduled) {
+      return NextResponse.json(
+        { error: "Crypto payments are only allowed for scheduled rides" },
+        { status: 400 }
+      );
+    }
+
+    // 2) For scheduled bookings, pickup time must be at least 1 hour from now
+    if (ride.pickupTime <= oneHourFromNow) {
+      return NextResponse.json(
+        { error: "For crypto payments, the scheduled pickup time must be at least 1 hour from now" },
+        { status: 400 }
+      );
+    }
 
     // Create new crypto payment record
     const pay = await prisma.cryptoPayment.create({
@@ -29,24 +78,21 @@ export async function POST(request: Request) {
         address,
         amountDkk,
         amountCoin,
-        status: "confirmed"
-      }
+        status: "confirmed",
+      },
     });
 
-    // Update booking status to PENDING PAYMENT if bookingId provided
-    if (bookingId) {
-      console.log(`Updating booking ${bookingId} status to PENDING with pending payment`);
-      await prisma.ride.update({
-        where: { id: parseInt(bookingId) },
-        data: {
-          status: 'PENDING',
-          paymentStatus: 'CRYPTO_PENDING',
-          paymentMethod: 'crypto',
-          explanation: 'Waiting for crypto payment confirmation'
-        }
-      });
-      console.log(`Booking ${bookingId} updated successfully`);
-    }
+    // Update booking status to PENDING / CRYPTO_PENDING
+    console.log(`Updating booking ${bookingId} status to PENDING with pending crypto payment`);
+    await prisma.ride.update({
+      where: { id: bookingId },
+      data: {
+        status: "PENDING",
+        paymentStatus: "CRYPTO_PENDING",
+        paymentMethod: "crypto",
+        explanation: "Waiting for crypto payment confirmation",
+      },
+    });
 
     // Notify user (payment confirmed)
     if (me.email) {
@@ -54,7 +100,7 @@ export async function POST(request: Request) {
         amount: amountDkk,
         method: `${symbol.toUpperCase()} (${network})`,
         transactionId: pay.id,
-        bookingId: bookingId
+        bookingId: bookingId,
       };
       await notifyUserPaymentReceived(me.email, me.firstName, paymentDetails).catch(() => {});
     }
@@ -69,7 +115,7 @@ export async function POST(request: Request) {
         <p>Address: ${address}</p>
         <p>Amount: ${amountDkk} DKK (~ ${amountCoin} ${symbol.toUpperCase()})</p>
         <p>Payment ID: <code>${pay.id}</code></p>
-        ${bookingId ? `<p>Booking ID: <code>${bookingId}</code></p>` : ''}
+        <p>Booking ID: <code>${bookingId}</code></p>
       </div>
     `;
     await notifyAdmin(subjectAdmin, htmlAdmin).catch(() => {});

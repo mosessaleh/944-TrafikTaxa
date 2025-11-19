@@ -19,7 +19,7 @@ function PayIndexContent(){
 
 
   // State for booking data
-  const [bookingData, setBookingData] = useState<{price: number} | null>(null);
+  const [bookingData, setBookingData] = useState<{ price: number; scheduled?: boolean; pickupTime?: string | null } | null>(null);
   const [loadingBooking, setLoadingBooking] = useState(false);
   const [hasInvoicePaymentMethod, setHasInvoicePaymentMethod] = useState(false);
 
@@ -39,7 +39,11 @@ function PayIndexContent(){
           if (bookingResponse.ok) {
             const bookingData = await bookingResponse.json();
             if (bookingData.ride) {
-              setBookingData({ price: bookingData.ride.price });
+              setBookingData({
+                price: bookingData.ride.price,
+                scheduled: bookingData.ride.scheduled,
+                pickupTime: bookingData.ride.pickupTime,
+              });
               // Verify payment method stored in the database
               setHasInvoicePaymentMethod(bookingData.ride.paymentMethod === 'invoice');
             }
@@ -67,7 +71,11 @@ function PayIndexContent(){
           if (invoiceResponse.ok) {
             const invoiceData = await invoiceResponse.json();
             if (invoiceData.invoice && invoiceData.invoice.ride) {
-              setBookingData({ price: invoiceData.invoice.ride.price });
+              setBookingData({
+                price: invoiceData.invoice.ride.price,
+                scheduled: invoiceData.invoice.ride.scheduled,
+                pickupTime: invoiceData.invoice.ride.pickupTime,
+              });
               // Verify payment method stored in the database
               setHasInvoicePaymentMethod(invoiceData.invoice.ride.paymentMethod === 'invoice');
             }
@@ -193,7 +201,21 @@ function PayIndexContent(){
               console.log('🛡️ Hiding "Pay by Invoice" because the booking already uses invoice payment method');
               return false;
             }
-            return method.isActive;
+            if (!method.isActive) return false;
+            // Hide crypto when it is not allowed for the current booking context
+            if (method.key === "crypto") {
+              // Only allow crypto for scheduled bookings with pickup at least 1h from now
+              if (!bookingId) return false;
+              if (!bookingData) return false;
+              if (bookingData.scheduled !== true) return false;
+              if (!bookingData.pickupTime) return false;
+              const pickup = new Date(bookingData.pickupTime);
+              if (Number.isNaN(pickup.getTime())) return false;
+              const now = new Date();
+              const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+              if (!(pickup > oneHourFromNow)) return false;
+            }
+            return true;
           }).map((paymentMethod) => {
             const isSelected = method === paymentMethod.key;
             let ringColor = "ring-blue-500";

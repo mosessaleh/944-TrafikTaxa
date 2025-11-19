@@ -24,13 +24,38 @@ const createBookingSchema = z.object({
   dropoffLon: z.number().min(-180).max(180).optional().nullable(),
   vehicleTypeId: z.number().int().positive("Invalid vehicle type"),
   scheduled: z.boolean(),
-  pickupTime: z.string().refine(val => {
-    const date = new Date(val);
-    const now = new Date();
-    const maxFuture = new Date();
-    maxFuture.setDate(now.getDate() + 90);
-    return date > now && date <= maxFuture;
-  }, "Pickup time must be in the future but within 90 days"),
+  pickupTime: z.string(),
+}).superRefine((data, ctx) => {
+  const now = new Date();
+  const maxFuture = new Date();
+  maxFuture.setDate(now.getDate() + 90);
+
+  const addPickupError = (message: string) => {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['pickupTime'],
+      message,
+    });
+  };
+
+  const date = new Date(data.pickupTime);
+  if (Number.isNaN(date.getTime())) {
+    addPickupError("Invalid pickup time");
+    return;
+  }
+
+  if (data.scheduled) {
+    // For scheduled bookings: at least 1 hour from now, and within 90 days
+    const minScheduled = new Date(now.getTime() + 60 * 60 * 1000);
+    if (date <= minScheduled || date > maxFuture) {
+      addPickupError("For scheduled bookings, pickup time must be at least 1 hour from now and within 90 days");
+    }
+  } else {
+    // For immediate bookings: must be in the future (no 1-hour requirement) and within 90 days
+    if (!(date > now && date <= maxFuture)) {
+      addPickupError("Pickup time must be in the future but within 90 days");
+    }
+  }
 });
 
 /**

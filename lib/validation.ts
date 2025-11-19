@@ -12,14 +12,45 @@ export const BookingFormSchema = z.object({
   pickupAddress: z.string().min(3, "Pickup address must be at least 3 characters").max(500, "Pickup address is too long").regex(addressRegex, "Pickup address contains invalid characters"),
   dropoffAddress: z.string().min(3, "Dropoff address must be at least 3 characters").max(500, "Dropoff address is too long").regex(addressRegex, "Dropoff address contains invalid characters"),
   tripType: z.enum(['immediate', 'scheduled']),
-  pickupTime: z.string().optional().refine(val => {
-    if (!val) return true; // Optional for immediate trips
-    const date = new Date(val);
-    const now = new Date();
-    const maxFuture = new Date();
-    maxFuture.setDate(now.getDate() + 90);
-    return date > now && date <= maxFuture;
-  }, "Pickup time must be in the future but within 90 days")
+  pickupTime: z.string().optional(),
+}).superRefine((data, ctx) => {
+  const now = new Date();
+  const maxFuture = new Date();
+  maxFuture.setDate(now.getDate() + 90);
+
+  // Helper to add a validation error on pickupTime
+  const addPickupError = (message: string) => {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['pickupTime'],
+      message,
+    });
+  };
+
+  if (data.tripType === 'immediate') {
+    // For immediate trips, pickupTime is optional but, if provided, must be in the future (within 90 days)
+    if (!data.pickupTime) {
+      return;
+    }
+    const date = new Date(data.pickupTime);
+    if (!(date > now && date <= maxFuture)) {
+      addPickupError("Pickup time must be in the future but within 90 days");
+    }
+    return;
+  }
+
+  // For scheduled trips, pickupTime is required and must be at least 1 hour from now (and within 90 days)
+  if (data.tripType === 'scheduled') {
+    if (!data.pickupTime) {
+      addPickupError("Pickup time is required for scheduled trips");
+      return;
+    }
+    const date = new Date(data.pickupTime);
+    const minScheduled = new Date(now.getTime() + 60 * 60 * 1000);
+    if (date <= minScheduled || date > maxFuture) {
+      addPickupError("For scheduled trips, pickup time must be at least 1 hour from now and within 90 days");
+    }
+  }
 });
 
 export type BookingFormInput = z.infer<typeof BookingFormSchema>;
