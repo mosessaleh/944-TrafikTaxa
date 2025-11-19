@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import ComplaintModal from './ComplaintModal';
@@ -136,11 +136,18 @@ interface Invoice {
   };
 }
 
+interface NotificationSettings {
+  emailBooking: boolean;
+  emailPayment: boolean;
+  emailInvoice: boolean;
+  emailMarketing: boolean;
+}
+
 export default function AccountClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get('tab') as 'profile' | 'history' | 'favorites' | 'invoices' || 'profile';
-  const [tab, setTab] = useState<'profile' | 'history' | 'favorites' | 'invoices'>(initialTab);
+  const initialTab = searchParams.get('tab') as 'profile' | 'history' | 'favorites' | 'invoices' | 'notifications' || 'profile';
+  const [tab, setTab] = useState<'profile' | 'history' | 'favorites' | 'invoices' | 'notifications'>(initialTab);
   const [me, setMe] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
@@ -314,6 +321,81 @@ export default function AccountClient() {
       shouldRetryOnError: false,
     }
   );
+
+ // Fetch notification settings
+ const {
+   data: notifSettingsData,
+   error: notifSettingsError,
+   isLoading: notifSettingsLoading,
+   mutate: mutateNotifSettings,
+ } = useSWR(
+   tab === 'notifications' && me ? '/api/profile/notifications' : null,
+   async (url) => {
+     const response = await fetch(url, {
+       method: 'GET',
+       credentials: 'include',
+       headers: {
+         'Content-Type': 'application/json',
+         'Cache-Control': 'no-cache',
+       },
+     });
+
+     if (!response.ok) {
+       if (response.status === 401) {
+         throw new Error('Please log in to manage notification settings');
+       }
+       const errorData = await response.json().catch(() => ({}));
+       throw new Error(errorData.error || `Failed to load notification settings: ${response.status}`);
+     }
+
+     const data = await response.json();
+
+     if (!data.ok || !data.settings) {
+       throw new Error(data.error || 'Failed to load notification settings');
+     }
+
+     return data.settings as NotificationSettings;
+   },
+   {
+     revalidateOnFocus: false,
+     revalidateOnReconnect: false,
+     dedupingInterval: 5000,
+   }
+ );
+
+ const handleSaveNotificationSettings = async (e: FormEvent<HTMLFormElement>) => {
+   e.preventDefault();
+
+   const formData = new FormData(e.currentTarget);
+   const payload = {
+     emailBooking: formData.get('emailBooking') === 'on',
+     emailPayment: formData.get('emailPayment') === 'on',
+     emailInvoice: formData.get('emailInvoice') === 'on',
+     emailMarketing: formData.get('emailMarketing') === 'on',
+   };
+
+   try {
+     const response = await fetch('/api/profile/notifications', {
+       method: 'POST',
+       credentials: 'include',
+       headers: {
+         'Content-Type': 'application/json',
+       },
+       body: JSON.stringify(payload),
+     });
+
+     if (!response.ok) {
+       const errorData = await response.json().catch(() => ({}));
+       throw new Error(errorData.error || 'Failed to update notification settings');
+     }
+
+     await mutateNotifSettings();
+     alert('Notification preferences updated.');
+   } catch (error) {
+     console.error('Failed to update notification settings:', error);
+     alert('Failed to update notification preferences. Please try again.');
+   }
+ };
 
   const handleLogout = async () => {
     try {
@@ -503,42 +585,51 @@ export default function AccountClient() {
   }
 
   return (
-    <div className="min-h-screen pt-20 pb-8">
-      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen pt-20 pb-8 bg-slate-50">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-800 mb-2">My Account</h1>
-          <p className="text-slate-600">Manage your profile and view your booking history</p>
+          <p className="text-slate-600">Manage your profile, notifications, and booking history</p>
         </div>
 
-        {/* Tabs */}
-        <div className="mb-6">
-          <nav className="flex space-x-1 bg-slate-100 p-1 rounded-lg">
-            {[
-              { id: 'profile', label: 'Profile', icon: '👤' },
-              { id: 'history', label: 'Booking History', icon: '📋' },
-              { id: 'favorites', label: 'Favorite Addresses', icon: '⭐' },
-              { id: 'invoices', label: 'Invoices', icon: '📄' },
-            ].map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id as any)}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                  tab === t.id
-                    ? 'bg-white text-slate-800 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-800'
-                }`}
-              >
-                <span>{t.icon}</span>
-                {t.label}
-              </button>
-            ))}
-          </nav>
-        </div>
+        {/* Dashboard Layout: Sidebar + Content */}
+        <div className="flex flex-col lg:flex-row gap-6 items-start">
+          {/* Sidebar */}
+          <aside className="w-full lg:w-64">
+            <nav className="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100">
+              {[
+                { id: 'profile', label: 'Profile', icon: '👤' },
+                { id: 'history', label: 'Booking History', icon: '📋' },
+                { id: 'favorites', label: 'Favorite Addresses', icon: '⭐' },
+                { id: 'invoices', label: 'Invoices', icon: '📄' },
+                { id: 'notifications', label: 'Notification Preferences', icon: '🔔' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTab(t.id as any)}
+                  className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-sm font-medium transition-colors ${
+                    tab === t.id
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span>{t.icon}</span>
+                    <span>{t.label}</span>
+                  </span>
+                  {tab === t.id && (
+                    <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+                  )}
+                </button>
+              ))}
+            </nav>
+          </aside>
 
-        {/* Tab Content */}
-        <div className="bg-white rounded-lg shadow-sm border border-slate-200">
-          {tab === 'profile' && (
+          {/* Main Content */}
+          <div className="flex-1">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
+              {tab === 'profile' && (
             <div className="p-6">
               <div className="flex items-start justify-between gap-3 flex-wrap mb-6">
                 <div className="grid gap-1">
@@ -1036,26 +1127,126 @@ export default function AccountClient() {
               )}
             </div>
           )}
+
+          {tab === 'notifications' && (
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-slate-800 mb-2">Notification Preferences</h2>
+              <p className="text-sm text-slate-600 mb-6">
+                Choose which email notifications you want to receive.
+              </p>
+
+              {notifSettingsLoading ? (
+                <div className="text-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
+                  <p className="mt-2 text-slate-600">Loading notification settings...</p>
+                </div>
+              ) : notifSettingsError ? (
+                <div className="text-center py-8">
+                  <p className="text-red-600 mb-2">Failed to load notification settings</p>
+                  <p className="text-slate-600 text-sm">{(notifSettingsError as Error).message}</p>
+                </div>
+              ) : !notifSettingsData ? (
+                <div className="text-center py-8">
+                  <p className="text-slate-600">Notification settings are not available.</p>
+                </div>
+              ) : (
+                <form onSubmit={handleSaveNotificationSettings} className="space-y-6 max-w-lg">
+                  <div className="space-y-4">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        name="emailBooking"
+                        defaultChecked={notifSettingsData.emailBooking}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <div>
+                        <div className="font-medium text-slate-800">Booking emails</div>
+                        <div className="text-sm text-slate-600">
+                          Receive confirmation and status updates for your bookings.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        name="emailPayment"
+                        defaultChecked={notifSettingsData.emailPayment}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <div>
+                        <div className="font-medium text-slate-800">Payment emails</div>
+                        <div className="text-sm text-slate-600">
+                          Receive emails when payments are received or updated.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        name="emailInvoice"
+                        defaultChecked={notifSettingsData.emailInvoice}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <div>
+                        <div className="font-medium text-slate-800">Invoice emails</div>
+                        <div className="text-sm text-slate-600">
+                          Receive emails when invoices are generated or updated.
+                        </div>
+                      </div>
+                    </label>
+
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        name="emailMarketing"
+                        defaultChecked={notifSettingsData.emailMarketing}
+                        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <div>
+                        <div className="font-medium text-slate-800">Marketing emails</div>
+                        <div className="text-sm text-slate-600">
+                          Receive occasional offers, news, and promotions from 944 Trafik.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-200">
+                    <button
+                      type="submit"
+                      className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-sm hover:bg-slate-800"
+                    >
+                      Save preferences
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       </div>
-
-      {complaintModal.isOpen && (
-        <ComplaintModal
-          isOpen={complaintModal.isOpen}
-          onClose={() => setComplaintModal({ isOpen: false, bookingId: null })}
-          bookingId={complaintModal.bookingId || 0}
-          onSubmit={handleSubmitComplaint}
-        />
-      )}
-
-      {complaintConversationModal.isOpen && (
-        <ComplaintConversationModal
-          isOpen={complaintConversationModal.isOpen}
-          onClose={() => setComplaintConversationModal({ isOpen: false, complaint: null })}
-          complaint={complaintConversationModal.complaint}
-          onReply={handleReplyToComplaint}
-        />
-      )}
     </div>
-  );
+  </div>
+
+  {complaintModal.isOpen && (
+    <ComplaintModal
+      isOpen={complaintModal.isOpen}
+      onClose={() => setComplaintModal({ isOpen: false, bookingId: null })}
+      bookingId={complaintModal.bookingId || 0}
+      onSubmit={handleSubmitComplaint}
+    />
+  )}
+
+  {complaintConversationModal.isOpen && (
+    <ComplaintConversationModal
+      isOpen={complaintConversationModal.isOpen}
+      onClose={() => setComplaintConversationModal({ isOpen: false, complaint: null })}
+      complaint={complaintConversationModal.complaint}
+      onReply={handleReplyToComplaint}
+    />
+  )}
+</div>
+);
 }

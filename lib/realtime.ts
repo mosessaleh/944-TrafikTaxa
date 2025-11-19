@@ -285,11 +285,18 @@ export class RealtimeManager {
 
   // Send notification to specific user
   static sendNotificationToUser(userId: string, notification: NotificationPayload) {
-    this.sendToUser(userId, {
+    const message: RealtimeMessage = {
       type: 'notification',
       payload: notification,
       timestamp: Date.now(),
-    });
+      userId,
+    };
+
+    // WebSocket clients (if any are connected)
+    this.sendToUser(userId, message);
+
+    // SSE clients (Next.js /api/realtime SSE endpoint)
+    SSEManager.sendToClient(userId, 'message', message);
   }
 
   // Send message to specific user
@@ -340,13 +347,11 @@ export class SSEManager {
 
   static addClient(userId: string, response: any) {
     this.clients.set(userId, { response, lastEventId: '' });
-    response.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Cache-Control',
-    });
+
+    // NOTE:
+    // In the Next.js App Router implementation, headers are set in the
+    // route handler (app/api/realtime/route.ts). Here we only keep a
+    // minimal writer object (with write/end) and send SSE frames through it.
 
     // Send initial connection event
     this.sendToClient(userId, 'connected', { message: 'SSE connection established' });

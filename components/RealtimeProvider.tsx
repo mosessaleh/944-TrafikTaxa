@@ -33,70 +33,16 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
   const [bookingUpdates, setBookingUpdates] = useState<BookingUpdatePayload[]>([]);
   const [notifications, setNotifications] = useState<NotificationPayload[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessagePayload[]>([]);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
-  const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
-  const reconnectDelay = 3000; // 3 seconds
-
-  const connect = () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-
-    try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/realtime`;
-
-      wsRef.current = new WebSocket(wsUrl);
-
-      wsRef.current.onopen = () => {
-        console.log('[Realtime] Connected to server');
-        setIsConnected(true);
-        reconnectAttempts.current = 0;
-      };
-
-      wsRef.current.onmessage = (event) => {
-        try {
-          const message: RealtimeMessage = JSON.parse(event.data);
-          handleMessage(message);
-        } catch (error) {
-          console.error('[Realtime] Error parsing message:', error);
-        }
-      };
-
-      wsRef.current.onclose = (event) => {
-        console.log('[Realtime] Connection closed:', event.code, event.reason);
-        setIsConnected(false);
-        wsRef.current = null;
-
-        // Attempt to reconnect if not a normal closure
-        if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
-          reconnectAttempts.current++;
-          console.log(`[Realtime] Attempting to reconnect (${reconnectAttempts.current}/${maxReconnectAttempts})...`);
-
-          reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
-          }, reconnectDelay * reconnectAttempts.current); // Exponential backoff
-        }
-      };
-
-      wsRef.current.onerror = (error) => {
-        console.error('[Realtime] WebSocket error:', error);
-      };
-
-    } catch (error) {
-      console.error('[Realtime] Failed to create WebSocket connection:', error);
-    }
-  };
+  const esRef = useRef<EventSource | null>(null);
 
   const handleMessage = (message: RealtimeMessage) => {
     switch (message.type) {
       case 'booking_update':
-        setBookingUpdates(prev => [...prev, message.payload]);
+        setBookingUpdates(prev => [...prev, message.payload as BookingUpdatePayload]);
         break;
 
       case 'notification':
-        setNotifications(prev => [...prev, message.payload]);
-        // Also show browser notification if permission granted
+        setNotifications(prev => [...prev, message.payload as NotificationPayload]);
         if ('Notification' in window && Notification.permission === 'granted') {
           new Notification(message.payload.title, {
             body: message.payload.message,
@@ -106,11 +52,11 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
         break;
 
       case 'chat_message':
-        setChatMessages(prev => [...prev, message.payload]);
+        setChatMessages(prev => [...prev, message.payload as ChatMessagePayload]);
         break;
 
       case 'pong':
-        // Handle ping/pong for connection health
+        // No-op for SSE
         break;
 
       default:
@@ -118,41 +64,58 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
     }
   };
 
-  const subscribeToBooking = (bookingId: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'subscribe_booking',
-        payload: { bookingId },
-        timestamp: Date.now(),
-      }));
+  const connect = () => {
+    if (esRef.current) return;
+
+    try {
+      const es = new EventSource('/api/realtime');
+      esRef.current = es;
+
+      es.addEventListener('connected', () => {
+        console.log('[Realtime] SSE connected');
+        setIsConnected(true);
+      });
+
+      es.addEventListener('message', (event) => {
+        try {
+          const data = (event as MessageEvent).data;
+          const message: RealtimeMessage = JSON.parse(data);
+          handleMessage(message);
+          setIsConnected(true);
+        } catch (error) {
+          console.error('[Realtime] Error parsing SSE message:', error);
+        }
+      });
+
+      es.onerror = (error) => {
+        console.error('[Realtime] SSE error:', error);
+        setIsConnected(false);
+
+        if (esRef.current) {
+          esRef.current.close();
+          esRef.current = null;
+        }
+      };
+    } catch (error) {
+      console.error('[Realtime] Failed to create SSE connection:', error);
     }
   };
 
+  const subscribeToBooking = (bookingId: number) => {
+    console.warn('[Realtime] subscribeToBooking over SSE is not implemented yet', bookingId);
+  };
+
   const unsubscribeFromBooking = (bookingId: number) => {
-    // WebSocket doesn't have explicit unsubscribe, just remove from local state
     setBookingUpdates(prev => prev.filter(update => update.bookingId !== bookingId));
     setChatMessages(prev => prev.filter(msg => msg.bookingId !== bookingId));
   };
 
   const sendChatMessage = (bookingId: number, message: string, toUserId: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      const chatPayload: ChatMessagePayload = {
-        bookingId,
-        fromUserId: 'current_user', // This should be set from auth context
-        toUserId,
-        message,
-        messageId: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      };
-
-      wsRef.current.send(JSON.stringify({
-        type: 'chat_message',
-        payload: chatPayload,
-        timestamp: Date.now(),
-      }));
-
-      // Optimistically add to local state
-      setChatMessages(prev => [...prev, chatPayload]);
-    }
+    console.warn('[Realtime] sendChatMessage over SSE is not implemented yet', {
+      bookingId,
+      toUserId,
+      message,
+    });
   };
 
   const clearNotifications = () => {
@@ -171,7 +134,7 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
     connect();
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !isConnected) {
+      if (document.visibilityState === 'visible' && !isConnected && !esRef.current) {
         connect();
       }
     };
@@ -180,29 +143,12 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounting');
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
       }
     };
-  }, []);
-
-  // Send periodic ping to keep connection alive
-  useEffect(() => {
-    const pingInterval = setInterval(() => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'ping',
-          payload: {},
-          timestamp: Date.now(),
-        }));
-      }
-    }, 30000); // Ping every 30 seconds
-
-    return () => clearInterval(pingInterval);
-  }, []);
+  }, [isConnected]);
 
   const value: RealtimeContextType = {
     isConnected,

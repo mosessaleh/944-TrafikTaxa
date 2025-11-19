@@ -3,7 +3,8 @@ import { getUserFromCookie } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { retrievePaymentIntent, stripe as getStripe } from "@/lib/stripe";
 import { ConfirmCardPaymentSchema } from "@/lib/validation";
-import { notifyUserPaymentReceived, notifyUserBookingConfirmation, notifyAdmin } from "@/lib/notify";
+import { notifyAdmin } from "@/lib/notify";
+import { notifyBookingConfirmedUnified, notifyPaymentReceivedUnified } from "@/lib/notification-service";
 import { validateRequestOrigin } from "@/lib/security-headers";
 
 export async function POST(request: Request) {
@@ -322,7 +323,7 @@ export async function POST(request: Request) {
       console.log("card/confirm: Existing invoice status updated successfully");
     }
 
-    // === STEP 4: Send confirmation emails (optional but recommended) ===
+    // === STEP 4: Send notifications (email + in-app + realtime) ===
     const bookingDetails = {
       pickupAddress: booking.pickupAddress,
       dropoffAddress: booking.dropoffAddress,
@@ -333,25 +334,33 @@ export async function POST(request: Request) {
       id: booking.id
     };
 
-    console.log("card/confirm: Sending confirmation emails");
+    console.log("card/confirm: Sending confirmation notifications");
     try {
-      await notifyUserBookingConfirmation(me.email, me.firstName, bookingDetails);
-      console.log("card/confirm: Booking confirmation email sent");
+      await notifyBookingConfirmedUnified(
+        { id: booking.userId, email: booking.user.email, firstName: booking.user.firstName },
+        bookingDetails
+      );
+      console.log("card/confirm: Booking confirmation notification dispatched");
     } catch (e) {
-      console.error("card/confirm: Failed to send booking confirmation email", e);
+      console.error("card/confirm: Failed to send booking confirmation notification", e);
     }
 
+    const paymentDetailsForNotify = {
+      amount: amountDkk,
+      method: paymentIntentId.startsWith('pi_mock_') ? 'Mock Card Payment' : 'Credit/Debit Card',
+      transactionId: paymentIntentId,
+      bookingId: booking.id.toString(),
+      invoiceId: invoice.id.toString(),
+    };
+
     try {
-      await notifyUserPaymentReceived(me.email, me.firstName, {
-        amount: amountDkk,
-        method: paymentIntentId.startsWith('pi_mock_') ? 'Mock Card Payment' : 'Credit/Debit Card',
-        transactionId: paymentIntentId,
-        bookingId: booking.id.toString(),
-        invoiceId: invoice.id.toString(),
-      });
-      console.log("card/confirm: Payment confirmation email sent");
+      await notifyPaymentReceivedUnified(
+        { id: booking.userId, email: booking.user.email, firstName: booking.user.firstName },
+        paymentDetailsForNotify
+      );
+      console.log("card/confirm: Payment confirmation notification dispatched");
     } catch (e) {
-      console.error("card/confirm: Failed to send payment confirmation email", e);
+      console.error("card/confirm: Failed to send payment confirmation notification", e);
     }
 
     try {

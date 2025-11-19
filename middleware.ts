@@ -96,33 +96,37 @@ export async function middleware(req: NextRequest) {
   res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
 
-    // Enhanced CSP with nonce-based policies
-    const isDev = process.env.NODE_ENV === 'development';
-    const csp = [
-      "default-src 'self'",
-      "img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://*.stripe.com https://*.paypal.com",
-      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-      // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe + Google Analytics
-      ...(isDev
-        ? [`script-src 'self' 'unsafe-inline' 'unsafe-eval' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com`]
-        : [`script-src 'self' 'unsafe-inline' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com`]),
-      "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org https://api.stripe.com https://api.paypal.com" +
-        (isDev ? " ws:" : ""),
-      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.paypal.com",
-      "font-src 'self' data: https://fonts.gstatic.com",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "frame-ancestors 'none'",
-      "form-action 'self'",
-      ...(isDev ? [] : ["upgrade-insecure-requests"])
-    ].join('; ');
+  // Enhanced CSP with nonce-based policies
+  const isDev = process.env.NODE_ENV === 'development';
+  const csp = [
+    "default-src 'self'",
+    "img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://*.stripe.com https://*.paypal.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe + Google Analytics
+    ...(isDev
+      ? [`script-src 'self' 'unsafe-inline' 'unsafe-eval' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com`]
+      : [`script-src 'self' 'unsafe-inline' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com`]),
+    "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org https://api.stripe.com https://api.paypal.com" +
+      (isDev ? " ws:" : ""),
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.paypal.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    ...(isDev ? [] : ["upgrade-insecure-requests"])
+  ].join('; ');
   res.headers.set('Content-Security-Policy', csp);
 
   // Additional security headers
   res.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
-  res.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
-  res.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
-  res.headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+
+  // Only enable COEP/COOP/CORP on trusted origins (production)
+  if (process.env.NODE_ENV === 'production') {
+    res.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+    res.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
+    res.headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+  }
 
   return res;
 }

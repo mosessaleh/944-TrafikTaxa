@@ -63,10 +63,12 @@ model User {
   createdAt           DateTime  @default(now())
   canPayByInvoice     Boolean   @default(false)
 
-  rides      Ride[]
-  favorites  FavoriteAddress[]
-  complaints Complaint[]
-  invoices   Invoice[]
+  rides        Ride[]
+  favorites    FavoriteAddress[]
+  complaints   Complaint[]
+  invoices     Invoice[]
+  notifications Notification[]
+  notificationSettings NotificationSettings?
 
   // Optimized indexes for common queries
   @@index([role])
@@ -335,4 +337,28 @@ model Invoice {
   @@index([receiptNumber])
   @@index([paymentStatus, paymentDate])      // For payment date filtering
   @@index([confirmedBy, confirmedAt])        // For admin confirmation tracking
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  type      String   // e.g. booking_confirmed, payment_received, invoice_ready
+  title     String
+  body      String
+  data      Json?    @default("{}")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read, createdAt])
+}
+
+model NotificationSettings {
+  id             Int   @id @default(autoincrement())
+  user           User  @relation(fields: [userId], references: [id])
+  userId         Int   @unique
+  emailBooking   Boolean @default(true)
+  emailPayment   Boolean @default(true)
+  emailInvoice   Boolean @default(true)
+  emailMarketing Boolean @default(false)
 }
