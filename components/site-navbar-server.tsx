@@ -7,6 +7,7 @@ export default async function SiteNavbarServer(){
     id: Number(meFull.id),
     firstName: String(meFull.firstName || ''),
     lastName: String(meFull.lastName || ''),
+    email: String(meFull.email || ''),
     role: (meFull as any).role || 'USER'
   } : null;
   return <SiteNavbar me={me}/>;

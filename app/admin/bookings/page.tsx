@@ -21,8 +21,8 @@ const fetcher = (url:string)=> fetch(url,{cache:'no-store'}).then(r=>r.json());
 
 function TabBtn({active,label,count,onClick}:{active:boolean,label:string,count:number,onClick:()=>void}){
   return (
-    <button 
-        onClick={onClick} 
+    <button
+        onClick={onClick}
         className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
             active
             ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
@@ -44,6 +44,7 @@ export default function AdminBookings(){
   // State for filtering and bulk operations
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [selectedBookings, setSelectedBookings] = useState<number[]>([]);
 
   const groups = {
@@ -57,7 +58,7 @@ export default function AdminBookings(){
     refunded: rides.filter(r=> r.status==='REFUNDED'),
   } as const;
 
-  // Filter rides based on search and date
+  // Filter rides based on search, date, and status
   const filterRides = (rides: any[]) => {
     return rides.filter(ride => {
       // Search filter
@@ -76,7 +77,10 @@ export default function AdminBookings(){
         (dateFilter === 'week' && rideDate >= new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)) ||
         (dateFilter === 'month' && rideDate.getMonth() === today.getMonth() && rideDate.getFullYear() === today.getFullYear());
 
-      return matchesSearch && matchesDate;
+      // Status filter
+      const matchesStatus = statusFilter === 'all' || ride.status === statusFilter;
+
+      return matchesSearch && matchesDate && matchesStatus;
     });
   };
 
@@ -224,19 +228,19 @@ export default function AdminBookings(){
         <div className="p-4 border-b border-gray-100 flex flex-col lg:flex-row gap-4 justify-between items-center bg-gray-50/50">
             
             {/* Tabs */}
-            <div className="flex overflow-x-auto pb-2 lg:pb-0 gap-2 w-full lg:w-auto no-scrollbar">
-                {tabs.map(t=> (
-                    <TabBtn 
-                        key={t.key} 
-                        active={currentTab===t.key} 
-                        label={t.label} 
-                        count={filterRides(groups[t.key as keyof typeof groups]).length}
-                        onClick={()=>switchTab(t.key as any)} 
-                    />
+            <select
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
+                value={currentTab}
+                onChange={(e) => switchTab(e.target.value as keyof typeof groups)}
+            >
+                {tabs.map(t => (
+                    <option key={t.key} value={t.key}>
+                        {t.label} ({filterRides(groups[t.key as keyof typeof groups]).length})
+                    </option>
                 ))}
-            </div>
+            </select>
 
-            {/* Search & Date Filter */}
+            {/* Search & Filters */}
             <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
                 <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -259,6 +263,24 @@ export default function AdminBookings(){
                         <option value="today">Today</option>
                         <option value="week">This Week</option>
                         <option value="month">This Month</option>
+                    </select>
+                </div>
+                <div className="relative">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <select
+                        className="pl-9 pr-8 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white cursor-pointer"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                    >
+                        <option value="all">All Statuses</option>
+                        <option value="PENDING">Pending</option>
+                        <option value="CONFIRMED">Confirmed</option>
+                        <option value="DISPATCHED">Dispatched</option>
+                        <option value="ONGOING">Ongoing</option>
+                        <option value="COMPLETED">Completed</option>
+                        <option value="CANCELED">Canceled</option>
+                        <option value="REFUNDING">Refunding</option>
+                        <option value="REFUNDED">Refunded</option>
                     </select>
                 </div>
             </div>
@@ -413,8 +435,8 @@ export default function AdminBookings(){
                     </div>
                     <h3 className="text-lg font-medium text-gray-900">No bookings found</h3>
                     <p className="text-sm mt-1 max-w-xs mx-auto">We couldn't find any bookings matching your current filters. Try adjusting your search or date range.</p>
-                    <button 
-                        onClick={() => {setSearchTerm(''); setDateFilter('all');}}
+                    <button
+                        onClick={() => {setSearchTerm(''); setDateFilter('all'); setStatusFilter('all');}}
                         className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
                     >
                         <RefreshCw size={14} />

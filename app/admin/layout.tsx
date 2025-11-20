@@ -26,34 +26,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans">
-      {/* Header */}
-      <header className="bg-white shadow-sm h-16 sticky top-0 z-30 border-b border-gray-100">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 h-full flex items-center justify-between">
-        <div className="flex items-center gap-4">
-            <Link href="/" className="font-bold text-xl text-gray-900 flex items-center gap-2">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold shadow-sm">T</div>
-                <span className="hidden md:inline tracking-tight">TrafikTaxa</span>
-            </Link>
-        </div>
-
-        <div className="flex items-center gap-4">
-            <button className="p-2 text-gray-500 hover:bg-gray-100 rounded-full transition-colors relative">
-                <Bell size={20} />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
-            </button>
-            <div className="h-8 w-px bg-gray-200 mx-1"></div>
-            <div className="flex items-center gap-3">
-                <div className="text-right hidden md:block">
-                    <div className="text-sm font-semibold text-gray-900 leading-none">{me?.firstName} {me?.lastName}</div>
-                    <div className="text-xs text-gray-500 mt-1">{me?.email}</div>
-                </div>
-                <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-medium shadow-sm text-sm">
-                    {me?.firstName?.[0]}{me?.lastName?.[0]}
-                </div>
-            </div>
-        </div>
-        </div>
-      </header>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
