@@ -2,6 +2,7 @@ import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
 import Link from 'next/link';
 import AdminComplaintsClient from '@/components/AdminComplaintsClient';
+import { ArrowLeft } from 'lucide-react';
 
 export default async function AdminComplaints() {
   const me = await getUserFromCookie();
@@ -40,45 +41,25 @@ export default async function AdminComplaints() {
   });
 
   return (
-    <div className="grid gap-8">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-bold text-gray-900">Complaints Management</h1>
-          <p className="text-gray-600 mt-2">Review and manage customer complaints.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Complaints</h1>
+          <p className="text-gray-500 text-sm mt-1">Review and manage customer complaints.</p>
         </div>
         <Link
           href="/admin"
-          className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium shadow-sm"
         >
-          ← Back to Dashboard
+          <ArrowLeft size={16} />
+          Back to Dashboard
         </Link>
       </div>
 
       {/* Complaints Table */}
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-xl font-bold text-gray-900">Customer Complaints</h3>
-        </div>
-
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
         <AdminComplaintsClient initialComplaints={complaints} />
-
-        {complaints.length === 0 && (
-          <div className="px-6 py-12 text-center">
-            <div className="text-gray-500">No complaints found.</div>
-          </div>
-        )}
-      </div>
-
-      {/* Info Section */}
-      <div className="bg-blue-50 rounded-2xl p-6 border border-blue-200">
-        <h3 className="text-lg font-semibold text-blue-900 mb-2">Complaints Management</h3>
-        <div className="text-blue-800 text-sm space-y-1">
-          <p>• Review customer complaints and provide appropriate responses.</p>
-          <p>• Update complaint status as OPEN, CLOSED, or ACCEPTED.</p>
-          <p>• Add admin decisions for resolved complaints.</p>
-          <p>• All status changes are tracked with timestamps.</p>
-        </div>
       </div>
     </div>
   );

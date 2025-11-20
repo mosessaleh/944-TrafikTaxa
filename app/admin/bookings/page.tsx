@@ -1,22 +1,40 @@
 "use client";
 import useSWR from 'swr';
 import { useState, useEffect } from 'react';
-import dynamic from 'next/dynamic';
-
-// Simple dashboard without charts for now - focus on core functionality
+import { 
+  Search, 
+  Calendar, 
+  Download, 
+  Filter,
+  CheckCircle,
+  XCircle,
+  Clock,
+  CreditCard,
+  MapPin,
+  User,
+  MoreVertical,
+  Trash2,
+  RefreshCw
+} from 'lucide-react';
 
 const fetcher = (url:string)=> fetch(url,{cache:'no-store'}).then(r=>r.json());
 
-function ActionBtn({id, action, label, icon}:{id:number, action:string, label:string, icon?:string}){
-  async function go(){
-    await fetch('/api/admin/bookings/update',{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id, action }) });
-    location.reload();
-  }
-  return <button onClick={go} className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium transition-all duration-200 flex items-center gap-1">{icon}{label}</button>;
-}
-
-function TabBtn({active,label,onClick}:{active:boolean,label:string,onClick:()=>void}){
-  return <button onClick={onClick} className={`px-4 py-2 rounded-2xl border font-medium transition-all duration-200 ${active? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg':'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:shadow-md'}`}>{label}</button>;
+function TabBtn({active,label,count,onClick}:{active:boolean,label:string,count:number,onClick:()=>void}){
+  return (
+    <button 
+        onClick={onClick} 
+        className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
+            active
+            ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
+            : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
+        }`}
+    >
+        {label}
+        <span className={`px-1.5 py-0.5 rounded-md text-xs ${active ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'}`}>
+            {count}
+        </span>
+    </button>
+  );
 }
 
 export default function AdminBookings(){
@@ -63,14 +81,14 @@ export default function AdminBookings(){
   };
 
   const tabs = [
-    {key:'pending', label:`Awaiting confirmation (${filterRides(groups.pending).length})`},
-    {key:'paid', label:`Paid - awaiting confirmation (${filterRides(groups.paid).length})`},
-    {key:'processing', label:`Processing (${filterRides(groups.processing).length})`},
-    {key:'confirmedActive', label:`Confirmed / not finished (${filterRides(groups.confirmedActive).length})`},
-    {key:'completed', label:`Completed (${filterRides(groups.completed).length})`},
-    {key:'canceled', label:`Canceled (${filterRides(groups.canceled).length})`},
-    {key:'refunding', label:`Refunding (${filterRides(groups.refunding).length})`},
-    {key:'refunded', label:`Refunded (${filterRides(groups.refunded).length})`}
+    {key:'pending', label:'Pending'},
+    {key:'paid', label:'Paid'},
+    {key:'processing', label:'Processing'},
+    {key:'confirmedActive', label:'Active'},
+    {key:'completed', label:'Completed'},
+    {key:'canceled', label:'Canceled'},
+    {key:'refunding', label:'Refunding'},
+    {key:'refunded', label:'Refunded'}
   ] as const;
 
   // Use proper React state for tab management
@@ -146,135 +164,112 @@ export default function AdminBookings(){
   // Calculate statistics for dashboard
   const stats = {
     total: rides.length,
-    pending: groups.pending.length,
-    paid: groups.paid.length,
-    processing: groups.processing.length,
-    confirmedActive: groups.confirmedActive.length,
-    completed: groups.completed.length,
-    canceled: groups.canceled.length,
     totalRevenue: rides.filter(r => r.paymentStatus === 'PAID').reduce((sum, r) => sum + (r.price || 0), 0),
     todayBookings: rides.filter(r => {
       const today = new Date().toDateString();
       return new Date(r.createdAt).toDateString() === today;
-    }).length
+    }).length,
+    activeRides: groups.confirmedActive.length
   };
 
-  // Chart data
-  const statusData = [
-    { name: 'Pending', value: stats.pending, color: '#f59e0b' },
-    { name: 'Paid', value: stats.paid, color: '#3b82f6' },
-    { name: 'Processing', value: stats.processing, color: '#8b5cf6' },
-    { name: 'Active', value: stats.confirmedActive, color: '#06b6d4' },
-    { name: 'Completed', value: stats.completed, color: '#10b981' },
-    { name: 'Canceled', value: stats.canceled, color: '#ef4444' }
-  ];
-
   return (
-    <div className="grid gap-8">
-
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="card-feature text-center">
-          <div className="text-2xl font-bold text-cyan-600">{stats.total}</div>
-          <div className="text-sm text-slate-600">Total Bookings</div>
+    <div className="space-y-6">
+      
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+            <h1 className="text-2xl font-bold text-gray-900">Bookings Management</h1>
+            <p className="text-gray-500 text-sm mt-1">Manage and track all ride bookings.</p>
         </div>
-        <div className="card-feature text-center">
-          <div className="text-2xl font-bold text-emerald-600">{stats.todayBookings}</div>
-          <div className="text-sm text-slate-600">Today</div>
-        </div>
-        <div className="card-feature text-center">
-          <div className="text-2xl font-bold text-blue-600">{stats.totalRevenue} DKK</div>
-          <div className="text-sm text-slate-600">Total Revenue</div>
-        </div>
-        <div className="card-feature text-center">
-          <div className="text-2xl font-bold text-purple-600">{stats.confirmedActive}</div>
-          <div className="text-sm text-slate-600">Active Rides</div>
+        <div className="flex gap-2">
+            <button onClick={exportToCSV} className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2">
+                <Download size={16} />
+                Export CSV
+            </button>
         </div>
       </div>
 
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="Total Bookings" value={stats.total} icon={<Clock size={20} />} color="text-blue-600" bg="bg-blue-50" />
+        <StatCard label="Today's Bookings" value={stats.todayBookings} icon={<Calendar size={20} />} color="text-emerald-600" bg="bg-emerald-50" />
+        <StatCard label="Total Revenue" value={`${stats.totalRevenue} DKK`} icon={<CreditCard size={20} />} color="text-purple-600" bg="bg-purple-50" />
+        <StatCard label="Active Rides" value={stats.activeRides} icon={<CheckCircle size={20} />} color="text-orange-600" bg="bg-orange-50" />
+      </div>
 
       {/* Bulk Actions Bar */}
       {selectedBookings.length > 0 && (
-        <div className="card-feature bg-blue-50 border-blue-200">
-          <div className="flex items-center justify-between">
-            <span className="text-blue-800 font-medium">
-              {selectedBookings.length} booking(s) selected
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleBulkAction('CONFIRM')}
-                className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
-              >
-                ✅ Confirm Selected
-              </button>
-              <button
-                onClick={() => handleBulkAction('CANCEL')}
-                className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
-              >
-                ❌ Cancel Selected
-              </button>
-              <button
-                onClick={() => handleBulkAction('MARK_PAID')}
-                className="px-3 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-sm"
-              >
-                💳 Mark Paid
-              </button>
-              <button
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2 text-blue-800 font-medium">
+            <CheckCircle size={18} />
+            <span>{selectedBookings.length} booking(s) selected</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <BulkActionButton onClick={() => handleBulkAction('CONFIRM')} label="Confirm" icon={<CheckCircle size={14} />} color="bg-green-600 hover:bg-green-700" />
+            <BulkActionButton onClick={() => handleBulkAction('CANCEL')} label="Cancel" icon={<XCircle size={14} />} color="bg-red-600 hover:bg-red-700" />
+            <BulkActionButton onClick={() => handleBulkAction('MARK_PAID')} label="Mark Paid" icon={<CreditCard size={14} />} color="bg-emerald-600 hover:bg-emerald-700" />
+            <button
                 onClick={() => setSelectedBookings([])}
-                className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm"
-              >
-                ✕ Clear Selection
-              </button>
-            </div>
+                className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors"
+            >
+                Clear
+            </button>
           </div>
         </div>
       )}
 
-      {/* Tab Navigation */}
-      <div className="flex flex-wrap gap-3 justify-center">
-        {tabs.map(t=> (
-          <TabBtn key={t.key} active={currentTab===t.key} label={t.label} onClick={()=>switchTab(t.key as any)} />
-        ))}
-      </div>
-      {/* Search and Filter Bar */}
-      <div className="card-feature">
-        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-          <div className="flex-1 max-w-md">
-            <input
-              type="text"
-              placeholder="🔍 Search by user, address, or ID..."
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <div className="flex gap-2">
-            <select
-              className="px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-            >
-              <option value="all">All Dates</option>
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-            </select>
-            <button
-              onClick={exportToCSV}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2"
-            >
-              📊 Export CSV
-            </button>
-          </div>
-        </div>
-      </div>
+      {/* Main Content Area */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        
+        {/* Filters & Search */}
+        <div className="p-4 border-b border-gray-100 flex flex-col lg:flex-row gap-4 justify-between items-center bg-gray-50/50">
+            
+            {/* Tabs */}
+            <div className="flex overflow-x-auto pb-2 lg:pb-0 gap-2 w-full lg:w-auto no-scrollbar">
+                {tabs.map(t=> (
+                    <TabBtn 
+                        key={t.key} 
+                        active={currentTab===t.key} 
+                        label={t.label} 
+                        count={filterRides(groups[t.key as keyof typeof groups]).length}
+                        onClick={()=>switchTab(t.key as any)} 
+                    />
+                ))}
+            </div>
 
-      <div className="card overflow-hidden">
+            {/* Search & Date Filter */}
+            <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input
+                        type="text"
+                        placeholder="Search bookings..."
+                        className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+                <div className="relative">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <select
+                        className="pl-9 pr-8 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white cursor-pointer"
+                        value={dateFilter}
+                        onChange={(e) => setDateFilter(e.target.value)}
+                    >
+                        <option value="all">All Dates</option>
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="month">This Month</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        {/* Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="bg-gradient-to-r from-slate-50 to-slate-100 text-left">
-                <th className="px-2 py-2 font-semibold text-slate-700 w-8">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-100">
+              <tr>
+                <th className="px-4 py-3 w-10">
                   <input
                     type="checkbox"
                     checked={selectedBookings.length === filteredList.length && filteredList.length > 0}
@@ -285,26 +280,23 @@ export default function AdminBookings(){
                         setSelectedBookings([]);
                       }
                     }}
-                    className="rounded scale-75"
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
                 </th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-12">#</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-24">👤 User</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-32">📍 Pickup</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-32">🎯 Dropoff</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-20">🕐 Time</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-16">💰 Price</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-20">📊 Status</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-12">💳 Payment Status</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-20">💳 Payment Method</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-24">📝 Explanation</th>
-                <th className="px-2 py-2 font-semibold text-slate-700 w-32">⚡ Actions</th>
+                <th className="px-4 py-3">ID</th>
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Route</th>
+                <th className="px-4 py-3">Time</th>
+                <th className="px-4 py-3">Price</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Payment</th>
+                <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {filteredList.map((r:any)=> (
-                 <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors duration-150">
-                   <td className="px-2 py-2">
+                 <tr key={r.id} className="hover:bg-gray-50/50 transition-colors group">
+                   <td className="px-4 py-3">
                      <input
                        type="checkbox"
                        checked={selectedBookings.includes(r.id)}
@@ -315,79 +307,84 @@ export default function AdminBookings(){
                            setSelectedBookings(selectedBookings.filter(id => id !== r.id));
                          }
                        }}
-                       className="rounded scale-75"
+                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                      />
                    </td>
-                   <td className="px-2 py-2 font-medium text-slate-800 text-xs">{r.id}</td>
-                   <td className="px-2 py-2 text-slate-700 text-xs truncate">{r.user?.firstName} {r.user?.lastName}</td>
-                   <td className="px-2 py-2 text-slate-600 truncate" title={r.pickupAddress}>
-                     <div className="text-xs">{r.pickupAddress}</div>
+                   <td className="px-4 py-3 font-medium text-gray-900">#{r.id}</td>
+                   <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-xs font-medium">
+                                {r.user?.firstName?.[0]}{r.user?.lastName?.[0]}
+                            </div>
+                            <div>
+                                <div className="font-medium text-gray-900">{r.user?.firstName} {r.user?.lastName}</div>
+                                <div className="text-xs text-gray-500">{r.user?.email}</div>
+                            </div>
+                        </div>
                    </td>
-                   <td className="px-2 py-2 text-slate-600 truncate" title={r.dropoffAddress}>
-                     <div className="text-xs">{r.dropoffAddress}</div>
-                   </td>
-                   <td className="px-2 py-2 text-slate-600">
-                     <div className="text-xs">{new Date(r.pickupTime).toLocaleDateString()}</div>
-                     <div className="text-xs text-slate-500">{new Date(r.pickupTime).toLocaleTimeString()}</div>
-                   </td>
-                   <td className="px-2 py-2 font-semibold text-emerald-600 text-xs">{r.price} DKK</td>
-                   <td className="px-2 py-2">
-                     <span className={`px-1 py-0.5 rounded-full text-xs font-medium ${
-                       r.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-800' :
-                       r.status === 'DELIVERED' ? 'bg-emerald-100 text-emerald-800' :
-                       r.status === 'PICKED_UP' ? 'bg-blue-100 text-blue-800' :
-                       r.status === 'CANCELED' ? 'bg-red-100 text-red-800' :
-                       r.status === 'PROGRESSING' ? 'bg-blue-100 text-blue-800' :
-                       r.status === 'CONFIRMED' ? 'bg-cyan-100 text-cyan-800' :
-                       r.status === 'REFUNDING' ? 'bg-yellow-100 text-yellow-800' :
-                       r.status === 'REFUNDED' ? 'bg-green-100 text-green-800' :
-                       'bg-slate-100 text-slate-800'
-                     }`}>
-                       {r.status.replace('_', ' ')}
-                     </span>
-                   </td>
-                   <td className="px-2 py-2">
-                     {r.paymentStatus === 'PAID' ? (
-                       <span className="text-emerald-600 font-medium text-xs">✅</span>
-                     ) : (
-                       <span className="text-slate-500 text-xs">❌</span>
-                     )}
-                   </td>
-                   <td className="px-2 py-2 text-slate-600 text-xs capitalize">
-                     {r.paymentMethod || 'N/A'}
-                   </td>
-                   <td className="px-2 py-2 text-slate-600 text-xs truncate" title={r.explanation}>
-                     {r.explanation}
-                   </td>
-                   <td className="px-2 py-2">
+                   <td className="px-4 py-3 max-w-xs">
                      <div className="flex flex-col gap-1">
+                        <div className="flex items-start gap-1.5 text-xs">
+                            <MapPin size={14} className="text-green-500 mt-0.5 shrink-0" />
+                            <span className="text-gray-600 truncate" title={r.pickupAddress}>{r.pickupAddress}</span>
+                        </div>
+                        <div className="flex items-start gap-1.5 text-xs">
+                            <MapPin size={14} className="text-red-500 mt-0.5 shrink-0" />
+                            <span className="text-gray-600 truncate" title={r.dropoffAddress}>{r.dropoffAddress}</span>
+                        </div>
+                     </div>
+                   </td>
+                   <td className="px-4 py-3">
+                     <div className="text-gray-900 font-medium">{new Date(r.pickupTime).toLocaleDateString()}</div>
+                     <div className="text-xs text-gray-500">{new Date(r.pickupTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                   </td>
+                   <td className="px-4 py-3 font-semibold text-gray-900">{r.price} DKK</td>
+                   <td className="px-4 py-3">
+                     <StatusBadge status={r.status} />
+                   </td>
+                   <td className="px-4 py-3">
+                     <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1.5">
+                            {r.paymentStatus === 'PAID' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-100">
+                                    Paid
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-100">
+                                    Unpaid
+                                </span>
+                            )}
+                        </div>
+                        <div className="text-xs text-gray-500 capitalize flex items-center gap-1">
+                            <CreditCard size={12} />
+                            {r.paymentMethod?.toLowerCase() || 'N/A'}
+                        </div>
+                     </div>
+                   </td>
+                   <td className="px-4 py-3 text-right">
+                     <div className="relative inline-block text-left group-hover:opacity-100 opacity-100 sm:opacity-0 transition-opacity">
                        <select
-                         className="px-2 py-1 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-cyan-500 focus:border-transparent"
+                         className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                          onChange={async (e) => {
                            if (e.target.value) {
                              const action = e.target.value;
-                             console.log('Selected action:', action);
                              e.target.value = ''; // Reset select
                              if (confirm(`Are you sure you want to ${action.toLowerCase().replace('_', ' ')} this booking?`)) {
-                               console.log('Sending request with:', { id: r.id, action });
                                try {
                                  const response = await fetch('/api/admin/bookings/update', {
                                    method: 'POST',
                                    headers: { 'Content-Type': 'application/json' },
                                    body: JSON.stringify({ id: r.id, action: action })
                                  });
-                                 console.log('Response status:', response.status);
-                                 const data = await response.json();
-                                 console.log('Response data:', data);
                                  if (response.ok) {
                                    if (typeof window !== 'undefined') {
                                      window.location.reload();
                                    }
                                  } else {
+                                   const data = await response.json();
                                    alert(`Error: ${data.error || 'Unknown error'}`);
                                  }
                                } catch (error) {
-                                 console.error('Error:', error);
                                  alert('Network error occurred');
                                }
                              }
@@ -395,7 +392,7 @@ export default function AdminBookings(){
                          }}
                          defaultValue=""
                        >
-                         <option value="">Action</option>
+                         <option value="">Actions</option>
                          <option value="CONFIRM">✅ Confirm</option>
                          <option value="DISPATCH">🚗 Dispatch</option>
                          <option value="COMPLETE">📦 Complete</option>
@@ -409,10 +406,21 @@ export default function AdminBookings(){
                  </tr>
                ))}
               {filteredList.length===0 && (
-                <tr><td colSpan={12} className="p-8 text-center text-slate-500">
-                  <div className="text-4xl mb-2">📭</div>
-                  <div className="font-medium">No bookings match your filters</div>
-                  <div className="text-sm mt-1">Try adjusting your search or date filters</div>
+                <tr><td colSpan={9} className="p-12 text-center text-gray-500">
+                  <div className="flex flex-col items-center justify-center">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                        <Search size={32} className="text-gray-400" />
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900">No bookings found</h3>
+                    <p className="text-sm mt-1 max-w-xs mx-auto">We couldn't find any bookings matching your current filters. Try adjusting your search or date range.</p>
+                    <button 
+                        onClick={() => {setSearchTerm(''); setDateFilter('all');}}
+                        className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
+                    >
+                        <RefreshCw size={14} />
+                        Clear Filters
+                    </button>
+                  </div>
                 </td></tr>
               )}
             </tbody>
@@ -421,4 +429,53 @@ export default function AdminBookings(){
       </div>
     </div>
   );
+}
+
+function StatCard({ label, value, icon, color, bg }: any) {
+    return (
+        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-lg ${bg} flex items-center justify-center ${color}`}>
+                {icon}
+            </div>
+            <div>
+                <div className="text-2xl font-bold text-gray-900">{value}</div>
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</div>
+            </div>
+        </div>
+    )
+}
+
+function BulkActionButton({ onClick, label, icon, color }: any) {
+    return (
+        <button
+            onClick={onClick}
+            className={`px-3 py-1.5 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${color}`}
+        >
+            {icon}
+            {label}
+        </button>
+    )
+}
+
+function StatusBadge({ status }: { status: string }) {
+    const styles = {
+        COMPLETED: 'bg-green-100 text-green-700 border-green-200',
+        DELIVERED: 'bg-green-100 text-green-700 border-green-200',
+        PICKED_UP: 'bg-blue-100 text-blue-700 border-blue-200',
+        CANCELED: 'bg-red-100 text-red-700 border-red-200',
+        PROGRESSING: 'bg-blue-100 text-blue-700 border-blue-200',
+        CONFIRMED: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+        REFUNDING: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+        REFUNDED: 'bg-purple-100 text-purple-700 border-purple-200',
+        PENDING: 'bg-gray-100 text-gray-700 border-gray-200',
+        DISPATCHED: 'bg-indigo-100 text-indigo-700 border-indigo-200'
+    };
+
+    const style = styles[status as keyof typeof styles] || styles.PENDING;
+
+    return (
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style}`}>
+            {status.replace('_', ' ')}
+        </span>
+    );
 }

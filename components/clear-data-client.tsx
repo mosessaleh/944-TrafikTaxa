@@ -1,6 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { 
+  Trash2, 
+  AlertTriangle, 
+  Database, 
+  RefreshCw, 
+  Shield, 
+  CheckCircle,
+  AlertOctagon
+} from 'lucide-react';
 
 interface TableCount {
   name: string;
@@ -91,111 +100,115 @@ export default function ClearDataClient() {
     return names[table] || table;
   };
 
-  const getTableIcon = (table: string) => {
-    const icons: { [key: string]: string } = {
-      'ride': '🚗',
-      'invoice': '🧾',
-      'complaint': '📝',
-      'favoriteAddress': '⭐',
-      'paymentMethod': '💳',
-      'cryptoPayment': '₿',
-      'cardPayment': '💳',
-      'paypalPayment': '🅿️',
-      'revolutPayment': '🔄',
-      'cryptoWallet': '💰',
-      'auditLog': '📋'
-    };
-    return icons[table] || '📊';
-  };
-
   const excludedTables = ['user', 'vehicleType', 'settings', '_prisma_migrations'];
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-64">
+      <div className="flex justify-center items-center min-h-[400px]">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-blue-600" />
       </div>
     );
   }
 
   return (
-    <div className="grid gap-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">🧹 Clear Database Data</h1>
-        <p className="text-gray-600 mt-2">
-          Select a table to clear all its data. This action is irreversible!
-        </p>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
-          <div className="flex items-start gap-3">
-            <div className="text-red-600 text-xl">⚠️</div>
-            <div>
-              <h3 className="font-semibold text-red-800">Danger Zone</h3>
-              <p className="text-red-700 text-sm mt-1">
-                Clearing data will permanently delete all records from the selected table. 
-                The table will be reset and IDs will start from 1 again.
-              </p>
-            </div>
-          </div>
+    <div className="space-y-6">
+      {/* Warning Banner */}
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6 flex items-start gap-4">
+        <div className="p-2 bg-red-100 rounded-lg text-red-600 shrink-0">
+            <AlertOctagon size={24} />
+        </div>
+        <div>
+            <h3 className="text-lg font-bold text-red-900">Danger Zone</h3>
+            <p className="text-red-700 text-sm mt-1 leading-relaxed">
+            Clearing data will permanently delete all records from the selected table. 
+            The table will be reset and IDs will start from 1 again. This action cannot be undone.
+            </p>
         </div>
       </div>
 
       {/* Clearable Tables */}
-      <div className="grid gap-4">
-        <h2 className="text-xl font-semibold text-gray-800">Available Tables to Clear</h2>
-        <div className="grid gap-3">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+                <Database size={18} className="text-gray-500" />
+                <h2 className="text-lg font-semibold text-gray-900">Manage Database Tables</h2>
+            </div>
+            <button 
+                onClick={fetchTableCounts} 
+                className="text-gray-500 hover:text-blue-600 transition-colors p-1 rounded-lg hover:bg-gray-100"
+                title="Refresh Counts"
+            >
+                <RefreshCw size={18} />
+            </button>
+        </div>
+        
+        <div className="divide-y divide-gray-100">
           {tableCounts.map((tableData) => (
-            <div key={tableData.name} className="bg-white rounded-2xl border border-gray-200 p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="text-3xl">{getTableIcon(tableData.name)}</div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {getTableDisplayName(tableData.name)}
-                    </h3>
-                    <p className="text-sm text-gray-600">
-                      Current records: <span className="font-mono font-semibold">{tableData.count}</span>
-                    </p>
+            <div key={tableData.name} className="p-6 flex items-center justify-between hover:bg-gray-50/50 transition-colors">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500">
+                    <Database size={20} />
+                </div>
+                <div>
+                  <h3 className="font-medium text-gray-900">
+                    {getTableDisplayName(tableData.name)}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                        {tableData.name}
+                    </span>
+                    <span className="text-sm text-gray-500">
+                      • {tableData.count} records
+                    </span>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleClearData(tableData.name)}
-                  disabled={clearing === tableData.name || tableData.count === 0}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {clearing === tableData.name ? (
-                    <div className="flex items-center gap-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
-                      Clearing...
-                    </div>
-                  ) : (
-                    'Clear Data'
-                  )}
-                </button>
               </div>
-              {tableData.count === 0 && (
-                <div className="mt-3 text-sm text-gray-500">
-                  This table is already empty.
-                </div>
-              )}
+              
+              <button
+                onClick={() => handleClearData(tableData.name)}
+                disabled={clearing === tableData.name || tableData.count === 0}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                    tableData.count === 0
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-white border border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 shadow-sm'
+                }`}
+              >
+                {clearing === tableData.name ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-red-600 border-t-transparent" />
+                    Clearing...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={16} />
+                    Clear Data
+                  </>
+                )}
+              </button>
             </div>
           ))}
         </div>
       </div>
 
       {/* Excluded Tables */}
-      <div className="bg-gray-50 rounded-2xl border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">Protected Tables (Cannot be cleared)</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="bg-gray-50 rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+            <Shield size={18} className="text-gray-500" />
+            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Protected System Tables</h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           {excludedTables.map((table) => (
-            <div key={table} className="flex items-center gap-2 text-sm text-gray-600">
-              <span className="text-gray-400">🔒</span>
-              <span className="font-mono">{table}</span>
+            <div key={table} className="flex items-center gap-3 bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+              <div className="text-green-500">
+                <CheckCircle size={16} />
+              </div>
+              <span className="text-sm font-mono text-gray-600">{table}</span>
             </div>
           ))}
         </div>
-        <p className="text-gray-500 text-sm mt-3">
-          These tables are protected because they contain essential system data.
+        <p className="text-xs text-gray-500 mt-4 flex items-center gap-1.5">
+            <AlertTriangle size={12} />
+            These tables contain essential system configuration and user data that cannot be cleared via this tool.
         </p>
       </div>
     </div>
