@@ -6,6 +6,11 @@ interface Complaint {
   complaint: string[] | string;
   status: string;
   adminDecision?: string;
+  category?: string;
+  priority?: string;
+  slaDeadline?: string;
+  escalated?: boolean;
+  responseTemplate?: string;
   createdAt: string;
   updatedAt: string;
   user: {
@@ -22,25 +27,58 @@ interface Complaint {
 }
 
 interface AdminComplaintModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  complaint: Complaint | null;
-  onUpdate: (complaintId: number, status: string, decision: string) => Promise<void>;
-  onReply: (complaintId: number, reply: string) => Promise<void>;
-}
+   isOpen: boolean;
+   onClose: () => void;
+   complaint: Complaint | null;
+   onUpdate: (complaintId: number, status: string, decision: string, category?: string, priority?: string, slaDeadline?: string, responseTemplate?: string) => Promise<void>;
+   onReply: (complaintId: number, reply: string) => Promise<void>;
+ }
 
 export default function AdminComplaintModal({ isOpen, onClose, complaint, onUpdate, onReply }: AdminComplaintModalProps) {
-  const [status, setStatus] = useState('');
-  const [decision, setDecision] = useState('');
-  const [reply, setReply] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [replyLoading, setReplyLoading] = useState(false);
+   const [status, setStatus] = useState('');
+   const [decision, setDecision] = useState('');
+   const [reply, setReply] = useState('');
+   const [loading, setLoading] = useState(false);
+   const [replyLoading, setReplyLoading] = useState(false);
+
+   // New fields
+   const [category, setCategory] = useState('');
+   const [priority, setPriority] = useState('medium');
+   const [slaDeadline, setSlaDeadline] = useState('');
+   const [responseTemplate, setResponseTemplate] = useState('');
+
+   // Response templates
+   const responseTemplates = {
+     delay: [
+       { id: 'delay_apology', title: 'Delay Apology', content: 'We sincerely apologize for the delay in your ride. We are working to resolve this issue and ensure better service in the future.' },
+       { id: 'delay_compensation', title: 'Delay with Compensation', content: 'We apologize for the inconvenience caused by the delay. As compensation, we will provide you with a 20% discount on your next ride.' }
+     ],
+     driver: [
+       { id: 'driver_behavior', title: 'Driver Behavior Issue', content: 'Thank you for bringing this to our attention. We take driver conduct very seriously and will investigate this matter immediately.' },
+       { id: 'driver_rating', title: 'Driver Rating Review', content: 'We have noted your feedback about the driver. All drivers are regularly reviewed based on customer feedback to maintain service quality.' }
+     ],
+     pricing: [
+       { id: 'pricing_explanation', title: 'Pricing Explanation', content: 'The fare calculation includes base fare, distance, time, and any applicable surcharges. We can review your specific ride details if needed.' },
+       { id: 'pricing_refund', title: 'Pricing Dispute Resolution', content: 'We understand your concern about the pricing. Our team will review the fare calculation and contact you within 24 hours with a resolution.' }
+     ],
+     technical: [
+       { id: 'technical_issue', title: 'Technical Issue Acknowledgment', content: 'We apologize for the technical difficulties you experienced. Our technical team is aware of this issue and working on a fix.' },
+       { id: 'app_problem', title: 'App/Website Issue', content: 'Thank you for reporting this technical issue. We regularly update our systems to improve performance and user experience.' }
+     ],
+     other: [
+       { id: 'general_apology', title: 'General Apology', content: 'We apologize for any inconvenience caused. Your feedback helps us improve our service. We will address this matter promptly.' }
+     ]
+   };
 
   useEffect(() => {
     if (complaint) {
       setStatus(complaint.status);
       setDecision(complaint.adminDecision || '');
       setReply('');
+      setCategory(complaint.category || 'other');
+      setPriority(complaint.priority || 'medium');
+      setSlaDeadline(complaint.slaDeadline ? new Date(complaint.slaDeadline).toISOString().slice(0, 16) : '');
+      setResponseTemplate(complaint.responseTemplate || '');
     }
   }, [complaint]);
 
@@ -50,7 +88,7 @@ export default function AdminComplaintModal({ isOpen, onClose, complaint, onUpda
 
     setLoading(true);
     try {
-      await onUpdate(complaint.id, status, decision);
+      await onUpdate(complaint.id, status, decision, category, priority, slaDeadline, responseTemplate);
       onClose();
     } catch (error) {
       console.error('Failed to update complaint:', error);
@@ -170,22 +208,100 @@ export default function AdminComplaintModal({ isOpen, onClose, complaint, onUpda
         </div>
 
         <form onSubmit={handleSubmit}>
-          {/* Status */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Status
-            </label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="w-full p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
-              required
-            >
-              <option value="OPEN">Open</option>
-              <option value="CLOSED">Closed</option>
-              <option value="ACCEPTED">Accepted</option>
-            </select>
-          </div>
+           {/* Category and Priority */}
+           <div className="grid grid-cols-2 gap-4 mb-4">
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-2">
+                 Category
+               </label>
+               <select
+                 value={category}
+                 onChange={(e) => setCategory(e.target.value)}
+                 className="w-full p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+               >
+                 <option value="delay">Delay</option>
+                 <option value="driver">Driver Issue</option>
+                 <option value="pricing">Pricing</option>
+                 <option value="technical">Technical</option>
+                 <option value="other">Other</option>
+               </select>
+             </div>
+             <div>
+               <label className="block text-sm font-medium text-gray-700 mb-2">
+                 Priority
+               </label>
+               <select
+                 value={priority}
+                 onChange={(e) => setPriority(e.target.value)}
+                 className="w-full p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+               >
+                 <option value="low">Low</option>
+                 <option value="medium">Medium</option>
+                 <option value="high">High</option>
+               </select>
+             </div>
+           </div>
+
+           {/* SLA Deadline */}
+           <div className="mb-4">
+             <label className="block text-sm font-medium text-gray-700 mb-2">
+               SLA Deadline
+             </label>
+             <input
+               type="datetime-local"
+               value={slaDeadline}
+               onChange={(e) => setSlaDeadline(e.target.value)}
+               className="w-full p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+             />
+           </div>
+
+           {/* Response Templates */}
+           {responseTemplates[category as keyof typeof responseTemplates] && (
+             <div className="mb-4">
+               <label className="block text-sm font-medium text-gray-700 mb-2">
+                 Quick Response Templates
+               </label>
+               <select
+                 value={responseTemplate}
+                 onChange={(e) => {
+                   const selectedTemplate = e.target.value;
+                   setResponseTemplate(selectedTemplate);
+                   if (selectedTemplate) {
+                     const templates = responseTemplates[category as keyof typeof responseTemplates];
+                     const template = templates.find(t => t.id === selectedTemplate);
+                     if (template) {
+                       setReply(template.content);
+                     }
+                   }
+                 }}
+                 className="w-full p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent mb-2"
+               >
+                 <option value="">Select a template...</option>
+                 {responseTemplates[category as keyof typeof responseTemplates].map(template => (
+                   <option key={template.id} value={template.id}>
+                     {template.title}
+                   </option>
+                 ))}
+               </select>
+             </div>
+           )}
+
+           {/* Status */}
+           <div className="mb-4">
+             <label className="block text-sm font-medium text-gray-700 mb-2">
+               Status
+             </label>
+             <select
+               value={status}
+               onChange={(e) => setStatus(e.target.value)}
+               className="w-full p-3 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+               required
+             >
+               <option value="OPEN">Open</option>
+               <option value="CLOSED">Closed</option>
+               <option value="ACCEPTED">Accepted</option>
+             </select>
+           </div>
 
           {/* Admin Decision */}
           <div className="mb-4">

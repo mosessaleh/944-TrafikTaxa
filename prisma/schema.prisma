@@ -267,14 +267,19 @@ model AuditLog {
 
 // === Added by assistant (Complaints System) ===
 model Complaint {
-  id            Int      @id @default(autoincrement())
-  userId        Int
-  rideId        Int
-  complaint     Json     // Changed to Json to store array of conversation messages
-  status        String   @default("OPEN") // OPEN, CLOSED, ACCEPTED
-  adminDecision String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  rideId          Int
+  complaint       Json     // Changed to Json to store array of conversation messages
+  status          String   @default("OPEN") // OPEN, CLOSED, ACCEPTED
+  adminDecision   String?
+  category        String?  @default("other") // delay, driver, pricing, technical, other
+  priority        String   @default("medium") // high, medium, low
+  slaDeadline     DateTime? // SLA response deadline
+  escalated       Boolean  @default(false) // Whether complaint has been escalated
+  responseTemplate String? // ID of automated response template used
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id])
   ride Ride @relation(fields: [rideId], references: [id])
@@ -285,9 +290,16 @@ model Complaint {
   @@index([status])
   @@index([createdAt])
   @@index([adminDecision])
+  @@index([category])
+  @@index([priority])
+  @@index([escalated])
+  @@index([slaDeadline])
   @@index([userId, status])                // For user complaint filtering
   @@index([status, createdAt])             // For admin complaint listing
   @@index([createdAt, status])             // For complaint reporting
+  @@index([category, priority])            // For categorization and priority filtering
+  @@index([status, escalated])             // For escalation tracking
+  @@index([slaDeadline, status])           // For SLA monitoring
 }
 
 // === Invoice Model ===

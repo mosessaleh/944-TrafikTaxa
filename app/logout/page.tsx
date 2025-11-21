@@ -1,17 +1,45 @@
-import { redirect } from 'next/navigation';
-import { getUserFromCookie } from '@/lib/auth';
-import type { Metadata } from 'next';
+"use client";
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
-export const metadata: Metadata = {
-  title: 'Logged Out | 944 Trafik',
-  description: 'You have been successfully logged out of 944 Trafik.',
-};
+export default function LogoutPage(){
+  const [loggedOut, setLoggedOut] = useState(false);
+  const router = useRouter();
 
-export default async function LogoutPage(){
-  const user = await getUserFromCookie();
-  if (user) {
-    // If user is still logged in, redirect to logout API
-    redirect('/api/auth/logout');
+  useEffect(() => {
+    // Check if user came from logout button
+    const logoutIntent = sessionStorage.getItem('logoutIntent');
+    if (logoutIntent !== 'true') {
+      // Direct access, redirect to home
+      router.push('/');
+      return;
+    }
+
+    // Remove the flag
+    sessionStorage.removeItem('logoutIntent');
+
+    // Call logout API
+    fetch('/api/auth/logout', { method: 'POST' })
+      .then(() => {
+        setLoggedOut(true);
+      })
+      .catch(() => {
+        setLoggedOut(true); // Even if error, consider logged out
+      });
+  }, [router]);
+
+  if (!loggedOut) {
+    return (
+      <div className="max-w-2xl mx-auto grid gap-6 py-12">
+        <div className="text-center">
+          <div className="text-4xl mb-4">🔄</div>
+          <h1 className="text-2xl font-bold mb-4">Logging out...</h1>
+          <p className="text-gray-600">
+            Please wait while we log you out.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

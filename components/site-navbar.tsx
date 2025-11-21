@@ -88,9 +88,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                 <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50">
                   <Link href="/account?tab=profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</Link>
                   {isAdmin && <Link href={getAdminPath()} onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Dashboard</Link>}
-                  <form action="/api/auth/logout" method="post" onSubmit={() => setDropdownOpen(false)}>
-                    <button type="submit" className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100">Logout</button>
-                  </form>
+                  <a href="/logout" onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setDropdownOpen(false); }} className="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100">Logout</a>
                 </div>
               )}
             </div>
@@ -178,15 +176,13 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                       Dashboard
                     </Link>
                   )}
-                  <form action="/api/auth/logout" method="post">
-                    <button
-                      className="w-full text-left px-4 py-3 rounded-lg hover:bg-slate-50 text-red-600 hover:text-red-700 font-medium transition-colors text-sm"
-                      type="submit"
-                      onClick={() => setMobileMenuOpen(false)}
-                    >
-                      Logout
-                    </button>
-                  </form>
+                  <a
+                    href="/logout"
+                    className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-red-600 hover:text-red-700 font-medium transition-colors text-sm"
+                    onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setMobileMenuOpen(false); }}
+                  >
+                    Logout
+                  </a>
                 </div>
               )}
             </div>

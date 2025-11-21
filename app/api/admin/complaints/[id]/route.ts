@@ -38,7 +38,7 @@ export async function POST(
       );
     }
 
-    const { status, adminDecision } = await request.json();
+    const { status, adminDecision, category, priority, slaDeadline, responseTemplate } = await request.json();
 
     if (!status || !['OPEN', 'CLOSED', 'ACCEPTED'].includes(status)) {
       return NextResponse.json(
@@ -55,11 +55,28 @@ export async function POST(
       );
     }
 
+    // Set SLA deadline based on priority if not provided
+    let finalSlaDeadline = slaDeadline;
+    if (!finalSlaDeadline && status === 'OPEN') {
+      const now = new Date();
+      if (priority === 'high') {
+        finalSlaDeadline = new Date(now.getTime() + 4 * 60 * 60 * 1000); // 4 hours
+      } else if (priority === 'medium') {
+        finalSlaDeadline = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours
+      } else {
+        finalSlaDeadline = new Date(now.getTime() + 72 * 60 * 60 * 1000); // 72 hours
+      }
+    }
+
     const updatedComplaint = await (prisma as any).complaint.update({
       where: { id: Number(complaintId) },
       data: {
         status,
         adminDecision: adminDecision || null,
+        category: category || 'other',
+        priority: priority || 'medium',
+        slaDeadline: finalSlaDeadline ? new Date(finalSlaDeadline) : null,
+        responseTemplate: responseTemplate || null,
         updatedAt: new Date(),
       },
     });
