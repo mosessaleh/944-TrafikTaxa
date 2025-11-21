@@ -6,6 +6,7 @@ import { safeEstimateDistance } from '@/lib/geocode-safe';
 import { computePrice } from '@/lib/price';
 import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 import { sanitizeInput } from '@/lib/sanitize';
+import { assessBookingRisk, updateBookingRisk } from '@/lib/risk-assessment';
 
 // Validation schema for booking creation
 const createBookingSchema = z.object({
@@ -290,6 +291,27 @@ export async function POST(request: NextRequest) {
         }
       }
     });
+
+    // Perform risk assessment
+    try {
+      const riskAssessment = await assessBookingRisk({
+        userId: user.id,
+        pickupAddress: validatedData.pickupAddress,
+        dropoffAddress: validatedData.dropoffAddress,
+        pickupTime,
+        price,
+        passengers: 1,
+        distanceKm: Number(distanceKm.toFixed(2))
+      });
+
+      // Update booking with risk assessment
+      await updateBookingRisk(booking.id, riskAssessment);
+
+      console.log(`Risk assessment completed for booking ${booking.id}: ${riskAssessment.level} (${riskAssessment.score})`);
+    } catch (riskError) {
+      console.error('Error performing risk assessment:', riskError);
+      // Don't fail the booking if risk assessment fails
+    }
 
     // Send notification to admin (async, don't wait)
     const adminEmail = process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL;

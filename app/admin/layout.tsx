@@ -1,17 +1,18 @@
 import Link from 'next/link';
 import { getUserFromCookie } from '@/lib/auth';
 import { getAdminPath } from '@/lib/admin-route';
-import { 
-  LayoutDashboard, 
-  ClipboardList, 
-  Users, 
-  Car, 
-  CreditCard, 
-  Settings, 
-  Bitcoin, 
-  AlertTriangle, 
+import {
+  LayoutDashboard,
+  ClipboardList,
+  Users,
+  Car,
+  CreditCard,
+  Settings,
+  Bitcoin,
+  AlertTriangle,
   Trash2,
-  Bell
+  Bell,
+  Shield
 } from 'lucide-react';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -40,6 +41,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                 <NavLink href={getAdminPath('/payments')} icon={<CreditCard size={18} />} label="Payments" />
                 <NavLink href={getAdminPath('/crypto')} icon={<Bitcoin size={18} />} label="Crypto" />
                 <NavLink href={getAdminPath('/complaints')} icon={<AlertTriangle size={18} />} label="Complaints" />
+                <NavLink href={getAdminPath('/risk')} icon={<Shield size={18} />} label="Risk Management" />
                 
                 <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 mt-8 px-3">System</div>
                 <NavLink href={getAdminPath('/settings')} icon={<Settings size={18} />} label="Settings" />

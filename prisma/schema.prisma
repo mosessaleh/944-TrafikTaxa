@@ -144,6 +144,14 @@ model Ride {
   createdAt      DateTime   @default(now())
   paymentMethod  String?
 
+  // Risk Management Fields
+  riskScore      Float?     @default(0) // 0-100 risk score
+  riskLevel      String?    @default("low") // low, medium, high, critical
+  riskFactors    Json?      @default("[]") // Array of risk factors detected
+  riskReviewed   Boolean    @default(false) // Whether admin has reviewed
+  riskApproved   Boolean?   // Admin approval status
+  riskNotes      String?    // Admin notes about risk assessment
+
   vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
   vehicleTypeId Int
 
@@ -157,6 +165,9 @@ model Ride {
   @@index([paymentStatus])
   @@index([pickupTime])
   @@index([createdAt])
+  @@index([riskScore])
+  @@index([riskLevel])
+  @@index([riskReviewed])
   @@index([userId, status])                    // For user ride filtering
   @@index([userId, createdAt])                 // For user history
   @@index([status, pickupTime])                // For admin dashboard queries
@@ -164,6 +175,8 @@ model Ride {
   @@index([paymentStatus, status])             // For payment status filtering
   @@index([scheduled, pickupTime])             // For scheduled rides
   @@index([status, paymentStatus])             // For comprehensive status filtering
+  @@index([riskLevel, riskReviewed])           // For risk management filtering
+  @@index([createdAt, riskScore])              // For risk analytics
 }
 
 
