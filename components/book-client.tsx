@@ -61,6 +61,12 @@ export default function BookClient(){
   const [mapInstance, setMapInstance] = useState<any>(null);
   const mapRef = useRef<any>(null);
 
+  // Geolocation state
+  const [currentLocation, setCurrentLocation] = useState<{lat: number; lng: number} | null>(null);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [locationPermission, setLocationPermission] = useState<'granted' | 'denied' | 'prompt' | null>(null);
+
   // Favorites state
   const [saveModal, setSaveModal] = useState<{open:boolean; target: FavApply|null; name:string; address:string}>({open:false, target:null, name:'', address:''});
   const [pickModal, setPickModal] = useState<{open:boolean; target: FavApply|null}>({open:false, target:null});
@@ -153,13 +159,81 @@ export default function BookClient(){
       // Create the map only once for this container
       const map = L.map(mapDiv).setView([55.6761, 12.5683], 12); // Default to Copenhagen
       mapRef.current = map;
-  
+
       // Use CartoDB tiles which have better CORS support
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '© OpenStreetMap contributors © CARTO',
         crossOrigin: true,
         maxZoom: 19
       }).addTo(map);
+
+      // Add click handler for location selection
+      map.on('click', async (e: any) => {
+        const { lat, lng } = e.latlng;
+
+        // Reverse geocode the clicked location
+        try {
+          const response = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            const address = [
+              data.localityInfo?.administrative?.[2]?.name,
+              data.city,
+              data.principalSubdivision,
+              data.countryName
+            ].filter(Boolean).join(', ');
+
+            if (address) {
+              const suggestion: Suggestion = {
+                id: null,
+                text: address,
+                lat: lat,
+                lon: lng,
+                postcode: data.postcode || null,
+                city: data.city || null
+              };
+
+              // Determine if this should be pickup or dropoff based on current state
+              if (!pickupSel) {
+                setPickupSel(suggestion);
+                setPickup(address);
+              } else if (!dropoffSel) {
+                setDropoffSel(suggestion);
+                setDropoff(address);
+              } else {
+                // Both are set, ask user or default to pickup
+                setPickupSel(suggestion);
+                setPickup(address);
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('Reverse geocoding failed for map click:', error);
+          // Fallback to coordinates
+          const suggestion: Suggestion = {
+            id: null,
+            text: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+            lat: lat,
+            lon: lng,
+            postcode: null,
+            city: null
+          };
+
+          if (!pickupSel) {
+            setPickupSel(suggestion);
+            setPickup(suggestion.text);
+          } else if (!dropoffSel) {
+            setDropoffSel(suggestion);
+            setDropoff(suggestion.text);
+          } else {
+            setPickupSel(suggestion);
+            setPickup(suggestion.text);
+          }
+        }
+      });
   
       return { map, L };
     };
@@ -208,7 +282,21 @@ export default function BookClient(){
       });
  
       const markers: any[] = [];
- 
+
+      // Add current location marker (blue) if available
+      if (currentLocation) {
+        const currentLocationMarker = L.marker([currentLocation.lat, currentLocation.lng], {
+          icon: L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="background-color: #3b82f6; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); position: relative;"><div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background-color: white; border-radius: 50%;"></div></div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+          })
+        }).addTo(map);
+        currentLocationMarker.bindPopup(`<strong>Your Location</strong><br><em>Click map to select pickup/dropoff</em>`);
+        markers.push(currentLocationMarker);
+      }
+
       // Add pickup marker (green) if available
       if (hasPickup && pickupSel) {
         const pickupMarker = L.marker([pickupSel.lat, pickupSel.lon], {
@@ -292,11 +380,117 @@ export default function BookClient(){
   useEffect(() => {
     const hasPickup = !!(pickupSel && pickupSel.lat && pickupSel.lon);
     const hasDropoff = !!(dropoffSel && dropoffSel.lat && dropoffSel.lon);
- 
+
     if (!hasPickup && !hasDropoff) return;
- 
+
     updateMapWithLocations();
   }, [pickupSel, dropoffSel]);
+
+  // Check location permission on mount
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && 'permissions' in navigator) {
+      navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+        setLocationPermission(result.state as 'granted' | 'denied' | 'prompt');
+        result.addEventListener('change', () => {
+          setLocationPermission(result.state as 'granted' | 'denied' | 'prompt');
+        });
+      }).catch(() => {
+        // Permissions API not supported, fallback to trying geolocation
+        setLocationPermission('prompt');
+      });
+    }
+  }, []);
+
+  // Get current location
+  const getCurrentLocation = async () => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by this browser');
+      return;
+    }
+
+    setLocationLoading(true);
+    setLocationError(null);
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 300000 // 5 minutes
+        });
+      });
+
+      const { latitude, longitude } = position.coords;
+      const location = { lat: latitude, lng: longitude };
+
+      setCurrentLocation(location);
+      setLocationPermission('granted');
+
+      // Reverse geocode to get address
+      try {
+        const response = await fetch(
+          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          const address = [
+            data.localityInfo?.administrative?.[2]?.name,
+            data.city,
+            data.principalSubdivision,
+            data.countryName
+          ].filter(Boolean).join(', ');
+
+          if (address) {
+            // Set as pickup location
+            const suggestion: Suggestion = {
+              id: null,
+              text: address,
+              lat: latitude,
+              lon: longitude,
+              postcode: data.postcode || null,
+              city: data.city || null
+            };
+
+            setPickupSel(suggestion);
+            setPickup(address);
+          }
+        }
+      } catch (geocodeError) {
+        console.warn('Reverse geocoding failed:', geocodeError);
+        // Still set the location even if geocoding fails
+        const suggestion: Suggestion = {
+          id: null,
+          text: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+          lat: latitude,
+          lon: longitude,
+          postcode: null,
+          city: null
+        };
+
+        setPickupSel(suggestion);
+        setPickup(suggestion.text);
+      }
+
+    } catch (error: any) {
+      console.error('Geolocation error:', error);
+
+      let errorMessage = 'Unable to get your location';
+
+      if (error.code === 1) {
+        errorMessage = 'Location access denied. Please enable location permissions.';
+        setLocationPermission('denied');
+      } else if (error.code === 2) {
+        errorMessage = 'Location unavailable. Please check your GPS settings.';
+      } else if (error.code === 3) {
+        errorMessage = 'Location request timed out. Please try again.';
+      }
+
+      setLocationError(errorMessage);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
 
   useEffect(() => {
     if(qTimer.current) clearTimeout(qTimer.current);
@@ -537,14 +731,30 @@ export default function BookClient(){
                       <span className="text-green-600">🚀</span>
                       Pickup address
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setPickModal({ open: true, target: FavApply.Pickup })}
-                      className="text-xs text-cyan-600 hover:text-cyan-700 font-medium inline-flex items-center gap-1"
-                    >
-                      <span>⭐</span>
-                      Favorites
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={getCurrentLocation}
+                        disabled={locationLoading}
+                        className={`text-xs font-medium inline-flex items-center gap-1 px-2 py-1 rounded-md transition-colors text-blue-600 hover:text-blue-700 hover:bg-blue-50 ${locationLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        title="Use my current location"
+                      >
+                        {locationLoading ? (
+                          <div className="animate-spin rounded-full h-3 w-3 border border-current border-t-transparent"></div>
+                        ) : (
+                          <span>📍</span>
+                        )}
+                        Use my location
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPickModal({ open: true, target: FavApply.Pickup })}
+                        className="text-xs text-cyan-600 hover:text-cyan-700 font-medium inline-flex items-center gap-1"
+                      >
+                        <span>⭐</span>
+                        Favorites
+                      </button>
+                    </div>
                   </div>
                   <div className="flex gap-3">
                     <div className="flex-1">
@@ -575,6 +785,11 @@ export default function BookClient(){
                       />
                     )}
                   </div>
+                  {locationError && (
+                    <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-200">
+                      ⚠️ {locationError}
+                    </div>
+                  )}
                 </div>
 
                 {/* Dropoff Address */}
@@ -819,8 +1034,25 @@ export default function BookClient(){
 
               {/* Map */}
               <div className="mt-4">
-                <div className="h-64 w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-slate-600">
+                    🗺️ Click on the map to select pickup or dropoff location
+                  </div>
+                  {currentLocation && (
+                    <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                      📍 Your location shown
+                    </div>
+                  )}
+                </div>
+                <div className="h-64 w-full rounded-xl overflow-hidden border border-slate-200 bg-slate-50 relative">
                   <div id="trip-map" className="h-full w-full"></div>
+                  {!pickupSel && !dropoffSel && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/5 pointer-events-none">
+                      <div className="bg-white/90 px-4 py-2 rounded-lg shadow-sm text-sm text-slate-600">
+                        Click anywhere on the map to set your pickup location
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

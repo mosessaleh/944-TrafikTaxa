@@ -119,4 +119,91 @@ test.describe('Booking Flow E2E Tests', () => {
     const navExists = await desktopNav.isVisible().catch(() => false);
     expect(navExists).toBe(true);
   });
+
+  test('should handle geolocation features', async ({ page, context }) => {
+    // Mock geolocation API
+    await context.grantPermissions(['geolocation']);
+
+    // Mock geolocation position
+    await page.addInitScript(() => {
+      navigator.geolocation.getCurrentPosition = (success) => {
+        success({
+          coords: {
+            latitude: 55.6761,
+            longitude: 12.5683,
+            accuracy: 100,
+            altitude: null,
+            altitudeAccuracy: null,
+            heading: null,
+            speed: null
+          },
+          timestamp: Date.now()
+        } as GeolocationPosition);
+      };
+    });
+
+    await page.goto('/book');
+
+    // Wait for the page to load
+    await page.waitForSelector('#trip-map');
+
+    // Click the current location button
+    const locationButton = page.locator('button').filter({ hasText: 'Use my location' });
+    await expect(locationButton).toBeVisible();
+    await locationButton.click();
+
+    // Wait for location to be set
+    await page.waitForTimeout(2000);
+
+    // Check if pickup field has been filled
+    const pickupInput = page.locator('input[name="pickup"]');
+    const pickupValue = await pickupInput.inputValue();
+    expect(pickupValue.length).toBeGreaterThan(0);
+
+    // Check if map shows current location marker
+    const mapContainer = page.locator('#trip-map');
+    await expect(mapContainer).toBeVisible();
+  });
+
+  test('should allow map-based location selection', async ({ page }) => {
+    await page.goto('/book');
+
+    // Wait for the map to load
+    await page.waitForSelector('#trip-map');
+
+    // Click on the map (simulate clicking at coordinates)
+    const mapContainer = page.locator('#trip-map');
+    await mapContainer.click({
+      position: { x: 100, y: 100 }
+    });
+
+    // Wait for location processing
+    await page.waitForTimeout(2000);
+
+    // Check if pickup field has been filled
+    const pickupInput = page.locator('input[name="pickup"]');
+    const pickupValue = await pickupInput.inputValue();
+    expect(pickupValue.length).toBeGreaterThan(0);
+  });
+
+  test('should handle location permission denied', async ({ page, context }) => {
+    // Deny geolocation permission
+    await context.clearPermissions();
+    // Don't grant geolocation permission
+
+    await page.goto('/book');
+
+    // Click the current location button
+    const locationButton = page.locator('button').filter({ hasText: 'Use my location' });
+    await expect(locationButton).toBeVisible();
+    await locationButton.click();
+
+    // Wait for error message
+    await page.waitForTimeout(1000);
+
+    // Check for error message
+    const errorMessage = page.locator('text=/Location access denied/i');
+    const hasError = await errorMessage.isVisible().catch(() => false);
+    expect(hasError).toBe(true);
+  });
 });
