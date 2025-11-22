@@ -1,36 +1,118 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, develop ]
 
 jobs:
-  build-and-test:
+  test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Use Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'yarn'
 
-      - name: Install dependencies
-        run: npm ci
+    - name: Install dependencies
+      run: yarn install --frozen-lockfile
 
-      - name: Typecheck
-        run: npx tsc --noEmit
+    - name: Setup environment
+      run: |
+        cp .env.example .env.local
+        echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/test_db" >> .env.local
+        echo "NEXTAUTH_SECRET=test-secret-key" >> .env.local
+        echo "NEXTAUTH_URL=http://localhost:3000" >> .env.local
 
-      - name: Lint
-        run: npm run lint
+    - name: Generate Prisma client
+      run: yarn prisma:generate
 
-      - name: Test
-        run: npm test
+    - name: Run database migrations
+      run: yarn prisma:migrate
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
 
-      - name: Build
-        run: npm run build
+    - name: Seed database
+      run: yarn db:seed
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+
+    - name: Run linting
+      run: yarn lint
+
+    - name: Run unit tests
+      run: yarn test:coverage
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage/lcov.info
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Build application
+      run: yarn build
+
+    - name: Install Playwright browsers
+      run: yarn playwright install
+
+    - name: Run E2E tests
+      run: yarn test:e2e
+      env:
+        NEXT_PUBLIC_BASE_URL: http://localhost:3000
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results
+        path: |
+          test-results/
+          playwright-report/
+          coverage/
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'yarn'
+
+    - name: Install dependencies
+      run: yarn install --frozen-lockfile
+
+    - name: Build application
+      run: yarn build
+
+    - name: Deploy to production
+      run: |
+        echo "Deploy step - configure your deployment provider here"
+        # Add your deployment commands here

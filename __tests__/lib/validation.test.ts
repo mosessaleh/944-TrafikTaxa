@@ -79,10 +79,8 @@ describe('RegisterSchema', () => {
       firstName: 'John',
       lastName: 'Doe',
       phone: '+4512345678',
-      street: 'Test Street',
-      houseNumber: '1',
-      postalCode: '1234',
-      city: 'Test City',
+      address: 'Test Street 1, 1234 Test City',
+      acceptTerms: true,
     };
     expect(() => RegisterSchema.parse(validData)).not.toThrow();
   });
@@ -94,10 +92,8 @@ describe('RegisterSchema', () => {
       firstName: 'John',
       lastName: 'Doe',
       phone: '+4512345678',
-      street: 'Test Street',
-      houseNumber: '1',
-      postalCode: '1234',
-      city: 'Test City',
+      address: 'Test Street 1, 1234 Test City',
+      acceptTerms: true,
     };
     expect(() => RegisterSchema.parse(invalidData)).toThrow();
   });
@@ -109,10 +105,8 @@ describe('RegisterSchema', () => {
       firstName: 'John',
       lastName: 'Doe',
       phone: '+4512345678',
-      street: 'Test Street',
-      houseNumber: '1',
-      postalCode: '1234',
-      city: 'Test City',
+      address: 'Test Street 1, 1234 Test City',
+      acceptTerms: true,
     };
     expect(() => RegisterSchema.parse(invalidData)).toThrow();
   });
@@ -124,10 +118,8 @@ describe('RegisterSchema', () => {
       firstName: 'John',
       lastName: 'Doe',
       phone: '+4512345678',
-      street: 'Test Street',
-      houseNumber: '1',
-      postalCode: '1234',
-      city: 'Test City',
+      address: 'Test Street 1, 1234 Test City',
+      acceptTerms: true,
     };
     expect(() => RegisterSchema.parse(invalidData)).toThrow();
   });
