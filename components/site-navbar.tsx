@@ -43,6 +43,12 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             >
               Terms & rules
             </Link>
+            <Link
+              href="/knowledge-base"
+              className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+            >
+              Help
+            </Link>
           </nav>
         </div>
 
@@ -138,6 +144,13 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               onClick={() => setMobileMenuOpen(false)}
             >
               Terms & rules
+            </Link>
+            <Link
+              href="/knowledge-base"
+              className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Help
             </Link>
 
             <div className="border-t border-slate-200 pt-4 mt-4">

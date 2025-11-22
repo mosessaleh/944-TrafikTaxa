@@ -121,7 +121,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch complaint status for each booking
     const bookingsWithComplaints = await Promise.all(
-      bookings.map(async (booking) => {
+      bookings.map(async (booking: typeof bookings[number]) => {
         try {
           const complaint = await prisma.complaint.findFirst({
             where: { rideId: booking.id },
@@ -149,7 +149,7 @@ export async function GET(request: NextRequest) {
     );
 
     // Transform bookings for frontend consumption
-     const transformedBookings = bookingsWithComplaints.map(booking => ({
+     const transformedBookings = bookingsWithComplaints.map((booking: typeof bookingsWithComplaints[number]) => ({
         id: booking.id,
         riderName: booking.riderName,
         passengers: booking.passengers,
@@ -316,6 +316,9 @@ export async function POST(request: NextRequest) {
     // Send notification to admin (async, don't wait)
     const adminEmail = process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL;
     if (adminEmail) {
+      // Fetch current cancellation fees from settings
+      const settings = await prisma.settings.findFirst();
+
       const title = validatedData.scheduled ? 'Scheduled booking' : 'Immediate booking';
       import('@/lib/email').then(({ sendEmail }) =>
         sendEmail(
@@ -326,7 +329,7 @@ export async function POST(request: NextRequest) {
             <li><strong>Booking ID:</strong> ${booking.id}</li>
             <li><strong>Customer:</strong> ${user.firstName} ${user.lastName} (${user.email})</li>
             <li><strong>Rider:</strong> ${booking.riderName}</li>
-            <li><strong>Vehicle:</strong> Standard</li>
+            <li><strong>Vehicle:</strong> ${booking.vehicleType.title}</li>
             <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
             <li><strong>Dropoff:</strong> ${booking.dropoffAddress}</li>
             <li><strong>Time:</strong> ${booking.pickupTime.toISOString()}</li>
@@ -335,16 +338,17 @@ export async function POST(request: NextRequest) {
             <li><strong>Price:</strong> ${booking.price} DKK</li>
           </ul>
           <h3>Cancellation Policy</h3>
-          <p>Please inform the customer about our cancellation policy:</p>
+          <p>Please inform the customer about our current cancellation policy:</p>
           <ul>
-            <li><strong>More than 2 hours before pickup:</strong> No cancellation fee (100% refund)</li>
-            <li><strong>1-2 hours before pickup:</strong> 25% cancellation fee</li>
-            <li><strong>Less than 1 hour before pickup:</strong> 50% cancellation fee</li>
+            <li><strong>More than 2 hours before pickup:</strong> ${settings?.scheduledCancellationFee1 || 0}% cancellation fee</li>
+            <li><strong>1-2 hours before pickup:</strong> ${settings?.scheduledCancellationFee2 || 25}% cancellation fee</li>
+            <li><strong>Less than 1 hour before pickup:</strong> ${settings?.scheduledCancellationFee3 || 50}% cancellation fee</li>
             <li><strong>After pickup time:</strong> No cancellation allowed</li>
           </ul>
           <h4>Immediate Bookings:</h4>
           <ul>
-            <li><strong>Any time before completion:</strong> 100 DKK fixed cancellation fee</li>
+            <li><strong>After driver dispatch:</strong> ${settings?.immediateCancellationFee || 50} DKK fixed cancellation fee</li>
+            <li><strong>Before driver dispatch:</strong> No cancellation fee</li>
           </ul>`
         )
       ).catch((error) => {
@@ -362,7 +366,7 @@ export async function POST(request: NextRequest) {
         pickupTime: booking.pickupTime.toISOString(),
         price: booking.price,
         status: booking.status,
-        vehicleType: { title: 'Standard', capacity: 4 }
+        vehicleType: booking.vehicleType
       }
     }, { status: 201 });
 

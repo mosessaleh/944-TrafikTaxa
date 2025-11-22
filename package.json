@@ -21,7 +21,7 @@
     "seed": "node prisma/seed.cjs"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "5.22.0",
     "@sentry/nextjs": "^10.22.0",
     "@stripe/react-stripe-js": "^5.2.0",
     "@stripe/stripe-js": "^8.1.0",

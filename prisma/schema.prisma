@@ -123,6 +123,11 @@ model Settings {
   // Business hours
   workStart    String  @default("06:00")
   workEnd      String  @default("18:00")
+  // Cancellation fees (as percentages)
+  scheduledCancellationFee1 Float @default(0)    // More than 2 hours before: no fee (0%)
+  scheduledCancellationFee2 Float @default(25)   // 1-2 hours before: up to 25%
+  scheduledCancellationFee3 Float @default(50)   // Less than 1 hour before: up to 50%
+  immediateCancellationFee  Float @default(50)   // Fixed fee for immediate rides (DKK)
 }
 
 model Ride {

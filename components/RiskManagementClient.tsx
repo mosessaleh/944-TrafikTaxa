@@ -57,7 +57,7 @@ export default function RiskManagementClient({ initialBookings, stats }: RiskMan
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [filter, setFilter] = useState<'all' | 'high' | 'medium' | 'unreviewed'>('all');
-  const [activeTab, setActiveTab] = useState<'queue' | 'analytics'>('queue');
+  const [activeTab, setActiveTab] = useState<'queue' | 'analytics' | 'knowledge'>('queue');
 
   const handleViewBooking = (booking: Booking) => {
     setSelectedBooking(booking);
@@ -151,6 +151,16 @@ export default function RiskManagementClient({ initialBookings, stats }: RiskMan
             }`}
           >
             Analytics Dashboard
+          </button>
+          <button
+            onClick={() => setActiveTab('knowledge')}
+            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'knowledge'
+                ? 'border-blue-500 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            قاعدة المعرفة
           </button>
         </div>
       </div>

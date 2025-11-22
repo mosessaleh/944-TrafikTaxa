@@ -77,6 +77,15 @@ export async function POST(
       );
     }
 
+    // Fetch cancellation fees from settings
+    const settings = await prisma.settings.findFirst();
+    if (!settings) {
+      return NextResponse.json(
+        { ok: false, error: 'System settings not found' },
+        { status: 500 }
+      );
+    }
+
     // Calculate cancellation fee based on booking type and time remaining
     const pickupTime = new Date(booking.pickupTime);
     const now = new Date();
@@ -93,14 +102,14 @@ export async function POST(
         // Within 15 minutes: can cancel for free
         cancellationFee = 0;
       } else if (timeDiffHours >= 2) {
-        // More than 2 hours: no fee
-        cancellationFee = 0;
+        // More than 2 hours: use database fee (usually 0%)
+        cancellationFee = Math.round((booking.price * settings.scheduledCancellationFee1) / 100);
       } else if (timeDiffHours >= 1) {
-        // 1-2 hours: 25% fee
-        cancellationFee = Math.round((booking.price * 25) / 100);
+        // 1-2 hours: use database fee (usually 25%)
+        cancellationFee = Math.round((booking.price * settings.scheduledCancellationFee2) / 100);
       } else if (timeDiffHours > 0) {
-        // Less than 1 hour: 50% fee
-        cancellationFee = Math.round((booking.price * 50) / 100);
+        // Less than 1 hour: use database fee (usually 50%)
+        cancellationFee = Math.round((booking.price * settings.scheduledCancellationFee3) / 100);
       } else {
         // Past pickup time: cannot cancel
         return NextResponse.json(
@@ -109,10 +118,10 @@ export async function POST(
         );
       }
     } else {
-      // Immediate bookings: can cancel before dispatch, 100 DKK fee after dispatch
+      // Immediate bookings: use database fee (usually 50 DKK)
       if (booking.status === 'DISPATCHED' || booking.status === 'ONGOING') {
-        // Car has been dispatched: 100 DKK fee
-        cancellationFee = Math.min(100, booking.price);
+        // Car has been dispatched: use database fee
+        cancellationFee = Math.min(settings.immediateCancellationFee, booking.price);
       } else {
         // Before dispatch: no fee
         cancellationFee = 0;
@@ -148,7 +157,7 @@ export async function POST(
             <li><strong>Original Price:</strong> ${booking.price} DKK</li>
             <li><strong>Cancellation Fee:</strong> ${cancellationFee} DKK</li>
             <li><strong>Refund Amount:</strong> ${refundAmount} DKK</li>
-            <li><strong>Payment Status:</strong> ${['PAID', 'COMPLETED'].includes(booking.status) ? 'Paid' : 'Unpaid'}</li>
+            <li><strong>Payment Status:</strong> ${booking.paymentStatus === 'PAID' ? 'Paid' : 'Unpaid'}</li>
           </ul>
           <p>Please process the refund if payment was made.</p>`
         );
@@ -164,20 +173,23 @@ export async function POST(
         'Booking Cancellation Confirmation',
         `<p>Dear ${user.firstName},</p>
         <p>Your booking has been successfully cancelled.</p>
-        <ul>
-          <li><strong>Booking ID:</strong> ${booking.id}</li>
-          <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
-          <li><strong>Dropoff:</strong> ${booking.dropoffAddress}</li>
-          <li><strong>Time:</strong> ${booking.pickupTime.toISOString()}</li>
-          <li><strong>Original Amount:</strong> ${booking.price} DKK</li>
-          <li><strong>Cancellation Fee:</strong> ${cancellationFee} DKK</li>
-          <li><strong>Refund Amount:</strong> ${refundAmount} DKK</li>
-        </ul>
-        ${['PAID', 'COMPLETED'].includes(booking.status) ?
-           `<p><strong>Refund Information:</strong> Your refund of ${refundAmount} DKK will be processed within 3-5 business days. The refund will be processed to the original payment method.</p>` :
+        <div style="background-color: #f8f9fa; border-left: 4px solid #007bff; padding: 20px; margin: 20px 0;">
+          <h3 style="margin: 0 0 15px 0; color: #333;">Cancellation Details:</h3>
+          <ul style="margin: 0; padding-left: 20px;">
+            <li><strong>Booking ID:</strong> ${booking.id}</li>
+            <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
+            <li><strong>Dropoff:</strong> ${booking.dropoffAddress}</li>
+            <li><strong>Scheduled Time:</strong> ${new Date(booking.pickupTime).toLocaleString('en-DK')}</li>
+            <li><strong>Original Amount:</strong> ${booking.price} DKK</li>
+            ${cancellationFee > 0 ? `<li><strong>Cancellation Fee:</strong> ${cancellationFee} DKK</li>` : ''}
+            ${refundAmount > 0 ? `<li><strong>Refund Amount:</strong> ${refundAmount} DKK</li>` : ''}
+          </ul>
+        </div>
+        ${booking.paymentStatus === 'PAID' ?
+           `<p><strong>Refund Information:</strong> ${refundAmount > 0 ? `Your refund of ${refundAmount} DKK will be processed within 3-5 business days. The refund will be processed to the original payment method.` : 'No refund is applicable for this cancellation.'}</p>` :
            '<p>No payment was made for this booking.</p>'
          }
-        <p>If you have any questions, please contact our support team.</p>
+        <p>If you have any questions about this cancellation, please contact our support team.</p>
         <p>Best regards,<br>944 Trafik Team</p>`
       );
     } catch (emailError) {

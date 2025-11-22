@@ -407,8 +407,55 @@ export default function AccountClient() {
   };
 
   const handleCancelBooking = async (bookingId: number) => {
-    if (!confirm('Are you sure you want to cancel this booking? Your payment will be refunded within 3-5 business days.')) {
-      return;
+    // Fetch current cancellation fees from settings
+    try {
+      const settingsResponse = await fetch('/api/settings');
+      const settingsData = await settingsResponse.json();
+      const settings = settingsData.settings;
+
+      // Find the booking to determine cancellation fee
+      const booking = ridesData?.find((r: Ride) => r.id === bookingId);
+      if (!booking) {
+        alert('Booking not found');
+        return;
+      }
+
+      // Calculate cancellation fee (simplified logic - full logic is in API)
+      let cancellationFee = 0;
+      if (booking.scheduled) {
+        const pickupTime = new Date(booking.pickupTime);
+        const now = new Date();
+        const timeDiffHours = (pickupTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+        if (timeDiffHours >= 2) {
+          cancellationFee = (booking.price * (settings?.scheduledCancellationFee1 || 0)) / 100;
+        } else if (timeDiffHours >= 1) {
+          cancellationFee = (booking.price * (settings?.scheduledCancellationFee2 || 25)) / 100;
+        } else if (timeDiffHours > 0) {
+          cancellationFee = (booking.price * (settings?.scheduledCancellationFee3 || 50)) / 100;
+        }
+      } else {
+        // Immediate booking
+        if (booking.status === 'DISPATCHED' || booking.status === 'ONGOING') {
+          cancellationFee = Math.min(settings?.immediateCancellationFee || 50, booking.price);
+        }
+      }
+
+      const refundAmount = booking.price - cancellationFee;
+
+      const message = cancellationFee > 0
+        ? `Are you sure you want to cancel this booking?\n\nCancellation Fee: ${cancellationFee} DKK\nRefund Amount: ${refundAmount} DKK\n\nYour refund will be processed within 3-5 business days.`
+        : 'Are you sure you want to cancel this booking? Your payment will be refunded within 3-5 business days.';
+
+      if (!confirm(message)) {
+        return;
+      }
+    } catch (error) {
+      console.error('Error fetching cancellation fees:', error);
+      // Fallback to original message
+      if (!confirm('Are you sure you want to cancel this booking? Your payment will be refunded within 3-5 business days.')) {
+        return;
+      }
     }
 
     try {
