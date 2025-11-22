@@ -21,7 +21,6 @@
 تدريب للسائقين: نظام تدريب إلكتروني
 🔒 الأمان والجودة
 تحسين الأمان: Two-factor authentication، تشفير أفضل
-اختبارات شاملة: Unit tests، integration tests، E2E tests
 Performance monitoring: تتبع سرعة الموقع وتحسينها
 GDPR compliance: خصوصية البيانات بشكل أفضل
 🎯 الميزات التسويقية

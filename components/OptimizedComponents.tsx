@@ -225,59 +225,8 @@ export const OptimizedImage: React.FC<OptimizedImageProps> = ({
 };
 
 // Enhanced component for heavy admin sections
-export const AdminComponents = {
-  // Lazy load admin components
-  AdminDashboard: createLazyComponent(
-    () => import('../app/admin/page'),
-    DashboardSkeleton
-  ),
-  
-  AdminBookings: createLazyComponent(
-    () => import('../app/admin/bookings/page'),
-    BookingFormSkeleton
-  ),
-  
-  AdminUsers: createLazyComponent(
-    () => import('../app/admin/users/page'),
-    () => (
-      <div className="space-y-4">
-        <SkeletonLoader className="h-10 w-32" />
-        <div className="grid gap-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="bg-white p-4 border rounded-lg">
-              <div className="flex items-center space-x-4">
-                <SkeletonLoader className="w-12 h-12 rounded-full" />
-                <div className="space-y-2">
-                  <SkeletonLoader className="h-5 w-48" />
-                  <SkeletonLoader className="h-4 w-32" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  ),
-
-  AdminSettings: createLazyComponent(
-    () => import('../app/admin/settings/page'),
-    () => (
-      <div className="space-y-6">
-        <SkeletonLoader className="h-8 w-32" />
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="bg-white p-6 border rounded-lg">
-            <SkeletonLoader className="h-6 w-48 mb-4" />
-            <div className="space-y-3">
-              <SkeletonLoader className="h-10 w-full" />
-              <SkeletonLoader className="h-10 w-2/3" />
-              <SkeletonLoader className="h-10 w-1/2" />
-            </div>
-          </div>
-        ))}
-      </div>
-    )
-  ),
-};
+// Note: AdminComponents removed to avoid server component import issues in client context
+// export const AdminComponents = { ... };
 
 // Utility for conditionally loading components based on user role
 export function createRoleBasedComponent<T extends ComponentType<any>>(
@@ -388,7 +337,6 @@ export default {
   withPerformanceMonitoring,
   createLazyComponent,
   createRoleBasedComponent,
-  AdminComponents,
   useIntersectionObserver,
   createVirtualList,
   usePerformanceMonitor,

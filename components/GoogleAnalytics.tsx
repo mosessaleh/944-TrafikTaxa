@@ -2,6 +2,8 @@
 
 import { useEffect } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { onCLS, onINP, onFCP, onLCP, onTTFB } from 'web-vitals';
+import Script from 'next/script';
 
 declare global {
   interface Window {
@@ -15,57 +17,39 @@ export default function GoogleAnalytics() {
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    // Load Google Analytics script
-    const script1 = document.createElement('script');
-    script1.async = true;
-    script1.src = 'https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID';
-    document.head.appendChild(script1);
-
-    const script2 = document.createElement('script');
-    script2.innerHTML = `
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'GA_MEASUREMENT_ID', {
-        page_title: document.title,
-        page_location: window.location.href,
-      });
-    `;
-    document.head.appendChild(script2);
-
     // Track page views
     const handleRouteChange = (url: string) => {
-      window.gtag('config', 'GA_MEASUREMENT_ID', {
-        page_path: url,
-      });
+      if (window.gtag) {
+        window.gtag('config', 'GA_MEASUREMENT_ID', {
+          page_path: url,
+        });
+      }
     };
 
     // Initial page load
     handleRouteChange(pathname + (searchParams?.toString() ? `?${searchParams.toString()}` : ''));
-
-    return () => {
-      // Cleanup scripts on unmount
-      document.head.removeChild(script1);
-      document.head.removeChild(script2);
-    };
   }, [pathname, searchParams]);
 
   // Track custom events
   useEffect(() => {
     // Track booking form interactions
     const handleBookingStart = () => {
-      window.gtag('event', 'begin_checkout', {
-        event_category: 'booking',
-        event_label: 'booking_form_start',
-      });
+      if (window.gtag) {
+        window.gtag('event', 'begin_checkout', {
+          event_category: 'booking',
+          event_label: 'booking_form_start',
+        });
+      }
     };
 
     const handleBookingComplete = () => {
-      window.gtag('event', 'purchase', {
-        event_category: 'booking',
-        event_label: 'booking_complete',
-        value: 1, // You can pass the booking amount here
-      });
+      if (window.gtag) {
+        window.gtag('event', 'purchase', {
+          event_category: 'booking',
+          event_label: 'booking_complete',
+          value: 1, // You can pass the booking amount here
+        });
+      }
     };
 
     // Listen for custom events
@@ -78,5 +62,44 @@ export default function GoogleAnalytics() {
     };
   }, []);
 
-  return null;
+  // Track Web Vitals
+  useEffect(() => {
+    const sendToGoogleAnalytics = ({ name, delta, value, id }: any) => {
+      if (window.gtag) {
+        window.gtag('event', name, {
+          event_category: 'Web Vitals',
+          event_label: id,
+          value: Math.round(name === 'CLS' ? delta * 1000 : delta),
+          custom_map: { metric_value: value },
+          non_interaction: true,
+        });
+      }
+    };
+
+    onCLS(sendToGoogleAnalytics);
+    onFCP(sendToGoogleAnalytics);
+    onLCP(sendToGoogleAnalytics);
+    onTTFB(sendToGoogleAnalytics);
+    onINP(sendToGoogleAnalytics);
+  }, []);
+
+  return (
+    <>
+      <Script
+        src="https://www.googletagmanager.com/gtag/js?id=GA_MEASUREMENT_ID"
+        strategy="afterInteractive"
+      />
+      <Script id="google-analytics" strategy="afterInteractive">
+        {`
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', 'GA_MEASUREMENT_ID', {
+            page_title: document.title,
+            page_location: window.location.href,
+          });
+        `}
+      </Script>
+    </>
+  );
 }

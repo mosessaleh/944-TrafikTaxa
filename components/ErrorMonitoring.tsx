@@ -42,9 +42,8 @@ export default function ErrorMonitoring() {
       });
     };
 
-    // Performance monitoring (simplified without web-vitals for now)
+    // Enhanced performance monitoring
     const handlePerformance = () => {
-      // Basic performance monitoring
       if ('performance' in window && 'getEntriesByType' in window.performance) {
         // Monitor navigation timing
         const navigation = window.performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming;
@@ -59,9 +58,52 @@ export default function ErrorMonitoring() {
               loadTime: navigation.loadEventEnd - navigation.loadEventStart,
               domContentLoaded: navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart,
               firstPaint: navigation.responseStart - navigation.requestStart,
+              domInteractive: navigation.domInteractive - navigation.fetchStart,
+              firstContentfulPaint: navigation.responseStart - navigation.fetchStart,
             },
           });
         }
+
+        // Monitor resource loading
+        const resources = window.performance.getEntriesByType('resource');
+        const slowResources = resources.filter(entry => entry.duration > 1000); // Resources taking >1s
+        if (slowResources.length > 0) {
+          Sentry.captureMessage('Slow Resource Loading', {
+            level: 'warning',
+            tags: {
+              type: 'performance',
+              metric: 'slow_resources',
+            },
+            extra: {
+              count: slowResources.length,
+              resources: slowResources.map(r => ({
+                name: r.name,
+                duration: r.duration,
+                size: (r as any).transferSize || 0,
+              })),
+            },
+          });
+        }
+
+        // Monitor long tasks
+        const observer = new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            if (entry.duration > 50) { // Long task >50ms
+              Sentry.captureMessage('Long Task Detected', {
+                level: 'warning',
+                tags: {
+                  type: 'performance',
+                  metric: 'long_task',
+                },
+                extra: {
+                  duration: entry.duration,
+                  startTime: entry.startTime,
+                },
+              });
+            }
+          }
+        });
+        observer.observe({ entryTypes: ['longtask'] });
       }
     };
 
