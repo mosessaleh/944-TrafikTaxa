@@ -128,6 +128,9 @@ model Settings {
   scheduledCancellationFee2 Float @default(25)   // 1-2 hours before: up to 25%
   scheduledCancellationFee3 Float @default(50)   // Less than 1 hour before: up to 50%
   immediateCancellationFee  Float @default(50)   // Fixed fee for immediate rides (DKK)
+  // Global discounts
+  discountPercentage      Float @default(0)    // Percentage discount applied to all bookings
+  maxDiscountAmount       Float @default(0)    // Maximum discount amount per booking
 }
 
 model Ride {

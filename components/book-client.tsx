@@ -50,7 +50,7 @@ export default function BookClient(){
   const [when, setWhen] = useState(() => new Date(Date.now()+15*60*1000).toISOString().slice(0,16));
 
   // Quote state
-  const [quote, setQuote] = useState<{price:number; distanceKm:number; durationMin:number}|null>(null);
+  const [quote, setQuote] = useState<{price:number; distanceKm:number; durationMin:number; originalPrice?:number; discountAmount?:number}|null>(null);
   const [qErr, setQErr] = useState<string|null>(null);
   const [qLoading, setQLoading] = useState(false);
   const qTimer = useRef<any>(null);
@@ -314,7 +314,13 @@ export default function BookClient(){
         });
         const j = await r.json();
         if(!r.ok || !j?.ok) throw new Error(j?.error||'Failed to get quote');
-        setQuote({ price: j.price, distanceKm: j.distanceKm, durationMin: j.durationMin });
+        setQuote({
+          price: j.price,
+          distanceKm: j.distanceKm,
+          durationMin: j.durationMin,
+          originalPrice: j.originalPrice,
+          discountAmount: j.discountAmount
+        });
       }catch(e:any){
         setQuote(null);
         setQErr(e?.message||'Failed to get quote');
@@ -447,8 +453,24 @@ export default function BookClient(){
                 <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
                   Current estimate
                 </div>
-                <div className="text-lg md:text-xl font-bold text-slate-900">
-                  {formatDKK(quote.price)}
+                <div className="flex items-center gap-2">
+                  {quote.discountAmount && quote.discountAmount > 0 ? (
+                    <>
+                      <span className="text-sm text-slate-500 line-through">
+                        {formatDKK(quote.originalPrice || quote.price)}
+                      </span>
+                      <span className="text-lg md:text-xl font-bold text-green-600">
+                        {formatDKK(quote.price)}
+                      </span>
+                      <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                        -{formatDKK(quote.discountAmount)}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-lg md:text-xl font-bold text-slate-900">
+                      {formatDKK(quote.price)}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="hidden sm:flex flex-col text-xs text-slate-600">
@@ -751,8 +773,24 @@ export default function BookClient(){
                   <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
                     Estimated price
                   </div>
-                  <div className="mt-2 text-3xl md:text-4xl font-extrabold text-slate-900">
-                    {quote ? formatDKK(quote.price) : formatDKK(0)}
+                  <div className="mt-2">
+                    {quote && quote.discountAmount && quote.discountAmount > 0 ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="text-slate-500 line-through text-lg">
+                          {formatDKK(quote.originalPrice || quote.price)}
+                        </div>
+                        <div className="text-3xl md:text-4xl font-extrabold text-green-600">
+                          {formatDKK(quote.price)}
+                        </div>
+                        <div className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full inline-block w-fit">
+                          Save {formatDKK(quote.discountAmount)}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-3xl md:text-4xl font-extrabold text-slate-900">
+                        {quote ? formatDKK(quote.price) : formatDKK(0)}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="hidden sm:flex items-center justify-center w-12 h-12 rounded-2xl bg-slate-900 text-white shadow-md">

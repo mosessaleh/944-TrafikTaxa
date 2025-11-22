@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { safeEstimateDistance } from '@/lib/geocode-safe';
-import { computePrice } from '@/lib/price';
+import { computePriceWithDetails } from '@/lib/price';
 import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 
 const Schema = z.object({
@@ -27,8 +27,15 @@ export async function POST(req: Request){
       { address: parsed.dropoffAddress, lat: parsed.dropoffLat||null, lon: parsed.dropoffLon||null }
     );
     const at = new Date(parsed.when);
-    const price = await computePrice(distanceKm, durationMin, at, parsed.vehicleTypeId);
-    return NextResponse.json({ ok:true, distanceKm, durationMin, price });
+    const priceDetails = await computePriceWithDetails(distanceKm, durationMin, at, parsed.vehicleTypeId);
+    return NextResponse.json({
+      ok: true,
+      distanceKm,
+      durationMin,
+      price: priceDetails.finalPrice,
+      originalPrice: priceDetails.originalPrice,
+      discountAmount: priceDetails.discountAmount
+    });
   }catch(e:any){
     return NextResponse.json({ ok:false, error:'Invalid request or addresses could not be geocoded.' }, { status:400 });
   }

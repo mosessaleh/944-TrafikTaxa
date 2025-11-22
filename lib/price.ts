@@ -44,12 +44,51 @@ export async function computePrice(distanceKm:number, durationMin:number, at: Da
   if (!vt || !vt.active) throw new Error('Vehicle type not available');
 
   const mul = Number(vt.multiplier || 1);
-  const finalPrice = Math.round(base * (mul > 0 ? mul : 1));
+  let finalPrice = Math.round(base * (mul > 0 ? mul : 1));
+
+  // Apply global discount
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  let discountAmount = 0;
+  if (settings && settings.discountPercentage > 0) {
+    discountAmount = Math.min(
+      finalPrice * (settings.discountPercentage / 100),
+      settings.maxDiscountAmount || 0
+    );
+    finalPrice = Math.round(finalPrice - discountAmount);
+  }
 
   // Cache the result
   CacheManager.setPriceCache(distanceKm, durationMin, vehicleTypeId, finalPrice);
 
   return finalPrice;
+}
+
+export async function computePriceWithDetails(distanceKm:number, durationMin:number, at: Date, vehicleTypeId?: number){
+  const base = await computeBase(distanceKm, durationMin, at);
+  if (!vehicleTypeId) return { originalPrice: base, finalPrice: base, discountAmount: 0 };
+
+  const vt = await prisma.vehicleType.findUnique({ where: { id: vehicleTypeId }, select: { active: true, multiplier: true } });
+  if (!vt || !vt.active) throw new Error('Vehicle type not available');
+
+  const mul = Number(vt.multiplier || 1);
+  const priceAfterMultiplier = Math.round(base * (mul > 0 ? mul : 1));
+
+  // Apply global discount
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  let discountAmount = 0;
+  if (settings && settings.discountPercentage > 0) {
+    discountAmount = Math.min(
+      priceAfterMultiplier * (settings.discountPercentage / 100),
+      settings.maxDiscountAmount || 0
+    );
+  }
+  const finalPrice = Math.round(priceAfterMultiplier - discountAmount);
+
+  return {
+    originalPrice: priceAfterMultiplier,
+    finalPrice,
+    discountAmount
+  };
 }
 
 export async function getSettingsForAdmin(){

@@ -25,7 +25,7 @@ export default function AdminSettingsClient(){
     const fd = new FormData(form);
     const payload:any = Object.fromEntries(fd.entries());
     // cast numbers
-    ['dayBase','dayPerKm','dayPerMin','nightBase','nightPerKm','nightPerMin','scheduledCancellationFee1','scheduledCancellationFee2','scheduledCancellationFee3','immediateCancellationFee'].forEach(k=> payload[k]=Number(payload[k]));
+    ['dayBase','dayPerKm','dayPerMin','nightBase','nightPerKm','nightPerMin','scheduledCancellationFee1','scheduledCancellationFee2','scheduledCancellationFee3','immediateCancellationFee','discountPercentage','maxDiscountAmount'].forEach(k=> payload[k]=Number(payload[k]));
     // Send in the expected shape for the API: { settings: { ... } }
     const res = await f('/api/admin/settings',{
       method:'POST',
@@ -112,6 +112,36 @@ export default function AdminSettingsClient(){
                     <Field label="Work End (HH:MM)" icon={<Clock size={14} />}>
                         <input name="workEnd" defaultValue={s.workEnd} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm" />
                     </Field>
+                </div>
+            </div>
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end">
+                <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2 shadow-sm">
+                    <Save size={16} />
+                    Save Settings
+                </button>
+            </div>
+        </div>
+
+        {/* Global Discounts */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center gap-2">
+                <DollarSign size={18} className="text-gray-500" />
+                <h2 className="text-lg font-semibold text-gray-900">Global Discounts</h2>
+            </div>
+            <div className="p-6 space-y-6">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-green-800 mb-4">Discount Settings</h3>
+                    <div className="grid md:grid-cols-2 gap-6">
+                        <Field label="Discount Percentage (%)" icon={<DollarSign size={14} />}>
+                            <input name="discountPercentage" type="number" step="0.01" min="0" max="100" defaultValue={s.discountPercentage || 0} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm" />
+                        </Field>
+                        <Field label="Max Discount Amount (DKK)" icon={<DollarSign size={14} />}>
+                            <input name="maxDiscountAmount" type="number" step="0.01" min="0" defaultValue={s.maxDiscountAmount || 0} className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm" />
+                        </Field>
+                    </div>
+                    <p className="text-xs text-green-700 mt-3">
+                        Applied to all bookings. Discount = min(price × percentage/100, max amount)
+                    </p>
                 </div>
             </div>
             <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end">

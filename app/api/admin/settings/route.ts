@@ -15,7 +15,13 @@ const Schema = z.object({
   nightPerKm: z.number().positive(),
   nightPerMin: z.number().positive(),
   workStart: z.string().regex(/^\d{2}:\d{2}$/),
-  workEnd: z.string().regex(/^\d{2}:\d{2}$/)
+  workEnd: z.string().regex(/^\d{2}:\d{2}$/),
+  discountPercentage: z.number().min(0).max(100),
+  maxDiscountAmount: z.number().min(0),
+  scheduledCancellationFee1: z.number().min(0).max(100),
+  scheduledCancellationFee2: z.number().min(0).max(100),
+  scheduledCancellationFee3: z.number().min(0).max(100),
+  immediateCancellationFee: z.number().min(0)
 });
 
 const PaymentMethodSchema = z.object({
@@ -47,7 +53,12 @@ export async function GET(){
       addressCity: process.env.ADDRESS_CITY || 'Frederikssund',
       dayBase: 40, dayPerKm: 12.75, dayPerMin: 5.75,
       nightBase: 60, nightPerKm: 16, nightPerMin: 7,
-      workStart: '06:00', workEnd: '18:00'
+      workStart: '06:00', workEnd: '18:00',
+      discountPercentage: 0, maxDiscountAmount: 0,
+      scheduledCancellationFee1: 0,
+      scheduledCancellationFee2: 25,
+      scheduledCancellationFee3: 50,
+      immediateCancellationFee: 50
     }
   });
 
