@@ -42,6 +42,7 @@ export default async function AdminDrivers() {
       drAddress: d.drAddress,
       drPhone: d.drPhone,
       drEmail: d.drEmail,
+      drPhoto: d.drPhoto,
       licenceNr: d.licenceNr,
       drCard: d.drCard,
       rating: d.rating,

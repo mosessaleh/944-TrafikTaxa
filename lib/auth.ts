@@ -4,10 +4,10 @@ import { sign, verify } from 'jsonwebtoken';
 import { comparePassword as cmp, hashPassword as hsh } from '@/lib/crypto';
 
 const SECRET =
-  process.env.SECRET ||
+  process.env.AUTH_SECRET ||
   (process.env.NODE_ENV === 'production'
     ? (() => {
-        throw new Error('SECRET env var is required in production');
+        throw new Error('AUTH_SECRET env var is required in production');
       })()
     : 'change_me_dev_secret');
 

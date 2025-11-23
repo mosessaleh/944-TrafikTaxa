@@ -437,6 +437,7 @@ model comDriver {
   drAddress      String
   drPhone        String
   drEmail        String?
+  drPhoto        String?
   licenceNr      String
   drCard         String
   rating         Float       @default(5.00)

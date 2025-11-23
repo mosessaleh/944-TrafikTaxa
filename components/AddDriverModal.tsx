@@ -21,6 +21,7 @@ export default function AddDriverModal({ companyId, companyName, onClose, onSave
     drAddress: "",
     drPhone: "",
     drEmail: "",
+    drPhoto: null as File | null,
     licenceNr: "",
     drCard: "",
     drUsername: "",
@@ -46,9 +47,36 @@ export default function AddDriverModal({ companyId, companyName, onClose, onSave
     }
   }, [formData.drCard, formData.cpr]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    onSave({ ...formData, comId: companyId });
+
+    let photoPath = formData.drPhoto;
+
+    // Upload photo if present
+    if (formData.drPhoto) {
+      try {
+        const formDataUpload = new FormData();
+        formDataUpload.append('file', formData.drPhoto);
+
+        const uploadRes = await fetch('/api/upload/driver-photo', {
+          method: 'POST',
+          body: formDataUpload,
+        });
+
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok || !uploadData.ok) {
+          alert('Failed to upload photo: ' + (uploadData.error || 'Unknown error'));
+          return;
+        }
+
+        photoPath = uploadData.path;
+      } catch (error) {
+        alert('Failed to upload photo');
+        return;
+      }
+    }
+
+    onSave({ ...formData, drPhoto: photoPath, comId: companyId });
   }
 
   return (
@@ -156,6 +184,18 @@ export default function AddDriverModal({ companyId, companyName, onClose, onSave
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={formData.drEmail}
               onChange={(e) => setFormData({ ...formData, drEmail: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+              Photo (Optional)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setFormData({ ...formData, drPhoto: e.target.files?.[0] || null })}
             />
           </div>
 

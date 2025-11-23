@@ -31,6 +31,7 @@ export type Driver = {
   drAddress: string;
   drPhone: string;
   drEmail?: string | null;
+  drPhoto?: string | null;
   licenceNr: string;
   drCard: string;
   rating: number;
@@ -89,10 +90,37 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
     setLoading(true);
     setActionMessage(null);
     try {
+      let photoPath = formData.drPhoto;
+
+      // Upload photo if present
+      if (formData.drPhotoFile) {
+        try {
+          const formDataUpload = new FormData();
+          formDataUpload.append('file', formData.drPhotoFile);
+
+          const uploadRes = await fetch('/api/upload/driver-photo', {
+            method: 'POST',
+            body: formDataUpload,
+          });
+
+          const uploadData = await uploadRes.json();
+          if (!uploadRes.ok || !uploadData.ok) {
+            throw new Error('Failed to upload photo: ' + (uploadData.error || 'Unknown error'));
+          }
+
+          photoPath = uploadData.path;
+        } catch (error: any) {
+          throw new Error('Failed to upload photo: ' + error.message);
+        }
+      }
+
+      const updateData = { ...formData, drPhoto: photoPath };
+      delete updateData.drPhotoFile; // Remove the file from the data
+
       const res = await fetch(`/api/com-drivers/${editDriver.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(updateData),
       });
 
       const data = await res.json();
@@ -205,9 +233,17 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <div className="relative">
-                        <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
-                          <User size={16} />
-                        </div>
+                        {d.drPhoto ? (
+                          <img
+                            src={d.drPhoto}
+                            alt={`${d.drFname} ${d.drLname}`}
+                            className="w-9 h-9 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
+                            <User size={16} />
+                          </div>
+                        )}
                         <div className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${
                           d.isOnline ? 'bg-green-500' : 'bg-red-500'
                         }`}></div>
@@ -290,7 +326,7 @@ type ModalProps = {
 };
 
 function DriverModal({ title, onClose, onSave, loading, initialData, isEdit = false, companies }: ModalProps & { companies: Company[] }) {
-  const [formData, setFormData] = useState(initialData);
+  const [formData, setFormData] = useState({ ...initialData, drPhotoFile: null as File | null });
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -423,6 +459,21 @@ function DriverModal({ title, onClose, onSave, loading, initialData, isEdit = fa
               value={formData.drEmail || ""}
               onChange={(e) => setFormData({ ...formData, drEmail: e.target.value })}
             />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+              Photo (Optional)
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setFormData({ ...formData, drPhotoFile: e.target.files?.[0] || null })}
+            />
+            {formData.drPhoto && (
+              <p className="text-xs text-gray-500 mt-1">Current photo will be replaced if a new file is selected.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
