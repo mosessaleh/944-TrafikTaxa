@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `comDriver` ADD COLUMN `cpr` VARCHAR(191) NOT NULL;
