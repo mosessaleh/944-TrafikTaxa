@@ -14,6 +14,12 @@ import {
   FileText,
 } from 'lucide-react';
 
+// Import CPR masking function
+function maskCPR(cpr: string, showLastDigits: number = 4): string {
+  if (cpr.length <= showLastDigits) return cpr;
+  return 'X'.repeat(cpr.length - showLastDigits) + cpr.slice(-showLastDigits);
+}
+
 export type Driver = {
   id: number;
   comId: number;
@@ -36,13 +42,19 @@ export type Driver = {
   createdAt?: string | null;
 };
 
+type Company = {
+  id: number;
+  comName: string;
+};
+
 type Props = {
   initialDrivers: Driver[];
+  companies: Company[];
 };
 
 type ActionMessage = { type: "success" | "error"; text: string } | null;
 
-export default function AdminDriversClient({ initialDrivers }: Props) {
+export default function AdminDriversClient({ initialDrivers, companies }: Props) {
   const [drivers, setDrivers] = useState<Driver[]>(initialDrivers);
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -261,6 +273,7 @@ export default function AdminDriversClient({ initialDrivers }: Props) {
           loading={loading}
           initialData={editDriver}
           isEdit={true}
+          companies={companies}
         />
       )}
     </div>
@@ -276,7 +289,7 @@ type ModalProps = {
   isEdit?: boolean;
 };
 
-function DriverModal({ title, onClose, onSave, loading, initialData, isEdit = false }: ModalProps) {
+function DriverModal({ title, onClose, onSave, loading, initialData, isEdit = false, companies }: ModalProps & { companies: Company[] }) {
   const [formData, setFormData] = useState(initialData);
 
   function handleSubmit(e: React.FormEvent) {
@@ -302,15 +315,20 @@ function DriverModal({ title, onClose, onSave, loading, initialData, isEdit = fa
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
-                Company ID
+                Company
               </label>
-              <input
-                type="number"
+              <select
                 required
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={formData.comId}
                 onChange={(e) => setFormData({ ...formData, comId: parseInt(e.target.value) || 0 })}
-              />
+              >
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.comName}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">

@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { hashPassword } from '@/lib/auth';
+import { hashPassword, requireAdmin } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
+import { encryptCPR, decryptCPR } from '@/lib/crypto';
+import { AuditLogger, AuditEvent } from '@/lib/audit-log';
 
 const UpdateSchema = z.object({
   comId: z.number().int().positive().optional(),
@@ -66,6 +68,11 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       updateData.drPass = await hashPassword(data.drPass);
     }
 
+    // Encrypt CPR if it's being updated
+    if (data.cpr) {
+      updateData.cpr = encryptCPR(data.cpr);
+    }
+
     const driver = await prisma.comDriver.update({
       where: { id },
       data: updateData,
@@ -78,7 +85,33 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
       },
     });
 
-    return NextResponse.json({ ok: true, data: driver });
+    // Audit log CPR update if CPR was changed
+    if (data.cpr) {
+      await AuditLogger.log({
+        event: AuditEvent.CPR_UPDATED,
+        userId: 'system', // Should get from admin session
+        ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                  req.headers.get('cf-connecting-ip') || 'unknown',
+        userAgent: req.headers.get('user-agent') || undefined,
+        metadata: {
+          driverId: id
+        },
+        severity: 'high'
+      });
+    }
+
+    // Decrypt CPR for response
+    let responseDriver = driver;
+    if (driver.cpr) {
+      try {
+        responseDriver = { ...driver, cpr: decryptCPR(driver.cpr) };
+      } catch (error) {
+        console.error(`Failed to decrypt CPR for driver ${id}:`, error);
+        responseDriver = { ...driver, cpr: 'DECRYPTION_ERROR' };
+      }
+    }
+
+    return NextResponse.json({ ok: true, data: responseDriver });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || 'Failed to update driver' }, { status: 500 });
   }

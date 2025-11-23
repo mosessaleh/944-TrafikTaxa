@@ -30,6 +30,12 @@ export enum AuditEvent {
   SUSPICIOUS_ACTIVITY = 'suspicious_activity',
   RATE_LIMIT_EXCEEDED = 'rate_limit_exceeded',
   INVALID_TOKEN = 'invalid_token',
+
+  // CPR Data Access events
+  CPR_VIEWED = 'cpr_viewed',
+  CPR_CREATED = 'cpr_created',
+  CPR_UPDATED = 'cpr_updated',
+  CPR_ACCESS_DENIED = 'cpr_access_denied',
 }
 
 export interface AuditLogData {
@@ -85,7 +91,13 @@ export class AuditLogger {
 
       case AuditEvent.ADMIN_LOGIN:
       case AuditEvent.ADMIN_ACTION:
+      case AuditEvent.CPR_VIEWED:
+      case AuditEvent.CPR_CREATED:
+      case AuditEvent.CPR_UPDATED:
         return 'high';
+
+      case AuditEvent.CPR_ACCESS_DENIED:
+        return 'critical';
 
       default:
         return 'low';

@@ -430,7 +430,7 @@ model PartnerCompany {
 model comDriver {
   id             Int         @id @default(autoincrement())
   comId          Int
-  cpr            String
+  cpr            String      // ENCRYPTED: Danish CPR number (Personal Identification Number)
   drFname        String
   drLname        String
   sex            Sex

@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { hashPassword } from '@/lib/auth';
+import { hashPassword, requireAdmin } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
+import { encryptCPR, decryptCPR } from '@/lib/crypto';
+import { AuditLogger, AuditEvent } from '@/lib/audit-log';
 
 const CreateSchema = z.object({
   comId: z.number().int().positive(),
@@ -28,8 +30,11 @@ const CreateSchema = z.object({
   }).optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    // Require admin authentication for viewing driver data (includes CPR)
+    const admin = await requireAdmin();
+
     const drivers = await prisma.comDriver.findMany({
       include: {
         company: {
@@ -40,8 +45,43 @@ export async function GET() {
       },
       orderBy: { createdAt: 'desc' }
     });
-    return NextResponse.json({ ok: true, data: drivers });
+
+    // Decrypt CPR for display and log access
+    const driversWithDecryptedCPR = await Promise.all(
+      drivers.map(async (driver) => {
+        try {
+          const decryptedCPR = decryptCPR(driver.cpr);
+
+          // Audit log CPR access
+          await AuditLogger.log({
+            event: AuditEvent.CPR_VIEWED,
+            userId: admin.id.toString(),
+            ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                      request.headers.get('cf-connecting-ip') || 'unknown',
+            userAgent: request.headers.get('user-agent') || undefined,
+            metadata: {
+              driverId: driver.id,
+              action: 'bulk_view',
+              accessLevel: 'full'
+            },
+            severity: 'high'
+          });
+
+          return { ...driver, cpr: decryptedCPR };
+        } catch (error) {
+          console.error(`Failed to decrypt CPR for driver ${driver.id}:`, error);
+          // Return masked CPR if decryption fails
+          return { ...driver, cpr: 'DECRYPTION_ERROR' };
+        }
+      })
+    );
+
+    return NextResponse.json({ ok: true, data: driversWithDecryptedCPR });
   } catch (e: any) {
+    // If authentication fails, return appropriate error
+    if (e.status === 401 || e.status === 403) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: e.status });
+    }
     return NextResponse.json({ ok: false, error: e?.message || 'Failed to fetch drivers' }, { status: 500 });
   }
 }
@@ -78,10 +118,13 @@ export async function POST(req: Request) {
 
     const hashedPassword = await hashPassword(data.drPass);
 
+    // Encrypt CPR before storing
+    const encryptedCPR = encryptCPR(data.cpr);
+
     const driver = await prisma.comDriver.create({
       data: {
         comId: data.comId,
-        cpr: data.cpr,
+        cpr: encryptedCPR,
         drFname: data.drFname,
         drLname: data.drLname,
         sex: data.sex,
@@ -97,12 +140,30 @@ export async function POST(req: Request) {
         currentRideId: data.currentRideId,
         drUsername: data.drUsername,
         drPass: hashedPassword,
-        lastLocation: data.lastLocation ? JSON.stringify(data.lastLocation) : null,
+        lastLocation: data.lastLocation ? JSON.stringify(data.lastLocation) : undefined,
       }
     });
 
-    return NextResponse.json({ ok: true, data: driver }, { status: 201 });
+    // Audit log CPR creation
+    await AuditLogger.log({
+      event: AuditEvent.CPR_CREATED,
+      userId: 'system', // Since this is from admin action, we might need to get admin ID
+      ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                req.headers.get('cf-connecting-ip') || 'unknown',
+      userAgent: req.headers.get('user-agent') || undefined,
+      metadata: {
+        driverId: driver.id,
+        companyId: data.comId
+      },
+      severity: 'high'
+    });
+
+    // Return driver data with decrypted CPR for immediate display
+    const driverWithDecryptedCPR = { ...driver, cpr: data.cpr };
+
+    return NextResponse.json({ ok: true, data: driverWithDecryptedCPR }, { status: 201 });
   } catch (e: any) {
+    console.error('Failed to create driver:', e?.stack || e?.message || e);
     return NextResponse.json({ ok: false, error: e?.message || 'Failed to create driver' }, { status: 500 });
   }
 }

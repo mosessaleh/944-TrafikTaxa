@@ -55,6 +55,69 @@ export function getCoinLogoUrl(symbol: string): string | undefined {
 }
 
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+
+// CPR Encryption/Decryption using AES-256-GCM
+const CPR_ENCRYPTION_KEY = process.env.CPR_ENCRYPTION_KEY;
+const ALGORITHM = 'aes-256-gcm';
+const KEY_LENGTH = 32; // 256 bits
+const IV_LENGTH = 16; // 128 bits
+const TAG_LENGTH = 16; // 128 bits
+
+if (!CPR_ENCRYPTION_KEY) {
+  throw new Error('CPR_ENCRYPTION_KEY environment variable is required');
+}
+
+// Derive key from environment variable
+const getEncryptionKey = (): Buffer => {
+  return crypto.scryptSync(CPR_ENCRYPTION_KEY!, 'salt', KEY_LENGTH);
+};
+
+export function encryptCPR(plainCPR: string): string {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+
+  let encrypted = cipher.update(plainCPR, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+
+  const authTag = cipher.getAuthTag();
+
+  // Format: iv:authTag:encryptedData
+  return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
+}
+
+export function decryptCPR(encryptedCPR: string): string {
+  try {
+    const key = getEncryptionKey();
+    const parts = encryptedCPR.split(':');
+
+    if (parts.length !== 3) {
+      throw new Error('Invalid encrypted CPR format');
+    }
+
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const encrypted = parts[2];
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAuthTag(authTag);
+
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+
+    return decrypted;
+  } catch (error) {
+    console.error('CPR decryption failed:', error);
+    throw new Error('Failed to decrypt CPR data');
+  }
+}
+
+// Data masking for CPR display
+export function maskCPR(cpr: string, showLastDigits: number = 4): string {
+  if (cpr.length <= showLastDigits) return cpr;
+  return 'X'.repeat(cpr.length - showLastDigits) + cpr.slice(-showLastDigits);
+}
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
