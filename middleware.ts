@@ -13,6 +13,64 @@ export async function middleware(req: NextRequest) {
 
   const pathname = req.nextUrl.pathname;
 
+  // Enhanced Origin validation for CSRF protection
+  const origin = req.headers.get('origin');
+  const referer = req.headers.get('referer');
+  const host = req.headers.get('host');
+
+  // Define allowed origins
+  const allowedOrigins = [
+    process.env.NODE_ENV === 'production'
+      ? process.env.PUBLIC_BASE_URL || 'https://944.dk'
+      : 'http://localhost:3000',
+    // Add additional allowed origins if needed
+  ].filter(Boolean);
+
+  // Check origin for sensitive operations
+  const sensitivePaths = ['/api/', '/admin/'];
+  const isSensitivePath = sensitivePaths.some(path => pathname.startsWith(path));
+
+  if (isSensitivePath && req.method !== 'GET' && req.method !== 'HEAD') {
+    // Validate origin for POST/PUT/DELETE requests
+    if (origin && !allowedOrigins.includes(origin)) {
+      console.warn(`Blocked request from unauthorized origin: ${origin} to ${pathname}`);
+      return NextResponse.json(
+        { error: 'Unauthorized origin' },
+        { status: 403 }
+      );
+    }
+
+    // Additional referer check for extra security
+    if (referer) {
+      try {
+        const refererUrl = new URL(referer);
+        const isAllowedReferer = allowedOrigins.some(allowedOrigin => {
+          try {
+            const allowedUrl = new URL(allowedOrigin);
+            return refererUrl.hostname === allowedUrl.hostname;
+          } catch {
+            return false; // Skip invalid allowed origins
+          }
+        });
+
+        if (!isAllowedReferer) {
+          console.warn(`Blocked request from unauthorized referer: ${referer} to ${pathname}`);
+          return NextResponse.json(
+            { error: 'Unauthorized referer' },
+            { status: 403 }
+          );
+        }
+      } catch (error) {
+        // Invalid referer URL, block the request
+        console.warn(`Invalid referer header: ${referer}`);
+        return NextResponse.json(
+          { error: 'Invalid request' },
+          { status: 400 }
+        );
+      }
+    }
+  }
+
   // Rate limiting for sensitive endpoints
   const sensitiveEndpoints = [
     '/api/auth/login',
@@ -132,5 +190,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/dev/.*).*)']
+  matcher: ['/((?!_next/.*|favicon.ico|api/dev/.*).*)']
 };

@@ -27,3 +27,14 @@ export function clientIpKey(req: Request){
   const h = (req.headers.get('x-forwarded-for') || req.headers.get('cf-connecting-ip') || 'local').split(',')[0].trim();
   return h || 'local';
 }
+
+// Rate limiting for CSRF token requests and failed validations
+export async function limitCSRFAttempts(key: string) {
+  // Allow 10 CSRF token requests per minute per IP
+  await limitOrThrow(`csrf:${key}`, { points: 10, durationSec: 60 });
+}
+
+export async function limitCSRFValidationFailures(key: string) {
+  // Allow only 5 CSRF validation failures per 15 minutes per IP
+  await limitOrThrow(`csrf-fail:${key}`, { points: 5, durationSec: 900 });
+}

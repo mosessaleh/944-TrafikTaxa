@@ -1,6 +1,7 @@
 "use client";
 import { useState } from 'react';
 import { ProfileUpdateSchema, ProfileUpdateInput } from '@/lib/validation';
+import { useCSRF } from '@/lib/useCSRF';
 
 export default function ProfileEditClient({ initial, onProfileUpdate }: { initial: any; onProfileUpdate?: () => void }){
   const [f,setF] = useState<ProfileUpdateInput>(initial);
@@ -10,8 +11,18 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
   const [verifyCode,setVerifyCode] = useState('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
+  // CSRF token management
+  const { csrfToken, loading: csrfLoading, error: csrfError } = useCSRF();
+
   async function onSave(e:React.FormEvent){
     e.preventDefault(); setMsg(''); setErr(''); setValidationErrors({}); setLoading(true);
+
+    // Check CSRF token availability
+    if (!csrfToken) {
+      setErr('Security token not available. Please refresh the page and try again.');
+      setLoading(false);
+      return;
+    }
 
     // Validate form
     const validation = ProfileUpdateSchema.safeParse(f);
@@ -26,13 +37,21 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
     }
 
     try{
-    const res = await fetch('/api/profile/update', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({
-      email: f.email,
-      firstName: f.firstName,
-      lastName: f.lastName,
-      phone: f.phone,
-      address: f.address
-    }) });
+    const res = await fetch('/api/profile/update', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-csrf-token': csrfToken // Include CSRF token
+      },
+      credentials:'include',
+      body: JSON.stringify({
+        email: f.email,
+        firstName: f.firstName,
+        lastName: f.lastName,
+        phone: f.phone,
+        address: f.address
+      })
+    });
       const j = await res.json();
       if(!j.ok){ setErr(j.error||'Update failed'); return; }
       if (j.pending){ setMsg('Verification code sent to your new email. Please verify below.'); }
@@ -91,8 +110,17 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
           <input className="border rounded-xl px-4 py-3" value={f.address || ''} onChange={e=>setF({ ...f, address:e.target.value })} />
           {validationErrors.address && <span className="text-red-500 text-sm">{validationErrors.address}</span>}
         </label>
-        <button disabled={loading} className="bg-black text-white rounded-2xl px-5 py-3 md:col-span-2">{loading ? 'Saving...' : 'Save changes'}</button>
+        <button disabled={loading || !csrfToken} className="bg-black text-white rounded-2xl px-5 py-3 md:col-span-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          {loading ? 'Saving...' : !csrfToken ? 'Loading security token...' : 'Save changes'}
+        </button>
       </form>
+
+      {/* CSRF Error Display */}
+      {csrfError && (
+        <div className="text-red-600 text-sm p-2 bg-red-50 rounded-lg border border-red-200">
+          Security error: {csrfError}
+        </div>
+      )}
 
       {initial.pendingEmail && (
         <div className="grid gap-2 border rounded-xl p-4 bg-yellow-50">

@@ -4,6 +4,8 @@ import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { validateRequestOrigin } from '@/lib/security-headers';
+import { validateCSRFMiddleware } from '@/lib/csrf';
+import { limitCSRFValidationFailures, clientIpKey } from '@/lib/rate-limit';
 
 const Schema = z.object({
   firstName: z.string().min(1),
@@ -25,6 +27,23 @@ export async function POST(req: Request){
 
     const me = await getUserFromCookie();
     if (!me) return NextResponse.json({ ok:false, error:'Unauthorized' }, { status:401 });
+
+    // CSRF protection for sensitive operations
+    const isValidCSRF = await validateCSRFMiddleware(req, me.id);
+    if (!isValidCSRF) {
+      // Rate limiting for CSRF validation failures
+      const clientKey = clientIpKey(req);
+      try {
+        await limitCSRFValidationFailures(clientKey);
+      } catch (rateLimitError: any) {
+        return NextResponse.json(
+          { ok: false, error: 'Too many failed requests. Please try again later.' },
+          { status: 429, headers: { 'Retry-After': rateLimitError.retryAfter?.toString() || '900' } }
+        );
+      }
+
+      return NextResponse.json({ ok: false, error: 'Invalid CSRF token' }, { status: 403 });
+    }
 
     const body = await req.json();
     const data = Schema.parse(body);

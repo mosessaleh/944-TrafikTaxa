@@ -21,13 +21,21 @@ export async function comparePassword(plain: string, hashed: string){ return cmp
 export function setSessionCookie(token: string){
   const jar = cookies();
   const isProd = process.env.NODE_ENV === 'production';
-  const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-  const secure = isProd ? true : envSecure;
+
+  // Improved secure cookie detection
+  const isHttps = isProd ||
+                  process.env.FORCE_HTTPS === 'true' ||
+                  process.env.NODE_ENV === 'development' && process.env.HTTPS === 'true';
+
+  const secure = isProd || isHttps;
   const name = isProd ? '__Host-session' : 'session';
+
+  // Use 'strict' for better CSRF protection, 'lax' for compatibility
+  const sameSite = isProd ? 'strict' : 'lax';
 
   jar.set(name, token, {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite,
     secure,
     path: '/',
     maxAge: 60*60*24*7,
