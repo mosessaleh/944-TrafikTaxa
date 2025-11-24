@@ -13,10 +13,10 @@ export async function POST(req: Request){
     if (user.emailVerified) return NextResponse.json({ ok:true, already:true });
 
     const code = Math.floor(100000 + Math.random()*900000).toString();
-    const expires = new Date(Date.now()+1000*60*15);
+    const expires = new Date(Date.now()+1000*60*60); // 1 hour expiry
 
     await prisma.user.update({ where:{ id:user.id }, data:{ emailVerifyCode: code, emailVerifyExpires: expires } });
-    await sendEmail(email, 'Your verification code', `<p>Your verification code is <b>${code}</b>. It expires in 15 minutes.</p>`);
+    await sendEmail(email, 'Your verification code', `<p>Your verification code is <b>${code}</b>. It expires in 1 hour.</p>`);
 
     return NextResponse.json({ ok:true });
   }catch(e:any){

@@ -72,20 +72,37 @@ export function wrapWithBrandedTemplate(title: string, rawHtmlBody: string): str
 }
 
 export async function notifyUserWelcome(to: string, firstName: string) {
-  const subject = "Welcome to 944 Trafik! 🎉";
+  const subject = "Welcome to 944 Trafik! 🎉 Your Account is Ready";
   const content = `
     <p>Dear ${firstName},</p>
-    <p>Welcome to <strong>944 Trafik</strong>! We're excited to have you join our community of satisfied customers.</p>
-    <p>With 944 Trafik, you can easily book reliable taxi services throughout Copenhagen and beyond. Our professional drivers are ready to provide you with safe, comfortable, and punctual transportation.</p>
-    <p><strong>What you can do now:</strong></p>
-    <ul>
-      <li>Book rides instantly through our website</li>
-      <li>Save your favorite addresses for quick booking</li>
-      <li>Track your ride history and receipts</li>
-      <li>Enjoy competitive pricing and excellent service</li>
-    </ul>
-    <p>If you have any questions or need assistance, our support team is here to help.</p>
-    <p>Safe travels!<br>The 944 Trafik Team</p>
+    <p>Welcome to <strong>944 Trafik</strong>! 🎊</p>
+    <p>Your account has been successfully created and verified. We're thrilled to have you join our community of satisfied customers who trust us for reliable transportation throughout Copenhagen and beyond.</p>
+
+    <div style="background-color: #f0f8ff; border-left: 4px solid #2563eb; padding: 20px; margin: 20px 0; border-radius: 8px;">
+      <h3 style="margin: 0 0 15px 0; color: #1e40af;">🚗 What You Can Do Now:</h3>
+      <ul style="margin: 0; padding-left: 20px;">
+        <li><strong>Book Instantly:</strong> Schedule rides in seconds through our user-friendly website</li>
+        <li><strong>Save Addresses:</strong> Store your favorite pickup and drop-off locations</li>
+        <li><strong>Track Rides:</strong> Monitor your ride status and driver location in real-time</li>
+        <li><strong>View History:</strong> Access your complete ride history and digital receipts</li>
+        <li><strong>Competitive Pricing:</strong> Enjoy transparent fares with no hidden charges</li>
+      </ul>
+    </div>
+
+    <div style="background-color: #fef3c7; border-left: 4px solid #d97706; padding: 20px; margin: 20px 0; border-radius: 8px;">
+      <h3 style="margin: 0 0 15px 0; color: #92400e;">📞 Need Help?</h3>
+      <p style="margin: 0 0 10px 0;">Our customer support team is available 24/7:</p>
+      <ul style="margin: 0; padding-left: 20px;">
+        <li><strong>Phone:</strong> +45 26 44 49 44</li>
+        <li><strong>Email:</strong> info@944.dk</li>
+        <li><strong>Website:</strong> www.944.dk</li>
+      </ul>
+    </div>
+
+    <p><strong>Ready to start your journey?</strong> Book your first ride now and experience the difference with 944 Trafik's professional service.</p>
+
+    <p>Safe travels and welcome aboard!<br>
+    <strong>The 944 Trafik Team</strong></p>
   `;
   const html = createEmailTemplate("Welcome to 944 Trafik!", content, "Book Your First Ride", "https://944.dk/book");
   return notifyUserEmail(to, subject, html);

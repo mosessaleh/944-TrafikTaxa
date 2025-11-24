@@ -37,7 +37,7 @@ export async function POST(req: Request){
 
     const hashedPassword = await hashPassword(data.password);
     const code = Math.floor(100000 + Math.random()*900000).toString();
-    const expires = new Date(Date.now()+1000*60*15);
+    const expires = new Date(Date.now()+1000*60*60); // 1 hour expiry
 
     const { password, ...userData } = data;
 
@@ -54,7 +54,7 @@ export async function POST(req: Request){
       }
     });
 
-    const mail = await sendEmail(data.email, 'Verify your email', `<p>Your verification code is <b>${code}</b>. It expires in 15 minutes.</p>`);
+    const mail = await sendEmail(data.email, 'Verify your email', `<p>Your verification code is <b>${code}</b>. It expires in 1 hour.</p>`);
 
     const token = signToken({ id: user.id, role: user.role });
     const res = NextResponse.json({ ok:true, mail: mail.ok, next: `/verify?email=${encodeURIComponent(user.email)}` });

@@ -81,6 +81,18 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
     setMsg('A new code has been sent to your new email.');
   }
 
+  async function onResendVerification(){
+    setErr(''); setMsg('');
+    const r = await fetch('/api/auth/resend-code', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email: initial.email })
+    });
+    const j = await r.json();
+    if(!j.ok){ setErr(j.error||'Failed to resend verification code'); return; }
+    setMsg('A new verification code has been sent to your email.');
+  }
+
   return (
     <section className="grid gap-4 bg-white border rounded-2xl p-6">
       <h2 className="text-xl font-semibold">Edit profile</h2>
@@ -119,6 +131,23 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
       {csrfError && (
         <div className="text-red-600 text-sm p-2 bg-red-50 rounded-lg border border-red-200">
           Security error: {csrfError}
+        </div>
+      )}
+
+      {/* Email verification status */}
+      {!initial.emailVerified && !initial.pendingEmail && (
+        <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200">
+          <div className="font-medium text-orange-800">Email not verified</div>
+          <div className="text-sm text-orange-700">
+            Your email <b>{initial.email}</b> is not verified. Please verify your email to access all features.
+          </div>
+          <button
+            type="button"
+            onClick={onResendVerification}
+            className="px-4 py-2 rounded-xl border border-orange-300 bg-orange-600 text-white hover:bg-orange-700 transition-colors w-fit"
+          >
+            Send verification code
+          </button>
         </div>
       )}
 
