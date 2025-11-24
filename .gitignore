@@ -60,3 +60,6 @@ config/secrets.ts
 security-keys/
 audit-logs/
 development-logs/
+
+# Pre-deployment checklists (contain sensitive deployment info)
+PRE_DEPLOYMENT_ACTIVATION_CHECKLIST.md
