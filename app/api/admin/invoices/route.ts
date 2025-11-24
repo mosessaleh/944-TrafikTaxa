@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
     const invoice = await prisma.invoice.findUnique({
       where: { id: parseInt(invoiceId) },
       include: { user: true, ride: true }
-    });
+    }) as any;
 
     if (!invoice) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
@@ -193,37 +193,78 @@ export async function POST(request: NextRequest) {
 
       case 'send_late_fee':
         const baseAmount = invoice.paymentAmount || invoice.ride?.price || 0;
-        const lateFeeAmount = 100 + (baseAmount * 0.057); // 100 DKK + 5.7% of invoice amount
-        const newDueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days from now
-        const totalAmount = baseAmount + lateFeeAmount;
 
-        await (prisma.invoice.update as any)({
-          where: { id: parseInt(invoiceId) },
-          data: {
-            lateFee1: lateFeeAmount,
-            lateFee1Date: new Date(),
-            extendedDueDate: newDueDate,
-            paymentStatus: 'OVERDUE',
-          }
-        });
+        // Check if first late fee is already applied
+        if (!invoice.lateFee1) {
+          // Apply first late fee: 100 DKK + 5.7% of invoice amount
+          const lateFeeAmount = 100 + (baseAmount * 0.057);
+          const newDueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000); // 3 days from now
+          const totalAmount = baseAmount + lateFeeAmount;
 
-        // Send late fee notification email
-        const lateFeeResult = await sendLateFeeNotificationEmail(
-          invoice.user.email,
-          invoice.invoiceNumber,
-          lateFeeAmount,
-          newDueDate.toISOString(),
-          totalAmount
-        );
+          await (prisma.invoice.update as any)({
+            where: { id: parseInt(invoiceId) },
+            data: {
+              lateFee1: lateFeeAmount,
+              lateFee1Date: new Date(),
+              extendedDueDate: newDueDate,
+              paymentStatus: 'OVERDUE',
+            }
+          });
 
-        if (!lateFeeResult.sent) {
-          return NextResponse.json(
-            { error: `Late fee applied but email failed: ${lateFeeResult.reason}` },
-            { status: 500 }
+          // Send first late fee notification email
+          const lateFeeResult = await sendLateFeeNotificationEmail(
+            invoice.user.email,
+            invoice.invoiceNumber,
+            lateFeeAmount,
+            newDueDate.toISOString(),
+            totalAmount
           );
-        }
 
-        return NextResponse.json({ success: true, message: 'Late fee applied and notification sent successfully' });
+          if (!lateFeeResult.sent) {
+            return NextResponse.json(
+              { error: `First late fee applied but email failed: ${lateFeeResult.reason}` },
+              { status: 500 }
+            );
+          }
+
+          return NextResponse.json({ success: true, message: 'First late fee applied and notification sent successfully' });
+        } else if (!invoice.lateFee2) {
+          // Apply second late fee: base amount + lateFee1 + 100 DKK + 5% of (base + lateFee1)
+          const subtotal = baseAmount + invoice.lateFee1;
+          const lateFeeAmount = 100 + (subtotal * 0.05); // 100 DKK + 5% of subtotal
+          const newDueDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000); // 5 days from now
+          const totalAmount = subtotal + lateFeeAmount;
+
+          await (prisma.invoice.update as any)({
+            where: { id: parseInt(invoiceId) },
+            data: {
+              lateFee2: lateFeeAmount,
+              lateFee2Date: new Date(),
+              extendedDueDate: newDueDate,
+              paymentStatus: 'OVERDUE',
+            }
+          });
+
+          // Send second late fee notification email
+          const lateFeeResult = await sendLateFeeNotificationEmail(
+            invoice.user.email,
+            invoice.invoiceNumber,
+            lateFeeAmount,
+            newDueDate.toISOString(),
+            totalAmount
+          );
+
+          if (!lateFeeResult.sent) {
+            return NextResponse.json(
+              { error: `Second late fee applied but email failed: ${lateFeeResult.reason}` },
+              { status: 500 }
+            );
+          }
+
+          return NextResponse.json({ success: true, message: 'Second late fee applied and notification sent successfully' });
+        } else {
+          return NextResponse.json({ error: 'Both late fees have already been applied' }, { status: 400 });
+        }
 
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

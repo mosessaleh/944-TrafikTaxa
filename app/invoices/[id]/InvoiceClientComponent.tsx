@@ -360,7 +360,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                   <tbody className="divide-y divide-gray-100 text-sm">
                     <tr>
                       <td className="px-4 py-3 text-gray-800">Taxi Service</td>
-                      <td className="px-4 py-3 text-right num">{baseAmount} DKK</td>
+                      <td className="px-4 py-3 text-right num">{baseAmount.toFixed(2)} DKK</td>
                     </tr>
                     {lateFee1 > 0 && (
                       <tr>
@@ -372,7 +372,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right text-red-600 num">+{lateFee1} DKK</td>
+                        <td className="px-4 py-3 text-right text-red-600 num">+{lateFee1.toFixed(2)} DKK</td>
                       </tr>
                     )}
                     {lateFee2 > 0 && (
@@ -385,13 +385,13 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right text-red-600 num">+{lateFee2} DKK</td>
+                        <td className="px-4 py-3 text-right text-red-600 num">+{lateFee2.toFixed(2)} DKK</td>
                       </tr>
                     )}
                     <tr className="bg-gray-50">
                       <td className="px-4 py-3 font-semibold text-sm">Total</td>
                       <td className="px-4 py-3 text-right font-semibold num">
-                        {totalAmount} DKK
+                        {totalAmount.toFixed(2)} DKK
                       </td>
                     </tr>
                   </tbody>

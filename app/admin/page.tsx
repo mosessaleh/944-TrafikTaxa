@@ -170,8 +170,8 @@ export default async function AdminHome(){
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
-            title="Total Revenue" 
-            value={`${stats.revenue.total.toLocaleString()} DKK`} 
+            title="Total Revenue"
+            value={`${stats.revenue.total.toFixed(2)} DKK`}
             trend="+12.5%" 
             trendUp={true}
             icon={<TrendingUp size={24} className="text-white" />}
@@ -239,7 +239,7 @@ export default async function AdminHome(){
             <div className="pt-4 border-t border-gray-100 mt-4">
                 <div className="flex justify-between items-center">
                     <span className="text-gray-900 font-semibold">Total Revenue</span>
-                    <span className="text-xl font-bold text-gray-900">{stats.revenue.total.toLocaleString()} DKK</span>
+                    <span className="text-xl font-bold text-gray-900">{stats.revenue.total.toFixed(2)} DKK</span>
                 </div>
             </div>
           </div>

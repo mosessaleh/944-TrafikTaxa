@@ -54,7 +54,7 @@ export default function HistoryClient({ initialRides }:{ initialRides: Ride[] })
               <div className="text-xs text-gray-500">Rider: {r.riderName} • Passengers: {r.passengers}</div>
             </div>
             <div className="text-right flex flex-col items-end gap-2">
-              <div className="text-2xl font-bold">{Number(r.price)} DKK</div>
+              <div className="text-2xl font-bold">{Number(r.price).toFixed(2)} DKK</div>
               {(!r.paymentMethod || r.paymentMethod === null || r.paymentMethod === '') &&
                r.status !== 'CANCELED' && r.status !== 'COMPLETED' && (
                 <a

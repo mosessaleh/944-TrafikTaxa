@@ -169,7 +169,7 @@ export default function AdminInvoicesClient({ initialInvoices }: AdminInvoicesCl
           <div className="text-sm text-yellow-600">Due Soon</div>
         </div>
         <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm">
-          <div className="text-2xl font-bold text-blue-600">{stats.totalAmount.toLocaleString('da-DK')}</div>
+          <div className="text-2xl font-bold text-blue-600">{stats.totalAmount.toFixed(2)}</div>
           <div className="text-sm text-blue-600">Total Amount (DKK)</div>
         </div>
       </div>
@@ -250,6 +250,13 @@ export default function AdminInvoicesClient({ initialInvoices }: AdminInvoicesCl
                             {invoice.paymentStatus === 'PAID' && (
                               <CheckCircle size={14} className="text-green-500" />
                             )}
+                            {/* Late fee indicators */}
+                            {invoice.lateFee1 && (
+                              <span className="text-red-500 text-xs font-bold">▲</span>
+                            )}
+                            {invoice.lateFee2 && (
+                              <span className="text-red-500 text-xs font-bold">▲</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -266,7 +273,7 @@ export default function AdminInvoicesClient({ initialInvoices }: AdminInvoicesCl
                       {invoice.dueDateFormatted}
                     </td>
                     <td className="px-4 py-3 font-semibold text-gray-900">
-                      {invoice.totalAmount.toLocaleString('da-DK')} DKK
+                      {invoice.totalAmount.toFixed(2)} DKK
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -306,7 +313,7 @@ export default function AdminInvoicesClient({ initialInvoices }: AdminInvoicesCl
                         >
                           <Mail size={16} />
                         </button>
-                        {invoice.lateFee2 === null && (
+                        {(!invoice.lateFee1 || !invoice.lateFee2) && (
                           <button
                             onClick={() => handleAction(invoice.id, 'send_late_fee')}
                             className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"

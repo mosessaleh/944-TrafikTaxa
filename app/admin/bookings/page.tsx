@@ -360,7 +360,7 @@ export default function AdminBookings(){
                      <div className="text-gray-900 font-medium">{new Date(r.pickupTime).toLocaleDateString()}</div>
                      <div className="text-xs text-gray-500">{new Date(r.pickupTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
                    </td>
-                   <td className="px-4 py-3 font-semibold text-gray-900">{r.price} DKK</td>
+                   <td className="px-4 py-3 font-semibold text-gray-900">{Number(r.price).toFixed(2)} DKK</td>
                    <td className="px-4 py-3">
                      <StatusBadge status={r.status} />
                    </td>
