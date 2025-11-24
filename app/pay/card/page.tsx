@@ -39,8 +39,8 @@ function CardPaymentContent() {
         let bookingData;
 
         if (invoiceId && !bookingId) {
-          // If we have invoice ID but no booking ID, fetch invoice data to get booking ID
-          console.log("CardPayment: Fetching invoice data to get booking ID");
+          // If we have invoice ID but no booking ID, fetch invoice data to get booking ID and calculate total amount
+          console.log("CardPayment: Fetching invoice data to get booking ID and calculate total amount");
           const invoiceResponse = await fetch(`/api/invoices/${invoiceId}/data`, {
             credentials: "include",
           });
@@ -58,6 +58,23 @@ function CardPaymentContent() {
 
           actualBookingId = invoiceData.invoice.rideId.toString();
           console.log("CardPayment: Extracted booking ID from invoice", actualBookingId);
+
+          // Calculate total amount including late fees for invoices
+          if (invoiceData.invoice) {
+            const baseAmount = invoiceData.invoice.ride?.price || 0;
+            const lateFee1 = invoiceData.invoice.lateFee1 || 0;
+            const lateFee2 = invoiceData.invoice.lateFee2 || 0;
+            const totalAmount = baseAmount + lateFee1 + lateFee2;
+            console.log("CardPayment: Calculated total amount including late fees", {
+              baseAmount,
+              lateFee1,
+              lateFee2,
+              totalAmount
+            });
+            setAmount(totalAmount.toString());
+            setLoading(false);
+            return;
+          }
         }
 
         // Fetch booking details using the actual booking ID

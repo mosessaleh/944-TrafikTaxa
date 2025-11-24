@@ -22,6 +22,7 @@ function PayIndexContent(){
   const [bookingData, setBookingData] = useState<{ price: number; scheduled?: boolean; pickupTime?: string | null } | null>(null);
   const [loadingBooking, setLoadingBooking] = useState(false);
   const [hasInvoicePaymentMethod, setHasInvoicePaymentMethod] = useState(false);
+  const [userCanPayByInvoice, setUserCanPayByInvoice] = useState(false);
 
   const [method, setMethod] = useState<string|null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
@@ -46,7 +47,7 @@ function PayIndexContent(){
               const totalAmount = baseAmount + lateFee1 + lateFee2;
 
               setBookingData({
-                price: amount ? parseFloat(amount) : totalAmount, // Use URL amount if provided, otherwise calculated total
+                price: totalAmount, // Always use calculated total for invoices (includes late fees)
                 scheduled: invoiceData.invoice.ride.scheduled,
                 pickupTime: invoiceData.invoice.ride.pickupTime,
               });
@@ -99,6 +100,17 @@ function PayIndexContent(){
             return;
           }
           setLoadingBooking(false);
+        }
+
+        // Fetch user profile to check canPayByInvoice permission
+        const profileResponse = await fetch('/api/profile', {
+          credentials: 'include'
+        });
+        if (profileResponse.ok) {
+          const profileData = await profileResponse.json();
+          const canPayByInvoice = profileData.me?.canPayByInvoice || false;
+          console.log('User can pay by invoice:', canPayByInvoice);
+          setUserCanPayByInvoice(canPayByInvoice);
         }
 
         // Fetch payment methods
@@ -201,25 +213,38 @@ function PayIndexContent(){
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {paymentMethods.filter(method => {
-            // Hide "Pay by Invoice" only when the database confirms
-            // that the booking payment method is already "invoice" (prevents URL tampering)
-            if (method.key === "invoice" && hasInvoicePaymentMethod) {
-              console.log('🛡️ Hiding "Pay by Invoice" because the booking already uses invoice payment method');
-              return false;
+            // Show "Pay by Invoice" if user has permission, but hide it if the booking already uses invoice payment method
+            if (method.key === "invoice") {
+              if (!userCanPayByInvoice) {
+                console.log('🛡️ Hiding "Pay by Invoice" because user does not have permission');
+                return false;
+              }
+              if (hasInvoicePaymentMethod) {
+                console.log('🛡️ Hiding "Pay by Invoice" because the booking already uses invoice payment method');
+                return false;
+              }
             }
             if (!method.isActive) return false;
             // Hide crypto when it is not allowed for the current booking context
             if (method.key === "crypto") {
-              // Only allow crypto for scheduled bookings with pickup at least 1h from now
-              if (!bookingId) return false;
-              if (!bookingData) return false;
-              if (bookingData.scheduled !== true) return false;
-              if (!bookingData.pickupTime) return false;
-              const pickup = new Date(bookingData.pickupTime);
-              if (Number.isNaN(pickup.getTime())) return false;
-              const now = new Date();
-              const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-              if (!(pickup > oneHourFromNow)) return false;
+              // Allow crypto for:
+              // 1. Invoice payments (when invoiceId is present), OR
+              // 2. Scheduled bookings with pickup at least 1h from now
+              if (invoiceId) {
+                // For invoice payments, crypto is always allowed
+                return true;
+              } else {
+                // For regular bookings, only allow crypto for scheduled bookings with pickup at least 1h from now
+                if (!bookingId) return false;
+                if (!bookingData) return false;
+                if (bookingData.scheduled !== true) return false;
+                if (!bookingData.pickupTime) return false;
+                const pickup = new Date(bookingData.pickupTime);
+                if (Number.isNaN(pickup.getTime())) return false;
+                const now = new Date();
+                const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
+                if (!(pickup > oneHourFromNow)) return false;
+              }
             }
             return true;
           }).map((paymentMethod) => {

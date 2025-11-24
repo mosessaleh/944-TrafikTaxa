@@ -78,7 +78,37 @@ export default function PayWithCrypto(){
         const bookingId = sp.get("booking_id");
 
         let bookingPrice = 0;
-        if (bookingId) {
+        const searchParams = new URLSearchParams(window.location.search);
+        const invoiceId = searchParams.get("invoice_id");
+
+        if (invoiceId) {
+          // If we have invoice ID, fetch invoice data to calculate total including late fees
+          console.log("CryptoPayment: Fetching invoice data for amount calculation");
+          const invoiceResponse = await fetch(`/api/invoices/${invoiceId}/data`, {
+            credentials: 'include'
+          });
+          if (invoiceResponse.ok) {
+            const invoiceData = await invoiceResponse.json();
+            if (invoiceData.invoice && invoiceData.invoice.ride) {
+              const baseAmount = invoiceData.invoice.ride.price;
+              const lateFee1 = invoiceData.invoice.lateFee1 || 0;
+              const lateFee2 = invoiceData.invoice.lateFee2 || 0;
+              bookingPrice = baseAmount + lateFee1 + lateFee2;
+              console.log("CryptoPayment: Calculated total amount including late fees", {
+                baseAmount,
+                lateFee1,
+                lateFee2,
+                totalAmount: bookingPrice
+              });
+            }
+          } else {
+            console.error('❌ Invoice fetch failed:', invoiceResponse.status);
+            alert('Invoice not found or access denied.');
+            window.location.href = '/';
+            return;
+          }
+        } else if (bookingId) {
+          // Regular booking without invoice
           const bookingResponse = await fetch(`/api/bookings/${bookingId}`, {
             credentials: 'include'
           });

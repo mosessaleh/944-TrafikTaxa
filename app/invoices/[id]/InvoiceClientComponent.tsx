@@ -107,7 +107,8 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
 
   const handlePayNow = () => {
     if (!invoice) return;
-    window.open(`/pay?invoice=${invoice.id}&booking=${invoice.ride.id}&amount_dkk=${totalAmount.toFixed(2)}`, '_blank', 'noopener,noreferrer');
+    // Redirect to payment method selection page
+    window.location.href = `/pay?invoice=${invoice.id}&booking=${invoice.ride.id}&amount_dkk=${totalAmount.toFixed(2)}`;
   };
 
   if (loading) {
@@ -443,6 +444,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
           </div>
         </div>
       </div>
+
     </>
   );
 }

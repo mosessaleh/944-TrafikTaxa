@@ -13,15 +13,41 @@ function PaymentSuccessContent() {
   const [amount, setAmount] = useState<string>("");
   const [bookingDetails, setBookingDetails] = useState<any>(null);
   const [notificationSent, setNotificationSent] = useState(false);
+  const invoiceId = searchParams.get("invoice_id");
 
   useEffect(() => {
     // Handle mock payments for admin users
     if (isMock) {
-      // For mock payments, fetch the actual booking amount from the booking API
-      const fetchBookingAmount = async () => {
+      // For mock payments, calculate the correct amount (including late fees for invoices)
+      const fetchPaymentAmount = async () => {
         let resolvedAmount: number | null = null;
- 
-        if (bookingId) {
+
+        if (invoiceId) {
+          // If we have an invoice ID, fetch invoice data and calculate total including late fees
+          try {
+            const invoiceResponse = await fetch(`/api/invoices/${invoiceId}/data`, {
+              credentials: "include",
+            });
+            if (invoiceResponse.ok) {
+              const invoiceData = await invoiceResponse.json();
+              if (invoiceData.invoice) {
+                const baseAmount = invoiceData.invoice.ride?.price || 0;
+                const lateFee1 = invoiceData.invoice.lateFee1 || 0;
+                const lateFee2 = invoiceData.invoice.lateFee2 || 0;
+                resolvedAmount = baseAmount + lateFee1 + lateFee2;
+                console.log("PaymentSuccess: Calculated total amount including late fees", {
+                  baseAmount,
+                  lateFee1,
+                  lateFee2,
+                  totalAmount: resolvedAmount
+                });
+              }
+            }
+          } catch (err) {
+            console.warn("Could not fetch invoice data:", err);
+          }
+        } else if (bookingId) {
+          // Fallback to booking amount if no invoice
           try {
             const response = await fetch(`/api/bookings/${bookingId}`);
             if (response.ok) {
@@ -40,17 +66,17 @@ function PaymentSuccessContent() {
             // ignore and keep resolvedAmount as null
           }
         }
- 
+
         if (resolvedAmount !== null) {
           setAmount(resolvedAmount.toString());
         } else {
           // If we can't determine the amount reliably, leave it empty and only show generic success text
           setAmount("");
         }
- 
+
         setStatus("success");
       };
-      fetchBookingAmount();
+      fetchPaymentAmount();
       return;
     }
 
@@ -129,9 +155,11 @@ function PaymentSuccessContent() {
     confirmPayment();
   }, [paymentIntent, isMock]);
 
-  // Determine the amount to display in the message: prefer bookingDetails.price, fallback to amount state
+  // Determine the amount to display in the message: prefer calculated amount for invoices, fallback to booking price
   const displayAmount =
-    bookingDetails && typeof (bookingDetails as any).price === "number"
+    invoiceId && amount
+      ? Number(amount) // For invoice payments, use the calculated amount (includes late fees)
+      : bookingDetails && typeof (bookingDetails as any).price === "number"
       ? (bookingDetails as any).price
       : bookingDetails && (bookingDetails as any).ride && typeof (bookingDetails as any).ride.price === "number"
       ? (bookingDetails as any).ride.price

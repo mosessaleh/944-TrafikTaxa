@@ -64,12 +64,16 @@ const KEY_LENGTH = 32; // 256 bits
 const IV_LENGTH = 16; // 128 bits
 const TAG_LENGTH = 16; // 128 bits
 
-if (!CPR_ENCRYPTION_KEY) {
-  throw new Error('CPR_ENCRYPTION_KEY environment variable is required');
+// Only throw error if CPR functions are actually called and key is missing
+function requireCPREncryptionKey() {
+  if (!CPR_ENCRYPTION_KEY) {
+    throw new Error('CPR_ENCRYPTION_KEY environment variable is required');
+  }
 }
 
 // Derive key from environment variable
 const getEncryptionKey = (): Buffer => {
+  requireCPREncryptionKey();
   return crypto.scryptSync(CPR_ENCRYPTION_KEY!, 'salt', KEY_LENGTH);
 };
 

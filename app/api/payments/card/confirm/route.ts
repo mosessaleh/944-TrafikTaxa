@@ -42,26 +42,36 @@ export async function POST(request: Request) {
     let amountDkk = 0;
     let booking: any = null;
     let invoiceForAmount: any = null;
- 
+
     // Handle mock payments for admin users (development flow)
     if (paymentIntentId.startsWith('pi_mock_')) {
       console.log("card/confirm: Processing mock payment for admin user (Stripe test)");
- 
-      if (bookingId) {
-        // Find booking by ID
+
+      let invoice: any = null;
+
+      // Priority: invoiceId > bookingId (when paying for invoice, use invoice amount)
+      if (invoiceId) {
+        // Find invoice first when invoiceId is provided
+        console.log("card/confirm: Looking for invoice with ID", invoiceId);
+        invoice = await prisma.invoice.findUnique({
+          where: { id: invoiceId },
+          include: { ride: { include: { user: true, vehicleType: true } } }
+        });
+        console.log("card/confirm: Invoice lookup result", invoice ? `Found (ID: ${invoice.id})` : 'Not found');
+        if (invoice) {
+          booking = invoice.ride;
+          console.log("card/confirm: Set booking from invoice ride", booking?.id);
+        } else {
+          console.log("card/confirm: Invoice not found, cannot proceed");
+          return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+        }
+      } else if (bookingId) {
+        // Find booking by ID when no invoiceId provided
         booking = await prisma.ride.findUnique({
           where: { id: bookingId },
           include: { user: true, vehicleType: true }
         });
-      } else if (invoiceId) {
-        // Find booking from invoice
-        const invoice = await prisma.invoice.findUnique({
-          where: { id: invoiceId },
-          include: { ride: { include: { user: true, vehicleType: true } } }
-        });
-        if (invoice) {
-          booking = invoice.ride;
-        }
+        console.log("card/confirm: Found booking by bookingId", booking?.id);
       } else {
         // Fallback: find first unpaid booking
         booking = await prisma.ride.findFirst({
@@ -70,15 +80,33 @@ export async function POST(request: Request) {
           include: { user: true, vehicleType: true }
         });
       }
- 
+
       if (!booking) {
         console.error("card/confirm: No unpaid booking found for user");
         return NextResponse.json({ error: "No unpaid booking found" }, { status: 400 });
       }
- 
-      // Use the booking price as the intended amount
-      amountDkk = booking.price;
-      console.log("card/confirm: Mock amount from booking", amountDkk, "bookingId:", booking.id);
+
+      // Calculate the total amount including late fees if paying for an invoice
+      if (invoice) {
+        const baseAmount = invoice.paymentAmount || booking.price;
+        const lateFee1 = invoice.lateFee1 || 0;
+        const lateFee2 = invoice.lateFee2 || 0;
+        amountDkk = baseAmount + lateFee1 + lateFee2;
+        // Round to 2 decimal places to avoid precision issues
+        amountDkk = Math.round(amountDkk * 100) / 100;
+        console.log("card/confirm: Mock amount from invoice (including late fees)", {
+          amountDkk,
+          baseAmount,
+          lateFee1,
+          lateFee2,
+          bookingId: booking.id,
+          invoiceId: invoice.id
+        });
+      } else {
+        // Use the booking price as the intended amount
+        amountDkk = booking.price;
+        console.log("card/confirm: Mock amount from booking", amountDkk, "bookingId:", booking.id);
+      }
  
       // Create a real Stripe test PaymentIntent so it appears in the Stripe Dashboard (test mode)
       try {
@@ -200,13 +228,28 @@ export async function POST(request: Request) {
         }
       }
 
-      // Derive authoritative amount from DB: prefer invoice.paymentAmount, else ride.price
-      const dbAmountDkk =
-        invoiceForAmount &&
-        typeof invoiceForAmount.paymentAmount === "number" &&
-        invoiceForAmount.paymentAmount > 0
-          ? invoiceForAmount.paymentAmount
-          : booking.price;
+      // Derive authoritative amount from DB: calculate total including late fees for invoices
+      let dbAmountDkk = booking.price; // Default to booking price
+
+      if (invoiceForAmount) {
+        // For invoice payments, calculate total including late fees
+        const baseAmount = invoiceForAmount.paymentAmount || booking.price;
+        const lateFee1 = invoiceForAmount.lateFee1 || 0;
+        const lateFee2 = invoiceForAmount.lateFee2 || 0;
+        dbAmountDkk = baseAmount + lateFee1 + lateFee2;
+        // Round to 2 decimal places to avoid precision issues
+        dbAmountDkk = Math.round(dbAmountDkk * 100) / 100;
+        console.log("card/confirm: Real payment amount from invoice (including late fees)", {
+          dbAmountDkk,
+          baseAmount,
+          lateFee1,
+          lateFee2,
+          bookingId: booking.id,
+          invoiceId: invoiceForAmount.id
+        });
+      } else {
+        console.log("card/confirm: Real payment amount from booking", dbAmountDkk, "bookingId:", booking.id);
+      }
 
       const amountFromGatewayDkk = paymentIntent.amount / 100; // Convert from øre to DKK
 
