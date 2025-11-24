@@ -30,8 +30,46 @@ function PayIndexContent(){
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch booking data if bookingId is provided
-        if (bookingId) {
+        // Priority: Invoice data takes precedence over booking data for accurate amounts
+        if (invoiceId) {
+          setLoadingBooking(true);
+          const invoiceResponse = await fetch(`/api/invoices/${invoiceId}/data`, {
+            credentials: 'include'
+          });
+          if (invoiceResponse.ok) {
+            const invoiceData = await invoiceResponse.json();
+            if (invoiceData.invoice && invoiceData.invoice.ride) {
+              // Calculate total amount including late fees for invoices
+              const baseAmount = invoiceData.invoice.ride.price;
+              const lateFee1 = invoiceData.invoice.lateFee1 || 0;
+              const lateFee2 = invoiceData.invoice.lateFee2 || 0;
+              const totalAmount = baseAmount + lateFee1 + lateFee2;
+
+              setBookingData({
+                price: amount ? parseFloat(amount) : totalAmount, // Use URL amount if provided, otherwise calculated total
+                scheduled: invoiceData.invoice.ride.scheduled,
+                pickupTime: invoiceData.invoice.ride.pickupTime,
+              });
+              // Verify payment method stored in the database
+              setHasInvoicePaymentMethod(invoiceData.invoice.ride.paymentMethod === 'invoice');
+            }
+          } else if (invoiceResponse.status === 401) {
+            alert('Please log in to continue.');
+            router.push('/login');
+            return;
+          } else if (invoiceResponse.status === 404) {
+            alert('Invoice not found.');
+            router.push('/account?tab=invoices');
+            return;
+          } else {
+            alert('You do not have permission to access this invoice.');
+            router.push('/account?tab=invoices');
+            return;
+          }
+          setLoadingBooking(false);
+        }
+        // Fetch booking data only if no invoiceId (for regular bookings)
+        else if (bookingId) {
           setLoadingBooking(true);
           const bookingResponse = await fetch(`/api/bookings/${bookingId}`, {
             credentials: 'include'
@@ -62,38 +100,6 @@ function PayIndexContent(){
           }
           setLoadingBooking(false);
         }
-        // Fetch invoice data if invoiceId is provided
-        else if (invoiceId && !amount) {
-          setLoadingBooking(true);
-          const invoiceResponse = await fetch(`/api/invoices/${invoiceId}/data`, {
-            credentials: 'include'
-          });
-          if (invoiceResponse.ok) {
-            const invoiceData = await invoiceResponse.json();
-            if (invoiceData.invoice && invoiceData.invoice.ride) {
-              setBookingData({
-                price: invoiceData.invoice.ride.price,
-                scheduled: invoiceData.invoice.ride.scheduled,
-                pickupTime: invoiceData.invoice.ride.pickupTime,
-              });
-              // Verify payment method stored in the database
-              setHasInvoicePaymentMethod(invoiceData.invoice.ride.paymentMethod === 'invoice');
-            }
-          } else if (invoiceResponse.status === 401) {
-            alert('Please log in to continue.');
-            router.push('/login');
-            return;
-          } else if (invoiceResponse.status === 404) {
-            alert('Invoice not found.');
-            router.push('/account?tab=invoices');
-            return;
-          } else {
-            alert('You do not have permission to access this invoice.');
-            router.push('/account?tab=invoices');
-            return;
-          }
-          setLoadingBooking(false);
-        }
 
         // Fetch payment methods
         const response = await fetch('/api/payments/methods');
@@ -120,7 +126,7 @@ function PayIndexContent(){
     setMethod(selectedMethod);
 
     // Use booking price from database if available, otherwise use URL parameter
-    const paymentAmount = bookingData?.price || (amount ? parseInt(amount) : 0);
+    const paymentAmount = bookingData?.price || (amount ? parseFloat(amount) : 0);
     
     // Build query parameters
     const params = new URLSearchParams();
@@ -176,7 +182,7 @@ function PayIndexContent(){
           <div className="text-center">
             <div className="text-lg font-semibold text-blue-900">Amount to Pay</div>
             <div className="text-2xl font-bold text-blue-800">
-              {loadingBooking ? "Loading..." : (bookingData?.price || amount)} DKK
+              {loadingBooking ? "Loading..." : (bookingData?.price ? bookingData.price.toFixed(2) : (amount || "0"))} DKK
             </div>
             {bookingId && (
               <div className="text-sm text-blue-600 mt-1">Booking #{bookingId}</div>

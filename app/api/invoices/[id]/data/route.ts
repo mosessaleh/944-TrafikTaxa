@@ -30,7 +30,7 @@ export async function GET(
     
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId }
-    });
+    }) as any; // Cast to any to access late fee fields
 
     console.log('📋 Invoice fetch result:', invoice ? `Found (ID: ${invoice.id})` : 'Not found');
 
@@ -101,6 +101,12 @@ export async function GET(
       createdAt: invoice.createdAt.toISOString(),
       // Use updatedAt if present, otherwise fall back to createdAt to avoid null-related crashes
       updatedAt: (invoice.updatedAt ?? invoice.createdAt).toISOString(),
+      // Late fee fields
+      lateFee1: invoice.lateFee1,
+      lateFee2: invoice.lateFee2,
+      lateFee1Date: invoice.lateFee1Date?.toISOString(),
+      lateFee2Date: invoice.lateFee2Date?.toISOString(),
+      extendedDueDate: invoice.extendedDueDate?.toISOString(),
       user: {
         id: user.id,
         email: user.email,

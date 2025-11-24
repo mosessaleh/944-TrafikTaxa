@@ -352,6 +352,13 @@ model Invoice {
   confirmedAt     DateTime?    // When the payment was confirmed by admin
   receiptNumber   String?      // Generated receipt number
 
+  // === Late fee fields ===
+  lateFee1        Float?       // First late fee amount (100 DKK + 5.7% of invoice amount)
+  lateFee2        Float?       // Second late fee amount (if applicable)
+  lateFee1Date    DateTime?    // When the first late fee was applied
+  lateFee2Date    DateTime?    // When the second late fee was applied
+  extendedDueDate DateTime?    // Extended due date after late fee application
+
   @@map("invoice")
 
   ride Ride @relation(fields: [rideId], references: [id])

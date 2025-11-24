@@ -107,7 +107,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
 
   const handlePayNow = () => {
     if (!invoice) return;
-    window.open(`/pay?invoice=${invoice.id}&booking=${invoice.ride.id}&amount_dkk=${invoice.ride.price}`, '_blank', 'noopener,noreferrer');
+    window.open(`/pay?invoice=${invoice.id}&booking=${invoice.ride.id}&amount_dkk=${totalAmount.toFixed(2)}`, '_blank', 'noopener,noreferrer');
   };
 
   if (loading) {
@@ -148,6 +148,12 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
   const isPaid = invoice.paymentStatus === 'PAID';
   const isUnpaid = invoice.paymentStatus === 'UNPAID';
   const isOverdue = invoice.paymentStatus === 'OVERDUE';
+
+  // Calculate amounts (no VAT for taxi services in Denmark)
+  const baseAmount = invoice.ride.price;
+  const lateFee1 = invoice.lateFee1 || 0;
+  const lateFee2 = invoice.lateFee2 || 0;
+  const totalAmount = baseAmount + lateFee1 + lateFee2;
 
   return (
     <>
@@ -203,7 +209,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
         >
           🖨️ Print
         </button>
-        {isUnpaid && (
+        {(isUnpaid || isOverdue) && (
           <button
             onClick={handlePayNow}
             className="px-4 py-2 bg-emerald-600 text-white text-xs rounded-xl hover:bg-emerald-700 transition-colors"
@@ -275,7 +281,7 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                 </div>
                 <div className="flex items-center gap-2 justify-end">
                   <span className="uppercase tracking-wide text-[10px] text-gray-500">Due</span>
-                  <span className="num font-medium">{new Date(invoice.dueDate).toLocaleDateString()}</span>
+                  <span className="num font-medium">{new Date(invoice.extendedDueDate || invoice.dueDate).toLocaleDateString()}</span>
                 </div>
               </div>
             </div>
@@ -354,21 +360,39 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                   <tbody className="divide-y divide-gray-100 text-sm">
                     <tr>
                       <td className="px-4 py-3 text-gray-800">Taxi Service</td>
-                      <td className="px-4 py-3 text-right num">{invoice.ride.price} DKK</td>
+                      <td className="px-4 py-3 text-right num">{baseAmount} DKK</td>
                     </tr>
-                    <tr>
-                      <td className="px-4 py-3 text-gray-500 text-[13px]">Subtotal</td>
-                      <td className="px-4 py-3 text-right text-gray-500 text-[13px] num">
-                        {invoice.ride.price} DKK
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="px-4 py-3 text-gray-500 text-[13px]">Tax (0%)</td>
-                      <td className="px-4 py-3 text-right text-gray-500 text-[13px] num">0 DKK</td>
-                    </tr>
+                    {lateFee1 > 0 && (
+                      <tr>
+                        <td className="px-4 py-3 text-red-600">
+                          Late Fee 1 (5.7% + 100 DKK)
+                          {invoice.lateFee1Date && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              Applied on: {new Date(invoice.lateFee1Date).toLocaleDateString()}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right text-red-600 num">+{lateFee1} DKK</td>
+                      </tr>
+                    )}
+                    {lateFee2 > 0 && (
+                      <tr>
+                        <td className="px-4 py-3 text-red-600">
+                          Late Fee 2
+                          {invoice.lateFee2Date && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              Applied on: {new Date(invoice.lateFee2Date).toLocaleDateString()}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right text-red-600 num">+{lateFee2} DKK</td>
+                      </tr>
+                    )}
                     <tr className="bg-gray-50">
                       <td className="px-4 py-3 font-semibold text-sm">Total</td>
-                      <td className="px-4 py-3 text-right font-semibold num">{invoice.ride.price} DKK</td>
+                      <td className="px-4 py-3 text-right font-semibold num">
+                        {totalAmount} DKK
+                      </td>
                     </tr>
                   </tbody>
                 </table>

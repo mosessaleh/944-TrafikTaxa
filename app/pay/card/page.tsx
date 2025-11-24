@@ -24,6 +24,15 @@ function CardPaymentContent() {
 
     const initializePayment = async () => {
       try {
+        // Check if amount is provided in URL (for invoices with penalties)
+        const urlAmount = searchParams.get("amount_dkk");
+        if (urlAmount) {
+          console.log("CardPayment: Using amount from URL", urlAmount);
+          setAmount(urlAmount);
+          setLoading(false);
+          return;
+        }
+
         console.log("CardPayment: Fetching booking details");
 
         let actualBookingId = bookingId;
@@ -42,7 +51,7 @@ function CardPaymentContent() {
 
           const invoiceData = await invoiceResponse.json();
           console.log("CardPayment: Invoice data received", invoiceData);
-          
+
           if (!invoiceData.invoice || !invoiceData.invoice.rideId) {
             throw new Error("Invoice data incomplete");
           }
@@ -83,7 +92,7 @@ function CardPaymentContent() {
     };
 
     initializePayment();
-  }, [bookingId, invoiceId]);
+  }, [bookingId, invoiceId, searchParams]);
 
   const handlePayment = async () => {
     if (!amount) return;

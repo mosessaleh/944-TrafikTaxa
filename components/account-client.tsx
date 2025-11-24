@@ -131,6 +131,9 @@ interface Invoice {
   paymentStatus: string;
   status: number;
   createdAt: string;
+  lateFee1?: number;
+  lateFee2?: number;
+  extendedDueDate?: string;
   ride?: {
     price: number;
   };
@@ -154,6 +157,7 @@ export default function AccountClient() {
   const [complaintModal, setComplaintModal] = useState<{ isOpen: boolean; bookingId: number | null }>({ isOpen: false, bookingId: null });
   const [complaintConversationModal, setComplaintConversationModal] = useState<{ isOpen: boolean; complaint: Complaint | null }>({ isOpen: false, complaint: null });
   const [expandedBooking, setExpandedBooking] = useState<number | null>(null);
+  const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'unpaid' | 'overdue'>('all');
 
   // Fetch user profile
   useEffect(() => {
@@ -281,7 +285,7 @@ export default function AccountClient() {
   );
 
   // Fetch invoices data
-  const { data: invoicesData, error: invoicesError, mutate: mutateInvoices, isLoading: invoicesLoading } = useSWR(
+  const { data: rawInvoicesData, error: invoicesError, mutate: mutateInvoices, isLoading: invoicesLoading } = useSWR(
     tab === 'invoices' && me ? '/api/invoices' : null,
     async (url) => {
       const response = await fetch(url, {
@@ -321,6 +325,20 @@ export default function AccountClient() {
       shouldRetryOnError: false,
     }
   );
+
+  // Filter invoices based on selected filter
+  const invoicesData = rawInvoicesData?.filter((invoice: Invoice) => {
+    const isOverdue = new Date(invoice.dueDate) < new Date() && invoice.paymentStatus !== 'PAID';
+
+    switch (invoiceFilter) {
+      case 'unpaid':
+        return invoice.paymentStatus !== 'PAID';
+      case 'overdue':
+        return isOverdue;
+      default:
+        return true;
+    }
+  });
 
  // Fetch notification settings
  const {
@@ -1029,7 +1047,7 @@ export default function AccountClient() {
                         </div>
                       </div>
                     );
-                  })}
+                    })}
                 </div>
               )}
             </div>
@@ -1106,7 +1124,41 @@ export default function AccountClient() {
 
           {tab === 'invoices' && (
             <div className="p-6">
-              <h2 className="text-xl font-semibold text-slate-800 mb-6">Invoices</h2>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <h2 className="text-xl font-semibold text-slate-800">Invoices</h2>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setInvoiceFilter('all')}
+                    className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                      invoiceFilter === 'all'
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setInvoiceFilter('unpaid')}
+                    className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                      invoiceFilter === 'unpaid'
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                    }`}
+                  >
+                    Unpaid
+                  </button>
+                  <button
+                    onClick={() => setInvoiceFilter('overdue')}
+                    className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                      invoiceFilter === 'overdue'
+                        ? 'bg-red-600 text-white'
+                        : 'bg-red-100 text-red-700 hover:bg-red-200'
+                    }`}
+                  >
+                    Overdue
+                  </button>
+                </div>
+              </div>
               {invoicesLoading ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
@@ -1124,27 +1176,42 @@ export default function AccountClient() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {invoicesData.map((invoice: Invoice) => (
-                    <div key={invoice.id} className="border border-slate-200 rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-slate-800">{invoice.invoiceNumber}</h3>
-                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                              invoice.paymentStatus === 'PAID'
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-yellow-100 text-yellow-800'
-                            }`}>
-                              {invoice.paymentStatus}
-                            </span>
-                          </div>
+                  {invoicesData.map((invoice: Invoice) => {
+                    // Use extended due date for display, but original due date for overdue check
+                    const effectiveDueDate = invoice.extendedDueDate || invoice.dueDate;
+                    const isOverdue = new Date(invoice.dueDate) < new Date() && invoice.paymentStatus !== 'PAID';
+                    const displayStatus = isOverdue ? 'OVERDUE' : invoice.paymentStatus;
+                    const statusColor = isOverdue
+                      ? 'bg-red-100 text-red-800'
+                      : invoice.paymentStatus === 'PAID'
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-yellow-100 text-yellow-800';
+
+                    // Determine violation status
+                    let violationText = '';
+                    if (invoice.lateFee2 && invoice.lateFee2 > 0) {
+                      violationText = ' (Second violation sent)';
+                    } else if (invoice.lateFee1 && invoice.lateFee1 > 0) {
+                      violationText = ' (First violation sent)';
+                    }
+
+                    return (
+                      <div key={invoice.id} className={`border border-slate-200 rounded-lg p-4 ${isOverdue ? 'bg-red-50' : ''}`}>
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="font-semibold text-slate-800">{invoice.invoiceNumber}</h3>
+                              <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${statusColor}`}>
+                                {displayStatus}{violationText}
+                              </span>
+                            </div>
                           <div className="grid md:grid-cols-2 gap-4 text-sm">
                             <div>
                               <p className="text-slate-600">
-                                <strong>Amount:</strong> {invoice.ride?.price || 'N/A'} DKK
+                                <strong>Amount:</strong> {(invoice.ride?.price || 0) + (invoice.lateFee1 || 0) + (invoice.lateFee2 || 0)} DKK
                               </p>
                               <p className="text-slate-600">
-                                <strong>Due Date:</strong> {invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString() : 'N/A'}
+                                <strong>Due Date:</strong> {effectiveDueDate ? new Date(effectiveDueDate).toLocaleDateString() : 'N/A'}
                               </p>
                             </div>
                             <div>
@@ -1169,7 +1236,8 @@ export default function AccountClient() {
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
