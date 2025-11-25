@@ -43,7 +43,7 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
 
       case 'notification':
         setNotifications(prev => [...prev, message.payload as NotificationPayload]);
-        if ('Notification' in window && Notification.permission === 'granted') {
+        if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
           new Notification(message.payload.title, {
             body: message.payload.message,
             icon: '/logo.svg',
@@ -124,7 +124,7 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
 
   // Request notification permission on mount
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }, []);
@@ -162,8 +162,10 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
   };
 
   return (
-    <RealtimeContext.Provider value={value}>
-      {children}
-    </RealtimeContext.Provider>
+    <div suppressHydrationWarning>
+      <RealtimeContext.Provider value={value}>
+        {children}
+      </RealtimeContext.Provider>
+    </div>
   );
 }

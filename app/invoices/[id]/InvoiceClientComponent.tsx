@@ -111,6 +111,33 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
     window.location.href = `/pay?invoice=${invoice.id}&booking=${invoice.ride.id}&amount_dkk=${totalAmount.toFixed(2)}`;
   };
 
+  // Consistent date formatting to avoid hydration mismatches
+  const formatDate = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
+    } catch {
+      return dateString;
+    }
+  };
+
+  const formatDateTime = (dateString: string) => {
+    try {
+      const date = new Date(dateString);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      return `${day}/${month}/${year} ${hours}:${minutes}`;
+    } catch {
+      return dateString;
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-96">
@@ -278,11 +305,11 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
               <div className="flex flex-col gap-1 text-right">
                 <div className="flex items-center gap-2 justify-end">
                   <span className="uppercase tracking-wide text-[10px] text-gray-500">Date</span>
-                  <span className="num font-medium">{new Date(invoice.createdAt).toLocaleDateString()}</span>
+                  <span className="num font-medium" suppressHydrationWarning>{formatDate(invoice.createdAt)}</span>
                 </div>
                 <div className="flex items-center gap-2 justify-end">
                   <span className="uppercase tracking-wide text-[10px] text-gray-500">Due</span>
-                  <span className="num font-medium">{new Date(invoice.extendedDueDate || invoice.dueDate).toLocaleDateString()}</span>
+                  <span className="num font-medium" suppressHydrationWarning>{formatDate(invoice.extendedDueDate || invoice.dueDate)}</span>
                 </div>
               </div>
             </div>
@@ -339,8 +366,8 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                   </div>
                   <div>
                     <p className="text-[11px] text-gray-500 mb-1">Pickup Time</p>
-                    <p className="text-sm text-gray-800">
-                      {new Date(invoice.ride.pickupTime).toLocaleString()}
+                    <p className="text-sm text-gray-800" suppressHydrationWarning>
+                      {formatDateTime(invoice.ride.pickupTime)}
                     </p>
                   </div>
                 </div>
@@ -368,8 +395,8 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                         <td className="px-4 py-3 text-red-600">
                           Late Fee 1 (5.7% + 100 DKK)
                           {invoice.lateFee1Date && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              Applied on: {new Date(invoice.lateFee1Date).toLocaleDateString()}
+                            <div className="text-xs text-gray-500 mt-1" suppressHydrationWarning>
+                              Applied on: {formatDate(invoice.lateFee1Date)}
                             </div>
                           )}
                         </td>
@@ -381,8 +408,8 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                         <td className="px-4 py-3 text-red-600">
                           Late Fee 2
                           {invoice.lateFee2Date && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              Applied on: {new Date(invoice.lateFee2Date).toLocaleDateString()}
+                            <div className="text-xs text-gray-500 mt-1" suppressHydrationWarning>
+                              Applied on: {formatDate(invoice.lateFee2Date)}
                             </div>
                           )}
                         </td>
@@ -428,9 +455,9 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                     <span className="font-medium">Status:</span>{' '}
                     <span className="text-green-600 font-semibold">PAID</span>
                   </p>
-                  <p>
+                  <p suppressHydrationWarning>
                     <span className="font-medium">Paid on:</span>{' '}
-                    {new Date(invoice.updatedAt).toLocaleDateString()}
+                    {formatDate(invoice.updatedAt)}
                   </p>
                 </div>
               </div>

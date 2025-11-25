@@ -11,13 +11,14 @@ export default function SiteNavbar({ me }: { me: NavUser }){
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-lg border-b border-slate-200/50 shadow-lg">
+    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-lg border-b border-slate-200/50 shadow-lg" suppressHydrationWarning>
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between relative">
         {/* Mobile menu button - absolute positioned on mobile */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="md:hidden absolute right-4 top-1/2 transform -translate-y-1/2 p-2 rounded-lg hover:bg-slate-50 transition-colors z-10"
           aria-label="Toggle mobile menu"
+          suppressHydrationWarning
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             {mobileMenuOpen ? (
@@ -81,8 +82,8 @@ export default function SiteNavbar({ me }: { me: NavUser }){
           )}
           {me && (
             <div className="relative">
-              <button onClick={() => setDropdownOpen(!dropdownOpen)} className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+              <button onClick={() => setDropdownOpen(!dropdownOpen)} className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors" suppressHydrationWarning>
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold" suppressHydrationWarning>
                   {me.firstName.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex flex-col text-left">
@@ -94,7 +95,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                 <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50">
                   <Link href="/account?tab=profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</Link>
                   {isAdmin && <Link href={getAdminPath()} onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Dashboard</Link>}
-                  <a href="/logout" onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setDropdownOpen(false); }} className="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100">Logout</a>
+                  <a href="/logout" onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setDropdownOpen(false); }} className="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" suppressHydrationWarning>Logout</a>
                 </div>
               )}
             </div>
@@ -107,8 +108,8 @@ export default function SiteNavbar({ me }: { me: NavUser }){
         <div className="md:hidden bg-white border-t border-slate-200/50 shadow-lg">
           <nav className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-4 space-y-2">
             {me && (
-              <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-xl mb-4">
-                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold">
+              <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-xl mb-4" suppressHydrationWarning>
+                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold" suppressHydrationWarning>
                   {me.firstName.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex flex-col text-left">
@@ -160,6 +161,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     href="/login"
                     className="block w-full btn-ghost text-center text-sm"
                     onClick={() => setMobileMenuOpen(false)}
+                    suppressHydrationWarning
                   >
                     Log in
                   </Link>
@@ -167,6 +169,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     href="/register"
                     className="block w-full btn-primary text-center shadow-md text-sm"
                     onClick={() => setMobileMenuOpen(false)}
+                    suppressHydrationWarning
                   >
                     Create account
                   </Link>
@@ -193,6 +196,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     href="/logout"
                     className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-red-600 hover:text-red-700 font-medium transition-colors text-sm"
                     onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setMobileMenuOpen(false); }}
+                    suppressHydrationWarning
                   >
                     Logout
                   </a>

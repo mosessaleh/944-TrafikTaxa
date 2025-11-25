@@ -81,7 +81,12 @@ export default function AdminUsersClient({ initialUsers }: Props) {
   function formatDate(value?: string | null) {
     if (!value) return "-";
     try {
-      return new Date(value).toLocaleDateString();
+      // Use consistent date formatting to avoid hydration mismatches
+      const date = new Date(value);
+      const day = String(date.getDate()).padStart(2, '0');
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      return `${day}/${month}/${year}`;
     } catch {
       return "-";
     }
@@ -255,7 +260,7 @@ export default function AdminUsersClient({ initialUsers }: Props) {
 
         {/* Users table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="w-full text-sm text-left" suppressHydrationWarning>
             <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-100">
               <tr>
                 <th className="px-4 py-3 w-16">ID</th>
@@ -280,7 +285,7 @@ export default function AdminUsersClient({ initialUsers }: Props) {
                       </div>
                       <div>
                         <div className="font-medium text-gray-900">{u.firstName} {u.lastName}</div>
-                        <div className="text-xs text-gray-500">Joined {formatDate(u.createdAt)}</div>
+                        <div className="text-xs text-gray-500" suppressHydrationWarning>Joined {formatDate(u.createdAt)}</div>
                       </div>
                     </div>
                   </td>
