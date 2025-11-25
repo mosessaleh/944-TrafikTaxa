@@ -427,7 +427,8 @@ model PartnerCompany {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  drivers comDriver[]
+  drivers  comDriver[]
+  vehicles comVehicles[]
 
   @@index([comStatus])
   @@index([contractSigned])
@@ -462,4 +463,31 @@ model comDriver {
   @@index([comId])
   @@index([isOnline])
   @@index([currentRideId])
+}
+
+model comVehicles {
+  id               Int      @id @default(autoincrement())
+  comId            Int
+  uId              Int?
+  vehicleType      String?
+  regNumber        String
+  make             String
+  model            String
+  variant          String?
+  year             Int?
+  vinNumber        String?
+  seats            Int?
+  color            String?
+  fuel             String?
+  status           Int      @default(0)
+  taxiPermitNumber String?
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  company PartnerCompany @relation(fields: [comId], references: [id])
+
+  @@index([comId])
+  @@index([uId])
+  @@index([status])
 }

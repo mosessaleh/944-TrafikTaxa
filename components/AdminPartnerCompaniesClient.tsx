@@ -17,6 +17,7 @@ import {
   Car,
 } from 'lucide-react';
 import AddDriverModal from './AddDriverModal';
+import AddVehicleModal from './AddVehicleModal';
 
 export type PartnerCompany = {
   id: number;
@@ -49,6 +50,7 @@ export default function AdminPartnerCompaniesClient({ initialPartners }: Props) 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editPartner, setEditPartner] = useState<PartnerCompany | null>(null);
   const [showAddDriverModal, setShowAddDriverModal] = useState<{ companyId: number; companyName: string } | null>(null);
+  const [showAddVehicleModal, setShowAddVehicleModal] = useState<{ companyId: number; companyName: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<ActionMessage>(null);
 
@@ -88,6 +90,15 @@ export default function AdminPartnerCompaniesClient({ initialPartners }: Props) 
 
   function closeAddDriver() {
     setShowAddDriverModal(null);
+  }
+
+  function openAddVehicle(companyId: number, companyName: string) {
+    setActionMessage(null);
+    setShowAddVehicleModal({ companyId, companyName });
+  }
+
+  function closeAddVehicle() {
+    setShowAddVehicleModal(null);
   }
 
   async function handleAddPartner(formData: Omit<PartnerCompany, 'id' | 'createdAt' | 'updatedAt'>) {
@@ -220,6 +231,33 @@ export default function AdminPartnerCompaniesClient({ initialPartners }: Props) 
     }
   }
 
+  async function handleAddVehicle(formData: any) {
+    setLoading(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch("/api/com-vehicles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to add vehicle");
+      }
+
+      setActionMessage({ type: "success", text: "Vehicle added successfully." });
+      closeAddVehicle();
+    } catch (e: any) {
+      setActionMessage({
+        type: "error",
+        text: e?.message || "Failed to add vehicle",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -317,7 +355,7 @@ export default function AdminPartnerCompaniesClient({ initialPartners }: Props) 
                         <UserPlus size={16} />
                       </button>
                       <button
-                        onClick={() => alert('Add Car functionality not implemented yet')}
+                        onClick={() => openAddVehicle(p.id, p.comName)}
                         className="p-1.5 text-gray-500 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                         title="Add Car"
                       >
@@ -404,6 +442,17 @@ export default function AdminPartnerCompaniesClient({ initialPartners }: Props) 
           companyName={showAddDriverModal.companyName}
           onClose={closeAddDriver}
           onSave={handleAddDriver}
+          loading={loading}
+        />
+      )}
+
+      {/* Add Vehicle Modal */}
+      {showAddVehicleModal && (
+        <AddVehicleModal
+          companyId={showAddVehicleModal.companyId}
+          companyName={showAddVehicleModal.companyName}
+          onClose={closeAddVehicle}
+          onSave={handleAddVehicle}
           loading={loading}
         />
       )}
