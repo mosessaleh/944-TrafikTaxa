@@ -3,10 +3,11 @@ import Link from "next/link";
 import { useState } from "react";
 import { getAdminPath } from '@/lib/admin-route';
 
-export type NavUser = { id:number; firstName:string; lastName:string; email:string; role?: 'ADMIN'|'USER' } | null;
+export type NavUser = { id:number; firstName:string; lastName:string; email:string; role?: 'ADMIN'|'USER'; type?: 'user' } | { id:number; comUserName:string; comName:string; type: 'partner' } | null;
 
 export default function SiteNavbar({ me }: { me: NavUser }){
-  const isAdmin = me?.role === 'ADMIN';
+  const isAdmin = me?.type === 'user' && me?.role === 'ADMIN';
+  const isPartner = me?.type === 'partner';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -41,12 +42,14 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             >
               Home
             </Link>
-            <Link
-              href="/book"
-              className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
-            >
-              Book ride
-            </Link>
+            {!isPartner && (
+              <Link
+                href="/book"
+                className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+              >
+                Book ride
+              </Link>
+            )}
             <Link
               href="/pricing"
               className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
@@ -84,17 +87,22 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             <div className="relative">
               <button onClick={() => setDropdownOpen(!dropdownOpen)} className="flex items-center gap-2 px-3 py-2 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors" suppressHydrationWarning>
                 <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold" suppressHydrationWarning>
-                  {me.firstName.charAt(0).toUpperCase()}
+                  {isPartner ? (me as any).comName.charAt(0).toUpperCase() : me.firstName.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex flex-col text-left">
-                  <span className="text-sm font-medium text-slate-700">{me.firstName} {me.lastName}</span>
-                  <span className="text-xs text-slate-500">{me.email}</span>
+                  <span className="text-sm font-medium text-slate-700">
+                    {isPartner ? (me as any).comName : `${me.firstName} ${me.lastName}`}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {isPartner ? (me as any).comUserName : me.email}
+                  </span>
                 </div>
               </button>
               {dropdownOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50">
-                  <Link href="/account?tab=profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</Link>
-                  {isAdmin && <Link href={getAdminPath()} onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Dashboard</Link>}
+                  <Link href="/profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</Link>
+                  {isAdmin && <Link href={getAdminPath()} onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Admin Dashboard</Link>}
+                  {isPartner && <Link href="/partner/dashboard" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Dashboard</Link>}
                   <a href="/logout" onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setDropdownOpen(false); }} className="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" suppressHydrationWarning>Logout</a>
                 </div>
               )}
@@ -110,11 +118,15 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             {me && (
               <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 rounded-xl mb-4" suppressHydrationWarning>
                 <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center text-white font-bold" suppressHydrationWarning>
-                  {me.firstName.charAt(0).toUpperCase()}
+                  {isPartner ? (me as any).comName.charAt(0).toUpperCase() : me.firstName.charAt(0).toUpperCase()}
                 </div>
                 <div className="flex flex-col text-left">
-                  <span className="text-sm font-medium text-slate-700">{me.firstName} {me.lastName}</span>
-                  <span className="text-xs text-slate-500">{me.email}</span>
+                  <span className="text-sm font-medium text-slate-700">
+                    {isPartner ? (me as any).comName : `${me.firstName} ${me.lastName}`}
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {isPartner ? (me as any).comUserName : me.email}
+                  </span>
                 </div>
               </div>
             )}
@@ -125,13 +137,15 @@ export default function SiteNavbar({ me }: { me: NavUser }){
             >
               Home
             </Link>
-            <Link
-              href="/book"
-              className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
-              onClick={() => setMobileMenuOpen(false)}
-            >
-              Book ride
-            </Link>
+            {!isPartner && (
+              <Link
+                href="/book"
+                className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Book ride
+              </Link>
+            )}
             <Link
               href="/pricing"
               className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
@@ -177,7 +191,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               ) : (
                 <div className="space-y-3">
                   <Link
-                    href="/account?tab=profile"
+                    href="/profile"
                     className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
                     onClick={() => setMobileMenuOpen(false)}
                   >
@@ -186,6 +200,15 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                   {isAdmin && (
                     <Link
                       href={getAdminPath()}
+                      className="block px-4 py-3 rounded-lg bg-slate-900 text-white font-medium shadow-sm hover:bg-black hover:shadow-md transition-colors text-sm"
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      Admin Dashboard
+                    </Link>
+                  )}
+                  {isPartner && (
+                    <Link
+                      href="/partner/dashboard"
                       className="block px-4 py-3 rounded-lg bg-slate-900 text-white font-medium shadow-sm hover:bg-black hover:shadow-md transition-colors text-sm"
                       onClick={() => setMobileMenuOpen(false)}
                     >

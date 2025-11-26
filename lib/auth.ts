@@ -100,29 +100,63 @@ export async function getUserFromCookie(){
       return null;
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: dec.id },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        phone: true,
-        address: true,
-        role: true,
-        emailVerified: true,
-        pendingEmail: true,
-        canPayByInvoice: true,
-        createdAt: true
+    if (dec.type === 'partner') {
+      // Partner company session
+      const partner = await prisma.partnerCompany.findUnique({
+        where: { id: dec.id },
+        select: {
+          id: true,
+          comUserName: true,
+          comName: true,
+          contactPerson: true,
+          comAddress: true,
+          comPhone: true,
+          comEmail: true,
+          comStatus: true,
+          commissionRate: true,
+          contractSigned: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
+
+      if (!partner) {
+        return null;
       }
-    });
 
-    // Additional security: ensure user still exists and is active
-    if (!user) {
-      return null;
+      return {
+        ...partner,
+        type: 'partner'
+      };
+    } else {
+      // Regular user session
+      const user = await prisma.user.findUnique({
+        where: { id: dec.id },
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+          phone: true,
+          address: true,
+          role: true,
+          emailVerified: true,
+          pendingEmail: true,
+          canPayByInvoice: true,
+          createdAt: true
+        }
+      });
+
+      // Additional security: ensure user still exists and is active
+      if (!user) {
+        return null;
+      }
+
+      return {
+        ...user,
+        type: 'user'
+      };
     }
-
-    return user;
   }catch(error){
     // Log suspicious activity in production
     if (process.env.NODE_ENV === 'production') {
@@ -135,6 +169,6 @@ export async function getUserFromCookie(){
 export async function requireAdmin(){
   const u = await getUserFromCookie();
   if (!u) throw Object.assign(new Error('Unauthorized'), { status: 401 });
-  if (u.role !== 'ADMIN') throw Object.assign(new Error('Forbidden'), { status: 403 });
+  if (u.type !== 'user' || (u as any).role !== 'ADMIN') throw Object.assign(new Error('Forbidden'), { status: 403 });
   return u;
 }
