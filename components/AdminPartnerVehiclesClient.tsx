@@ -13,6 +13,7 @@ import {
   Plus,
   Save,
   X,
+  UserPlus,
 } from 'lucide-react';
 
 export type PartnerVehicle = {
@@ -52,6 +53,8 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
   const [actionMessage, setActionMessage] = useState<ActionMessage>(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editVehicle, setEditVehicle] = useState<PartnerVehicle | null>(null);
+  const [showLinkDriverModal, setShowLinkDriverModal] = useState(false);
+  const [linkVehicle, setLinkVehicle] = useState<PartnerVehicle | null>(null);
 
   const filteredVehicles = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -75,6 +78,17 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
   function closeEditModal() {
     setShowEditModal(false);
     setEditVehicle(null);
+  }
+
+  function openLinkDriverModal(vehicle: PartnerVehicle) {
+    setActionMessage(null);
+    setLinkVehicle(vehicle);
+    setShowLinkDriverModal(true);
+  }
+
+  function closeLinkDriverModal() {
+    setShowLinkDriverModal(false);
+    setLinkVehicle(null);
   }
 
   async function handleUpdateVehicle(formData: any) {
@@ -143,6 +157,36 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
     }
   }
 
+  async function handleLinkDriver(vehicleId: number, driverId: number) {
+    setLoading(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/com-vehicles/${vehicleId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uId: driverId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to link driver");
+      }
+
+      setVehicles((prev) =>
+        prev.map((v) => (v.id === vehicleId ? { ...v, uId: driverId } : v))
+      );
+      setActionMessage({ type: "success", text: "Driver linked successfully." });
+      closeLinkDriverModal();
+    } catch (e: any) {
+      setActionMessage({
+        type: "error",
+        text: e?.message || "Failed to link driver",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -189,8 +233,8 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
               <tr>
                 <th className="px-4 py-3 w-16">ID</th>
                 <th className="px-4 py-3">Registration</th>
-                <th className="px-4 py-3">Make & Model</th>
                 <th className="px-4 py-3">Company</th>
+                <th className="px-4 py-3">Driver</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -204,21 +248,23 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
                   <td className="px-4 py-3 text-gray-500">#{v.id}</td>
                   <td className="px-4 py-3 font-medium">{v.regNumber}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-500">
-                        <Car size={16} />
-                      </div>
-                      <div>
-                        <div className="font-medium text-gray-900">{v.make} {v.model}</div>
-                        {v.variant && <div className="text-xs text-gray-500">{v.variant}</div>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <Building size={16} className="text-gray-400" />
                       <span className="text-sm">{v.company.comName}</span>
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {v.uId ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                        <CheckCircle size={12} />
+                        Linked (ID: {v.uId})
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-800">
+                        <AlertTriangle size={12} />
+                        Not Linked
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {v.status === 1 ? (
@@ -241,6 +287,13 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
                         title="Edit Vehicle"
                       >
                         <Edit2 size={16} />
+                      </button>
+                      <button
+                        onClick={() => openLinkDriverModal(v)}
+                        className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                        title="Link Driver"
+                      >
+                        <UserPlus size={16} />
                       </button>
                       <button
                         onClick={() => handleDeleteVehicle(v.id)}
@@ -284,6 +337,159 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
           isEdit={true}
         />
       )}
+
+      {/* Link Driver Modal */}
+      {showLinkDriverModal && linkVehicle && (
+        <LinkDriverModal
+          vehicle={linkVehicle}
+          onClose={closeLinkDriverModal}
+          onLink={handleLinkDriver}
+          loading={loading}
+        />
+      )}
+    </div>
+  );
+}
+
+type LinkDriverModalProps = {
+  vehicle: PartnerVehicle;
+  onClose: () => void;
+  onLink: (vehicleId: number, driverId: number) => void;
+  loading: boolean;
+};
+
+function LinkDriverModal({ vehicle, onClose, onLink, loading }: LinkDriverModalProps) {
+  const [drCard, setDrCard] = useState("");
+  const [foundDriver, setFoundDriver] = useState<{ id: number; drFname: string; drLname: string; company?: { comName: string } } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleSearch() {
+    if (!drCard.trim()) return;
+
+    setSearching(true);
+    setError("");
+    setFoundDriver(null);
+
+    try {
+      const params = new URLSearchParams({
+        drCard: drCard.trim(),
+        companyId: vehicle.comId.toString(),
+      });
+      const res = await fetch(`/api/search-driver?${params}`);
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Search failed");
+      }
+
+      if (data.driver) {
+        setFoundDriver(data.driver);
+      } else {
+        setError("Driver not found or not registered in this company");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Search failed");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function handleLink() {
+    if (foundDriver) {
+      onLink(vehicle.id, foundDriver.id);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+          <h2 className="text-lg font-semibold text-gray-900">Link Driver to Vehicle</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <p className="text-sm text-gray-600 mb-4">
+              Linking driver to: <strong>{vehicle.make} {vehicle.model} ({vehicle.regNumber})</strong>
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                Driver Card Number
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  value={drCard}
+                  onChange={(e) => setDrCard(e.target.value)}
+                  placeholder="Enter driver card number"
+                  onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                />
+                <button
+                  type="button"
+                  onClick={handleSearch}
+                  disabled={searching || !drCard.trim()}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {searching ? "..." : "Search"}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
+
+            {foundDriver && (
+              <div className="text-sm text-green-600 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                Found: <strong>{foundDriver.drFname} {foundDriver.drLname}</strong> (ID: {foundDriver.id})
+                {foundDriver.company && (
+                  <div className="text-xs mt-1">
+                    Company: {foundDriver.company.comName}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-all"
+            disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleLink}
+            disabled={loading || !foundDriver}
+            className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {loading ? "Linking..." : (
+              <>
+                <UserPlus size={16} />
+                Link Driver
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

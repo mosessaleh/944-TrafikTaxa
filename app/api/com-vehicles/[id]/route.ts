@@ -5,21 +5,23 @@ import { requireAdmin } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
 
 const UpdateSchema = z.object({
-  comId: z.number().int().positive(),
+  comId: z.number().int().positive().optional(),
   uId: z.union([z.number().int(), z.null()]).optional(),
   vehicleType: z.union([z.string(), z.null()]).optional(),
-  regNumber: z.string().min(1),
-  make: z.string().min(1),
-  model: z.string().min(1),
+  regNumber: z.string().min(1).optional(),
+  make: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
   variant: z.union([z.string(), z.null()]).optional(),
   year: z.union([z.number().int(), z.null()]).optional(),
   vinNumber: z.union([z.string(), z.null()]).optional(),
   seats: z.union([z.number().int(), z.null()]).optional(),
   color: z.union([z.string(), z.null()]).optional(),
   fuel: z.union([z.string(), z.null()]).optional(),
-  status: z.number().int(),
-  taxiPermitNumber: z.string().min(1),
+  status: z.number().int().optional(),
+  taxiPermitNumber: z.string().min(1).optional(),
   notes: z.union([z.string(), z.null()]).optional(),
+}).refine((data) => Object.keys(data).length > 0, {
+  message: "At least one field must be provided for update"
 });
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
