@@ -135,7 +135,7 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
       )}
 
       {/* Email verification status */}
-      {!initial.emailVerified && !initial.pendingEmail && (
+      {(!initial.emailVerified || initial.emailVerified === 0 || initial.emailVerified === "0") && !initial.pendingEmail && (
         <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200">
           <div className="font-medium text-orange-800">Email not verified</div>
           <div className="text-sm text-orange-700">

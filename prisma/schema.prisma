@@ -482,6 +482,10 @@ model comVehicles {
   status           Int      @default(0)
   taxiPermitNumber String?
   notes            String?
+  // Location tracking fields
+  lastLat           Float?
+  lastLon           Float?
+  lastLocationUpdate DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

@@ -14,6 +14,7 @@ import {
   Save,
   X,
   UserPlus,
+  UserMinus,
 } from 'lucide-react';
 
 export type PartnerVehicle = {
@@ -33,6 +34,10 @@ export type PartnerVehicle = {
   status: number;
   taxiPermitNumber?: string | null;
   notes?: string | null;
+  // Location tracking fields
+  lastLat?: number | null;
+  lastLon?: number | null;
+  lastLocationUpdate?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   company: {
@@ -187,6 +192,35 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
     }
   }
 
+  async function handleUnlinkDriver(vehicleId: number) {
+    setLoading(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/com-vehicles/${vehicleId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uId: null }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to unlink driver");
+      }
+
+      setVehicles((prev) =>
+        prev.map((v) => (v.id === vehicleId ? { ...v, uId: null } : v))
+      );
+      setActionMessage({ type: "success", text: "Driver unlinked successfully." });
+    } catch (e: any) {
+      setActionMessage({
+        type: "error",
+        text: e?.message || "Failed to unlink driver",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -235,6 +269,7 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
                 <th className="px-4 py-3">Registration</th>
                 <th className="px-4 py-3">Company</th>
                 <th className="px-4 py-3">Driver</th>
+                <th className="px-4 py-3">Last Location</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -267,6 +302,20 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
                     )}
                   </td>
                   <td className="px-4 py-3">
+                    {v.lastLat && v.lastLon ? (
+                      <div className="text-xs">
+                        <div className="font-medium">{v.lastLat.toFixed(4)}, {v.lastLon.toFixed(4)}</div>
+                        {v.lastLocationUpdate && (
+                          <div className="text-gray-500">
+                            {new Date(v.lastLocationUpdate).toLocaleString()}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-500">No location data</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     {v.status === 1 ? (
                       <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
                         <CheckCircle size={12} />
@@ -288,13 +337,23 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
                       >
                         <Edit2 size={16} />
                       </button>
-                      <button
-                        onClick={() => openLinkDriverModal(v)}
-                        className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                        title="Link Driver"
-                      >
-                        <UserPlus size={16} />
-                      </button>
+                      {v.uId ? (
+                        <button
+                          onClick={() => handleUnlinkDriver(v.id)}
+                          className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Unlink Driver"
+                        >
+                          <UserMinus size={16} />
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => openLinkDriverModal(v)}
+                          className="p-1.5 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                          title="Link Driver"
+                        >
+                          <UserPlus size={16} />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDeleteVehicle(v.id)}
                         className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -309,7 +368,7 @@ export default function AdminPartnerVehiclesClient({ initialVehicles }: Props) {
               {filteredVehicles.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-4 py-12 text-center text-gray-500"
                   >
                     <div className="flex flex-col items-center justify-center">

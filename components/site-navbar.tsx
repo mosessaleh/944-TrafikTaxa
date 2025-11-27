@@ -100,7 +100,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               </button>
               {dropdownOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50">
-                  <Link href="/profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</Link>
+                  <Link href="/account?tab=profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</Link>
                   {isAdmin && <Link href={getAdminPath()} onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Admin Dashboard</Link>}
                   {isPartner && <Link href="/partner/dashboard" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Dashboard</Link>}
                   <a href="/logout" onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setDropdownOpen(false); }} className="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" suppressHydrationWarning>Logout</a>
@@ -191,7 +191,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               ) : (
                 <div className="space-y-3">
                   <Link
-                    href="/profile"
+                    href="/account?tab=profile"
                     className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
                     onClick={() => setMobileMenuOpen(false)}
                   >

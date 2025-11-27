@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import useSWR from 'swr';
 import ComplaintModal from './ComplaintModal';
 import ComplaintConversationModal from './ComplaintConversationModal';
@@ -695,41 +696,48 @@ export default function AccountClient() {
           <div className="flex-1">
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
               {tab === 'profile' && (
-            <div className="p-6">
-              <div className="flex items-start justify-between gap-3 flex-wrap mb-6">
-                <div className="grid gap-1">
-                  <div className="text-sm text-gray-500">Email</div>
-                  <div className="font-semibold flex items-center gap-2">
-                    {me.email}
-                    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${me.emailVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                      {me.emailVerified ? 'Verified' : 'Unverified'}
-                    </span>
-                  </div>
+                <div className="p-6">
+                  <h1 className="text-3xl font-bold mb-6">My Profile</h1>
+   
                   {!me.emailVerified && (
-                    <div className="text-sm text-gray-600">You need to verify your email to book rides or view history.</div>
+                    <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200 mb-6">
+                      <div className="font-medium text-orange-800">Email not verified</div>
+                      <div className="text-sm text-orange-700">Your email <b>{me.email}</b> is not verified. Please verify your email to access all features.</div>
+                      <Link href={`/verify?email=${encodeURIComponent(me.email)}`} className="px-4 py-2 rounded-xl border border-orange-300 bg-orange-600 text-white hover:bg-orange-700 transition-colors w-fit">Send verification code</Link>
+                    </div>
                   )}
+   
+                  <section className="grid gap-4 bg-white border rounded-2xl p-6 mb-6">
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="grid gap-1">
+                        <div className="text-sm text-gray-500">Email</div>
+                        <div className="font-semibold flex items-center gap-2">{me.email} <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${me.emailVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{me.emailVerified ? 'Verified' : 'Unverified'}</span></div>
+                        {!me.emailVerified && (
+                          <div className="text-sm text-gray-600">You need to verify your email to book rides or view history. <Link href={`/verify?email=${encodeURIComponent(me.email)}`} className="underline">Verify now</Link></div>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+   
+                  <ProfileEditClient initial={{
+                    email: me.email,
+                    firstName: me.firstName,
+                    lastName: me.lastName,
+                    phone: me.phone,
+                    address: me.address || '',
+                    pendingEmail: me.pendingEmail || null
+                  }} onProfileUpdate={refreshProfile} />
+   
+                  <div className="mt-8 pt-6 border-t border-slate-200">
+                    <button
+                      onClick={handleLogout}
+                      className="btn-ghost text-red-600 hover:text-red-700 hover:bg-red-50"
+                    >
+                      🚪 Logout
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <ProfileEditClient initial={{
-                email: me.email,
-                firstName: me.firstName,
-                lastName: me.lastName,
-                phone: me.phone,
-                address: me.address || '',
-                pendingEmail: me.pendingEmail || null
-              }} onProfileUpdate={refreshProfile} />
-
-              <div className="mt-8 pt-6 border-t border-slate-200">
-                <button
-                  onClick={handleLogout}
-                  className="btn-ghost text-red-600 hover:text-red-700 hover:bg-red-50"
-                >
-                  🚪 Logout
-                </button>
-              </div>
-            </div>
-          )}
+              )}
 
           {tab === 'history' && (
             <div className="p-6">
