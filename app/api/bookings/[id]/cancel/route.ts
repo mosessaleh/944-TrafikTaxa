@@ -20,7 +20,7 @@ export async function POST(
       );
     }
 
-    if (!user.emailVerified) {
+    if (user.type === 'user' && !(user as any).emailVerified) {
       return NextResponse.json(
         { ok: false, error: 'Email verification required' },
         { status: 403 }
@@ -148,7 +148,7 @@ export async function POST(
           `<p>A customer has cancelled their booking:</p>
           <ul>
             <li><strong>Booking ID:</strong> ${booking.id}</li>
-            <li><strong>Customer:</strong> ${user.firstName} ${user.lastName} (${user.email})</li>
+            <li><strong>Customer:</strong> ${(user as any).firstName} ${(user as any).lastName} (${(user as any).email})</li>
             <li><strong>Rider:</strong> ${booking.riderName}</li>
             <li><strong>Vehicle:</strong> ${booking.vehicleType.title}</li>
             <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
@@ -169,9 +169,9 @@ export async function POST(
     // Send confirmation email to user
     try {
       await sendEmail(
-        user.email,
+        (user as any).email,
         'Booking Cancellation Confirmation',
-        `<p>Dear ${user.firstName},</p>
+        `<p>Dear ${(user as any).firstName},</p>
         <p>Your booking has been successfully cancelled.</p>
         <div style="background-color: #f8f9fa; border-left: 4px solid #007bff; padding: 20px; margin: 20px 0;">
           <h3 style="margin: 0 0 15px 0; color: #333;">Cancellation Details:</h3>

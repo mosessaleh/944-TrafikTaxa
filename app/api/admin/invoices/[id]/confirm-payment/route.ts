@@ -55,7 +55,7 @@ export async function POST(
 ) {
   try {
     const me = await getUserFromCookie();
-    if (!me || me.role !== 'ADMIN') {
+    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
       await createAuditLog(
         'admin_unauthorized_access_attempt',
         'unknown',
@@ -161,7 +161,7 @@ export async function POST(
               paymentRef: paymentRef,
               paymentDate: new Date(),
               paymentAmount: paymentAmount,
-              paymentNotes: `Payment manually confirmed by admin ${me.firstName} ${me.lastName} (ID: ${me.id})`,
+              paymentNotes: `Payment manually confirmed by admin ${(me as any).firstName} ${(me as any).lastName} (ID: ${me.id})`,
               confirmedBy: me.id,
               confirmedAt: new Date(),
               receiptNumber: receiptNumber,

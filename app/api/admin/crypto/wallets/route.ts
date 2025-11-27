@@ -12,8 +12,8 @@ export async function GET() {
     console.log('Forbidden: no user');
     return NextResponse.json({ error: "forbidden - no user" }, { status: 403 });
   }
-  if (me.role !== "ADMIN") {
-    console.log('Forbidden: user not admin, role:', me.role);
+  if (me.type !== 'user' || (me as any).role !== "ADMIN") {
+    console.log('Forbidden: user not admin, role:', (me as any).role);
     return NextResponse.json({ error: "forbidden - not admin" }, { status: 403 });
   }
   const wallets = await prisma.cryptoWallet.findMany({
@@ -30,9 +30,9 @@ export async function POST(request: Request) {
     console.log('Forbidden: no user');
     return NextResponse.json({ error: "forbidden - no user" }, { status: 403 });
   }
-  console.log('Role check: me.role =', me.role, 'expected ADMIN');
-  if (me.role !== "ADMIN") {
-    console.log('Forbidden: user not admin, role:', me.role);
+  console.log('Role check: me.role =', (me as any).role, 'expected ADMIN');
+  if (me.type !== 'user' || (me as any).role !== "ADMIN") {
+    console.log('Forbidden: user not admin, role:', (me as any).role);
     return NextResponse.json({ error: "forbidden - not admin" }, { status: 403 });
   }
   const body = await request.json().catch(() => ({}));

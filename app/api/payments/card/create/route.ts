@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
     }
 
-    console.log("card/create: User authenticated", { userId: me.id, email: me.email });
+    console.log("card/create: User authenticated", { userId: me.id, email: (me as any).email });
 
     const raw = await request.json().catch(() => ({}));
     console.log("card/create: Received payload", raw);
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       }
 
       // Authorization: ensure current user owns the booking or is admin
-      if (booking.userId !== me.id && me.role !== "ADMIN") {
+      if (booking.userId !== me.id && (me.type !== 'user' || (me as any).role !== "ADMIN")) {
         console.error("card/create: Access denied for booking", {
           bookingId: booking.id,
           userId: me.id,
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
       }
 
       // Authorization: ensure current user owns the invoice or is admin
-      if (invoice.userId !== me.id && me.role !== "ADMIN") {
+      if (invoice.userId !== me.id && (me.type !== 'user' || (me as any).role !== "ADMIN")) {
         console.error("card/create: Access denied for invoice", {
           invoiceId: invoice.id,
           userId: me.id,
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
       userId: me.id.toString(),
       bookingId: booking ? booking.id.toString() : "",
       invoiceId: invoice ? invoice.id.toString() : "",
-      userEmail: me.email || "",
+      userEmail: (me as any).email || "",
       expectedAmountDkk: amountDkk.toFixed(2),
     }, idempotencyKey);
 

@@ -3,7 +3,7 @@ import AdminSidebar from './sidebar';
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const me = await getUserFromCookie();
-  const isAdmin = !!me && me.role === 'ADMIN';
+  const isAdmin = !!me && me.type === 'user' && (me as any).role === 'ADMIN';
 
   if (!isAdmin) {
       // If not admin, we just render children which will likely show the access denied message from page.tsx

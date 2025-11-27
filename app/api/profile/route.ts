@@ -42,7 +42,7 @@ export async function PUT(req: Request){
   }
 
   const data = Schema.parse(await req.json());
-  const emailChanged = data.email.toLowerCase() !== me.email.toLowerCase();
+  const emailChanged = data.email.toLowerCase() !== (me as any).email.toLowerCase();
   const update:any = { firstName:data.firstName, lastName:data.lastName, phone:data.phone, address:data.address };
   if(emailChanged){ update.pendingEmail = data.email; update.pendingEmailCode = String(Math.floor(100000+Math.random()*900000)); update.pendingEmailExpires = new Date(Date.now()+1000*60*30); }
   await prisma.user.update({ where:{ id: me.id }, data: update });

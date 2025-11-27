@@ -35,7 +35,7 @@ export async function GET(
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    if (booking.userId !== me.id && me.role !== 'ADMIN') {
+    if (booking.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 

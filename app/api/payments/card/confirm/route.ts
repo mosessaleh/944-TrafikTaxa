@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
     }
 
-    console.log("card/confirm: User authenticated", { userId: me.id, email: me.email });
+    console.log("card/confirm: User authenticated", { userId: me.id, email: (me as any).email });
 
     const raw = await request.json().catch(() => ({}));
     console.log("card/confirm: Received payload", raw);
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
           metadata: {
             userId: me.id.toString(),
             bookingId: booking.id.toString(),
-            userEmail: me.email || '',
+            userEmail: (me as any).email || '',
             mock: 'true'
           }
         });
@@ -299,7 +299,7 @@ export async function POST(request: Request) {
     }
 
     // Check authorization
-    if (booking.userId !== me.id && me.role !== 'ADMIN') {
+    if (booking.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
       console.error("card/confirm: Access denied for booking", { bookingId: booking.id, userId: me.id });
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -410,7 +410,7 @@ export async function POST(request: Request) {
       await notifyAdmin(`New Booking Payment`, `
         <p>A new booking has been created with successful payment:</p>
         <ul>
-          <li><strong>User:</strong> ${me.firstName} ${me.lastName} (${me.email})</li>
+          <li><strong>User:</strong> ${(me as any).firstName} ${(me as any).lastName} (${(me as any).email})</li>
           <li><strong>Booking ID:</strong> ${booking.id}</li>
           <li><strong>Amount:</strong> ${amountDkk} DKK</li>
           <li><strong>Payment Method:</strong> ${paymentIntentId.startsWith('pi_mock_') ? 'Mock Card Payment' : 'Card Payment'}</li>

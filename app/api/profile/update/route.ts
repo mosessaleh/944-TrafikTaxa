@@ -48,7 +48,7 @@ export async function POST(req: Request){
     const body = await req.json();
     const data = Schema.parse(body);
 
-    const emailChanged = data.email.toLowerCase() !== me.email.toLowerCase();
+    const emailChanged = data.email.toLowerCase() !== (me as any).email.toLowerCase();
 
     // Always update profile fields
     let pendingNotice = false;

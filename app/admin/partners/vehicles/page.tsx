@@ -18,5 +18,13 @@ export default async function AdminPartnerVehiclesPage() {
     orderBy: { createdAt: 'desc' }
   });
 
-  return <AdminPartnerVehiclesClient initialVehicles={vehicles} />;
+  // Convert dates to strings for compatibility
+  const vehiclesWithStringDates = vehicles.map(vehicle => ({
+    ...vehicle,
+    createdAt: vehicle.createdAt.toISOString(),
+    updatedAt: vehicle.updatedAt.toISOString(),
+    lastLocationUpdate: (vehicle as any).lastLocationUpdate?.toISOString() || null,
+  }));
+
+  return <AdminPartnerVehiclesClient initialVehicles={vehiclesWithStringDates} />;
 }

@@ -39,7 +39,7 @@ export async function POST(
     }
 
     // Check if user is admin or the complaint owner
-    const isAdmin = user.role === 'ADMIN';
+    const isAdmin = user.type === 'user' && (user as any).role === 'ADMIN';
     const isOwner = complaint.userId === user.id;
     console.log('User check:', { userId: user.id, complaintUserId: complaint.userId, isAdmin, isOwner });
 

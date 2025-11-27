@@ -72,7 +72,7 @@ export async function POST(
 ) {
   try {
     const me = await getUserFromCookie();
-    if (!me || me.role !== 'ADMIN') {
+    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
       await createAuditLog(
         'admin_unauthorized_email_attempt',
         'unknown',

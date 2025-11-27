@@ -21,7 +21,7 @@ export async function POST(req: Request){
   if (!me) {
     return NextResponse.json({ ok:false, error:'Unauthorized' }, { status:401 });
   }
-  if (me.role !== 'ADMIN') {
+  if (me.type !== 'user' || (me as any).role !== 'ADMIN') {
     return NextResponse.json({ ok:false, error:'Forbidden' }, { status:403 });
   }
 

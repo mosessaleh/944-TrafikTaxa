@@ -17,7 +17,7 @@ import {
 
 export default async function AdminHome(){
   const me = await getUserFromCookie();
-  if (!me || me.role !== 'ADMIN'){
+  if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN'){
     return (
       <div className="max-w-xl mx-auto grid gap-4">
         <h1 className="text-3xl font-bold">Admin</h1>
@@ -153,7 +153,7 @@ export default async function AdminHome(){
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-1">Welcome back, {me.firstName}! Here's what's happening today.</p>
+          <p className="text-gray-500 text-sm mt-1">Welcome back, {(me as any).firstName}! Here's what's happening today.</p>
         </div>
         <div className="flex items-center gap-3">
             <div className="bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-600 shadow-sm flex items-center gap-2">

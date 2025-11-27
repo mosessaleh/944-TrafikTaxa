@@ -37,14 +37,14 @@ export async function POST(request: Request) {
         },
       });
 
-      if (me.email) {
+      if ((me as any).email) {
         const paymentDetails = {
           amount: amountDkk,
           method: 'Revolut',
           transactionId: paymentId,
           bookingId: 'N/A',
         };
-        await notifyUserPaymentReceived(me.email, me.firstName, paymentDetails).catch(() => {});
+        await notifyUserPaymentReceived((me as any).email, (me as any).firstName, paymentDetails).catch(() => {});
       }
 
       return NextResponse.json({

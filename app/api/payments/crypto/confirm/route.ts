@@ -95,14 +95,14 @@ export async function POST(request: Request) {
     });
 
     // Notify user (payment confirmed)
-    if (me.email) {
+    if ((me as any).email) {
       const paymentDetails = {
         amount: amountDkk,
         method: `${symbol.toUpperCase()} (${network})`,
         transactionId: pay.id,
         bookingId: bookingId,
       };
-      await notifyUserPaymentReceived(me.email, me.firstName, paymentDetails).catch(() => {});
+      await notifyUserPaymentReceived((me as any).email, (me as any).firstName, paymentDetails).catch(() => {});
     }
 
     // Notify admin
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
     const htmlAdmin = `
       <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto">
         <h2>Crypto Payment Confirmed</h2>
-        <p>User ID: ${me.id}${me.email ? ` (${me.email})` : ""}</p>
+        <p>User ID: ${me.id}${(me as any).email ? ` (${(me as any).email})` : ""}</p>
         <p>Symbol: ${symbol.toUpperCase()} — Network: ${network}</p>
         <p>Address: ${address}</p>
         <p>Amount: ${amountDkk} DKK (~ ${amountCoin} ${symbol.toUpperCase()})</p>

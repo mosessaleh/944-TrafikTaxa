@@ -6,7 +6,7 @@ import RiskManagementClient from '../../../components/RiskManagementClient';
 
 export default async function AdminRiskManagement() {
   const me = await getUserFromCookie();
-  if (!me || me.role !== 'ADMIN') {
+  if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
     return (
       <div className="max-w-xl mx-auto grid gap-4">
         <h1 className="text-3xl font-bold">Admin</h1>

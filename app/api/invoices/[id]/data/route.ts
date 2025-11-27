@@ -40,9 +40,9 @@ export async function GET(
     }
 
     console.log('🔒 Checking authorization...');
-    console.log('👤 User ID:', me.id, 'Invoice user ID:', invoice.userId, 'User role:', me.role);
+    console.log('👤 User ID:', me.id, 'Invoice user ID:', invoice.userId, 'User role:', (me as any).role);
     
-    if (invoice.userId !== me.id && me.role !== 'ADMIN') {
+    if (invoice.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
       console.log('❌ Access denied');
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }

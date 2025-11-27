@@ -28,7 +28,7 @@ interface AdminPaymentItem {
 export async function GET(request: NextRequest) {
   try {
     const me = await getUserFromCookie();
-    if (!me || me.role !== 'ADMIN') {
+    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

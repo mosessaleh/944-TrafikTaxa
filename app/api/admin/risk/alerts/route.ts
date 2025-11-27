@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   try {
     // Optional authentication - can be called by cron jobs
     const user = await getUserFromCookie();
-    const isAdmin = user && user.role === 'ADMIN';
+    const isAdmin = user && user.type === 'user' && (user as any).role === 'ADMIN';
 
     // Get high-risk bookings that need attention
     const highRiskBookings = await getHighRiskBookings(10); // Top 10 high-risk bookings

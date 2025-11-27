@@ -11,7 +11,7 @@ export async function POST(
 ) {
   try {
     const user = await getUserFromCookie();
-    if (!user || user.role !== 'ADMIN') {
+    if (!user || user.type !== 'user' || (user as any).role !== 'ADMIN') {
       return NextResponse.json(
         { ok: false, error: 'Admin access required' },
         { status: 403 }

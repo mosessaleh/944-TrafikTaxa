@@ -19,9 +19,9 @@ export async function POST(
 
     console.log('✅ User authenticated:', { 
       userId: me.id, 
-      email: me.email, 
-      role: me.role, 
-      canPayByInvoice: me.canPayByInvoice 
+      email: (me as any).email,
+      role: (me as any).role,
+      canPayByInvoice: (me as any).canPayByInvoice
     });
 
     // 2. Parse booking ID
@@ -65,7 +65,7 @@ export async function POST(
     console.log('✅ Booking found:', { id: booking.id, userId: booking.userId });
 
     // 5. Check authorization
-    if (booking.userId !== me.id && me.role !== 'ADMIN') {
+    if (booking.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
       console.log('❌ Access denied for booking:', { bookingId, userId: me.id });
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
@@ -79,11 +79,11 @@ export async function POST(
       console.log('💰 Processing INVOICE payment method');
 
       // Check invoice permissions
-      if (!me.canPayByInvoice && me.role !== 'ADMIN') {
+      if (!(me as any).canPayByInvoice && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
         console.log('❌ Invoice payment not allowed. User details:', {
           userId: me.id,
-          canPayByInvoice: me.canPayByInvoice,
-          role: me.role
+          canPayByInvoice: (me as any).canPayByInvoice,
+          role: (me as any).role
         });
         return NextResponse.json({
           error: 'Invoice payment not available for your account'

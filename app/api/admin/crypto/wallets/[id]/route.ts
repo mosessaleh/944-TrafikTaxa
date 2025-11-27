@@ -6,7 +6,7 @@ type Params = { params: { id: string } };
 
 export async function PUT(request: Request, { params }: Params) {
   const me = await getUserFromCookie();
-  if (!me || me.role !== "ADMIN") {
+  if (!me || me.type !== 'user' || (me as any).role !== "ADMIN") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const body = await request.json().catch(() => ({}));
@@ -21,7 +21,7 @@ export async function PUT(request: Request, { params }: Params) {
 
 export async function DELETE(request: Request, { params }: Params) {
   const me = await getUserFromCookie();
-  if (!me || me.role !== "ADMIN") {
+  if (!me || me.type !== 'user' || (me as any).role !== "ADMIN") {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
   const id = params.id;
