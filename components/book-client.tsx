@@ -46,7 +46,7 @@ export default function BookClient(){
   const [dropoffSel, setDropoffSel] = useState<Suggestion|null>(null);
   const [riderName, setRiderName] = useState('');
   const [vehicleId, setVehicleId] = useState<number|null>(null);
-  const [whenType, setWhenType] = useState<'now'|'later'>('now');
+  const [whenType, setWhenType] = useState<'now'|'later'>('later');
   const [when, setWhen] = useState(() => new Date(Date.now()+15*60*1000).toISOString().slice(0,16));
 
   // Quote state
@@ -683,6 +683,19 @@ export default function BookClient(){
 
         {/* Auth banners */}
         <div className="space-y-3 mb-6">
+          {/* Booking policy notification */}
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-start gap-3">
+            <div className="text-2xl leading-none">ℹ️</div>
+            <div>
+              <h3 className="text-sm font-semibold text-blue-800">Booking Information</h3>
+              <ul className="text-xs sm:text-sm text-blue-700 mt-1 space-y-1">
+                <li>• Instant booking is currently disabled. Only scheduled bookings are available.</li>
+                <li>• Your booking will be confirmed within 10 minutes.</li>
+                <li>• Please note that there is a possibility the trip may be canceled due to vehicle unavailability.</li>
+              </ul>
+            </div>
+          </div>
+
           {!me && !profileError && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
               <div className="text-2xl leading-none">🔐</div>
@@ -878,14 +891,13 @@ export default function BookClient(){
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                         <span className="text-indigo-600">🕐</span>
-                        When to pick up
+                        Schedule pickup time
                       </label>
                       <select
                         value={whenType}
                         onChange={e => setWhenType(e.target.value as 'now' | 'later')}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                       >
-                        <option value="now">🚀 As soon as possible</option>
                         <option value="later">📅 Schedule for later</option>
                       </select>
                     </div>

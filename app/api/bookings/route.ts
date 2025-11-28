@@ -248,6 +248,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Only allow scheduled bookings (deferred bookings)
+    if (!validatedData.scheduled) {
+      return NextResponse.json(
+        { ok: false, error: 'Instant booking is currently disabled. Please schedule your booking for later.' },
+        { status: 400 }
+      );
+    }
+
     // Calculate distance and duration
     const { distanceKm, durationMin } = await safeEstimateDistance(
       {
