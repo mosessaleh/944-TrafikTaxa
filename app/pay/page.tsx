@@ -1,6 +1,7 @@
 "use client";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, Suspense, useEffect } from "react";
+import PaymentMethodsClient from "@/components/payment-methods-client";
 
 interface PaymentMethod {
   id: number;
@@ -27,6 +28,8 @@ function PayIndexContent(){
   const [method, setMethod] = useState<string|null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userPaymentMethods, setUserPaymentMethods] = useState<any[]>([]);
+  const [showAddCardModal, setShowAddCardModal] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -118,6 +121,17 @@ function PayIndexContent(){
         const data = await response.json();
         if (data.success) {
           setPaymentMethods(data.paymentMethods);
+        }
+
+        // Fetch user payment methods
+        const userMethodsResponse = await fetch('/api/user/payment-methods', {
+          credentials: 'include'
+        });
+        if (userMethodsResponse.ok) {
+          const userMethodsData = await userMethodsResponse.json();
+          if (userMethodsData.success) {
+            setUserPaymentMethods(userMethodsData.paymentMethods || []);
+          }
         }
       } catch (error) {
         console.error('Error fetching payment data:', error);
@@ -251,11 +265,20 @@ function PayIndexContent(){
             const isSelected = method === paymentMethod.key;
             let ringColor = "ring-blue-500";
             let bgColor = "bg-blue-50";
+            let isDisabled = false;
 
             switch (paymentMethod.key) {
               case "card":
-                ringColor = "ring-blue-500";
-                bgColor = "bg-blue-50";
+                // Check if user has saved card payment methods
+                const hasSavedCards = userPaymentMethods.filter((pm: any) => pm.type === 'card' && pm.isActive).length > 0;
+                if (!hasSavedCards) {
+                  isDisabled = true;
+                  ringColor = "ring-amber-500";
+                  bgColor = "bg-amber-50";
+                } else {
+                  ringColor = "ring-blue-500";
+                  bgColor = "bg-blue-50";
+                }
                 break;
               case "crypto":
                 ringColor = "ring-orange-500";
@@ -278,8 +301,19 @@ function PayIndexContent(){
             return (
               <button
                 key={paymentMethod.key}
-                onClick={() => handlePaymentMethod(paymentMethod.key)}
-                className={`rounded-2xl border p-6 text-left transition hover:shadow-md hover:scale-105 ${isSelected ? `ring-2 ${ringColor} ${bgColor}` : ""}`}
+                onClick={() => {
+                  if (paymentMethod.key === 'card' && isDisabled) {
+                    setShowAddCardModal(true);
+                  } else {
+                    handlePaymentMethod(paymentMethod.key);
+                  }
+                }}
+                disabled={isDisabled}
+                className={`rounded-2xl border p-6 text-left transition hover:shadow-md hover:scale-105 ${
+                  isSelected ? `ring-2 ${ringColor} ${bgColor}` : ""
+                } ${
+                  isDisabled ? 'opacity-60 cursor-not-allowed' : ''
+                }`}
               >
                 <div className="text-lg font-semibold">
                   {paymentMethod.key === "card" && "💳"}
@@ -289,16 +323,29 @@ function PayIndexContent(){
                   {paymentMethod.key === "invoice" && "📄"}
                   {paymentMethod.title}
                 </div>
-                <div className="text-sm text-gray-500 mt-1">{paymentMethod.description}</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {paymentMethod.key === "card" && isDisabled
+                    ? "Add a card to your profile to use this payment method"
+                    : paymentMethod.description
+                  }
+                  {paymentMethod.key === "crypto" && paymentMethod.description}
+                  {paymentMethod.key === "paypal" && paymentMethod.description}
+                  {paymentMethod.key === "revolut" && paymentMethod.description}
+                  {paymentMethod.key === "invoice" && paymentMethod.description}
+                </div>
                 <div className="text-xs text-gray-400 mt-2">
-                  {paymentMethod.key === "card" && "Secure payment through Stripe or Revolut"}
+                  {paymentMethod.key === "card" && !isDisabled && "Secure payment through Stripe or Revolut"}
+                  {paymentMethod.key === "card" && isDisabled && "Click to add your first card"}
                   {paymentMethod.key === "crypto" && "Direct wallet payments"}
                   {paymentMethod.key === "paypal" && "Secure PayPal checkout"}
                   {paymentMethod.key === "revolut" && "European banking integration"}
                   {paymentMethod.key === "invoice" && "Payment by invoice (requires approval)"}
                 </div>
-                <div className="text-xs text-green-600 mt-1 font-medium">
-                  {paymentMethod.key === "card" && "✓ Instant processing"}
+                <div className={`text-xs mt-1 font-medium ${
+                  paymentMethod.key === "card" && isDisabled ? 'text-amber-600' : 'text-green-600'
+                }`}>
+                  {paymentMethod.key === "card" && !isDisabled && "✓ Instant processing"}
+                  {paymentMethod.key === "card" && isDisabled && "⚠️ Card required"}
                   {paymentMethod.key === "crypto" && "✓ Lower fees"}
                   {paymentMethod.key === "paypal" && "✓ Buyer protection"}
                   {paymentMethod.key === "revolut" && "✓ Bank-grade security"}
@@ -311,8 +358,33 @@ function PayIndexContent(){
       )}
 
       <div className="text-center text-sm text-gray-600">
-        Your booking will be confirmed only after successful payment.
+        Payment will be collected automatically after trip completion.
       </div>
+
+      {/* Add Card Modal */}
+      {showAddCardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Add Payment Method</h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Add a card to enable instant payments after trip completion.
+              </p>
+            </div>
+
+            <div className="relative">
+              <button
+                onClick={() => setShowAddCardModal(false)}
+                className="absolute top-2 right-2 text-gray-400 hover:text-gray-600 text-xl"
+                aria-label="Close"
+              >
+                ×
+              </button>
+              <PaymentMethodsClient />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -67,6 +67,7 @@ model User {
   resetExpires        DateTime?
   createdAt           DateTime  @default(now())
   canPayByInvoice     Boolean   @default(false)
+  stripeCustomerId    String?   @unique // Stripe customer ID for payment processing
 
   rides        Ride[]
   favorites    FavoriteAddress[]
@@ -74,6 +75,7 @@ model User {
   invoices     Invoice[]
   notifications Notification[]
   notificationSettings NotificationSettings?
+  paymentMethods UserPaymentMethod[]
 
   // Optimized indexes for common queries
   @@index([role])
@@ -82,6 +84,27 @@ model User {
   @@index([role, emailVerified])          // For admin queries
   @@index([createdAt])                     // For user listing
   @@index([emailVerified, canPayByInvoice]) // For user access queries
+}
+
+model UserPaymentMethod {
+  id          Int      @id @default(autoincrement())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      Int
+  type        String   // 'card', 'paypal', 'revolut'
+  provider    String   // 'stripe', 'paypal', 'revolut'
+  token       String   // Encrypted payment token
+  last4       String?  // Last 4 digits for cards
+  expiryMonth Int?
+  expiryYear  Int?
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rides Ride[]
+
+  @@index([userId, isActive])
+  @@index([userId, isDefault])
 }
 
 model VehicleType {
@@ -158,6 +181,13 @@ model Ride {
   car            String?
   createdAt      DateTime   @default(now())
   paymentMethod  String?
+  savedPaymentMethodId Int?
+
+  // Payment Processing Fields
+  paymentRetryCount    Int?         @default(0)    // Number of payment retry attempts
+  paymentNextRetry     DateTime?                   // Next scheduled retry time
+  paymentLastAttempt   DateTime?                   // Last payment attempt timestamp
+  paymentFailureReason String?                     // Reason for last payment failure
 
   // Risk Management Fields
   riskScore      Float?     @default(0) // 0-100 risk score
@@ -172,6 +202,7 @@ model Ride {
 
   complaints Complaint[]
   invoices   Invoice[]
+  savedPaymentMethod UserPaymentMethod? @relation(fields: [savedPaymentMethodId], references: [id])
 
   // Optimized indexes for common queries
   @@index([userId])
@@ -180,6 +211,7 @@ model Ride {
   @@index([paymentStatus])
   @@index([pickupTime])
   @@index([createdAt])
+  @@index([savedPaymentMethodId])
   @@index([riskScore])
   @@index([riskLevel])
   @@index([riskReviewed])

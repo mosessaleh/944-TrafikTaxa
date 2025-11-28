@@ -1,6 +1,7 @@
 import { getUserFromCookie } from '@/lib/auth';
 import Link from 'next/link';
 import ProfileEditClient from '@/components/profile-edit-client';
+import PaymentMethodsClient from '@/components/payment-methods-client';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -60,6 +61,8 @@ export default async function ProfilePage(){
         address: user.address,
         pendingEmail: user.pendingEmail || null
       }} />
+
+      <PaymentMethodsClient />
     </div>
   );
 }

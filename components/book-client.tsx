@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import useSWR, { mutate } from 'swr';
 // Add Leaflet CSS dynamically
 if (typeof window !== 'undefined') {
@@ -28,16 +29,17 @@ type FavItem = { id:number; label:string; address:string; lat:number|null; lon:n
 type Me = { id:number; firstName:string; lastName:string; email?:string; role?:string } | null;
 
 export default function BookClient(){
-  const { data: profileData, error: profileError } = useSWR('/api/profile', (url) =>
-    fetch(url, { credentials: 'include' }).then(r => r.json()).then(j => j?.me ? {
-      id: j.me.id,
-      firstName: j.me.firstName,
-      lastName: j.me.lastName,
-      email: j.me.email,
-      role: j.me.role
-    } : null)
-  );
-  const me = profileData || null;
+   const router = useRouter();
+   const { data: profileData, error: profileError } = useSWR('/api/profile', (url) =>
+     fetch(url, { credentials: 'include' }).then(r => r.json()).then(j => j?.me ? {
+       id: j.me.id,
+       firstName: j.me.firstName,
+       lastName: j.me.lastName,
+       email: j.me.email,
+       role: j.me.role
+     } : null)
+   );
+   const me = profileData || null;
 
   // Booking form state
   const [pickup, setPickup] = useState('');
@@ -87,6 +89,7 @@ export default function BookClient(){
     fetch(url, { credentials: 'include' }).then(r => r.status === 200 ? r.json().then(j => j?.ok ? j.favorites || [] : []) : [])
   );
   const favorites = favoritesData || [];
+
 
   const bothSelected = !!(pickupSel && dropoffSel);
   const quotePayload = useMemo(() => ({
@@ -525,7 +528,7 @@ export default function BookClient(){
     return () => { if(qTimer.current) clearTimeout(qTimer.current); };
   }, [bothSelected, quotePayload, vehicleId]);
 
-  async function handleBookAndPay(){
+  async function handleBookAndConfirm(){
     if(!quote || !me) return;
 
     setBookingLoading(true);
@@ -542,7 +545,7 @@ export default function BookClient(){
         vehicleTypeId: vehicleId!,
         scheduled: whenType === 'later',
         pickupTime: whenType === 'later' ? new Date(when).toISOString() : new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        amountDkk: quote.price
+        paymentMethod: 'card' // Default to card, will be selected on payment page
       };
 
       const response = await fetch('/api/bookings', {
@@ -557,12 +560,9 @@ export default function BookClient(){
         throw new Error(data.error || 'Failed to create booking');
       }
 
-      const bookingId = data.ride.id.toString();
+      // Redirect to payment method selection page
+      router.push(`/pay?booking_id=${data.ride.id}&amount_dkk=${data.ride.price}`);
 
-      // Redirect to payment page with booking details
-      const redirectUrl = `/pay?amount_dkk=${encodeURIComponent(quote.price.toString())}&booking_id=${encodeURIComponent(bookingId)}`;
-      console.log("BookClient: Created booking and redirecting to payment", { bookingId, redirectUrl });
-      window.location.href = redirectUrl;
     }catch(e:any){
       console.error("BookClient: Booking failed", e);
       alert(e?.message||'Failed to create booking');
@@ -918,6 +918,7 @@ export default function BookClient(){
                   </div>
                 </div>
 
+
                 {/* CTA */}
                 <div className="pt-4 border-t border-slate-200">
                   <div className="flex flex-col gap-3">
@@ -937,22 +938,13 @@ export default function BookClient(){
                       {me && quote && (
                         <span className="flex items-center gap-1 text-emerald-600">
                           <span>✅</span>
-                          All set – you can confirm and go to payment.
+                          All set – you can confirm your booking.
                         </span>
                       )}
                     </div>
 
                     <button
-                      onClick={() => {
-                        console.log("Book and Pay clicked", {
-                          me: !!me,
-                          quote: !!quote,
-                          qLoading,
-                          bothSelected,
-                          vehicleId
-                        });
-                        handleBookAndPay();
-                      }}
+                      onClick={handleBookAndConfirm}
                       disabled={
                         !me ||
                         profileError ||
@@ -981,8 +973,8 @@ export default function BookClient(){
                         </>
                       ) : (
                         <>
-                          <span>💳</span>
-                          Book and pay
+                          <span>✅</span>
+                          Confirm booking
                         </>
                       )}
                     </button>

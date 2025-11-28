@@ -6,6 +6,7 @@ import useSWR from 'swr';
 import ComplaintModal from './ComplaintModal';
 import ComplaintConversationModal from './ComplaintConversationModal';
 import ProfileEditClient from './profile-edit-client';
+import PaymentMethodsClient from './payment-methods-client';
 
 // Invoice Actions Component
 function InvoiceActions({ bookingId }: { bookingId: number }) {
@@ -150,8 +151,8 @@ interface NotificationSettings {
 export default function AccountClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialTab = searchParams.get('tab') as 'profile' | 'history' | 'favorites' | 'invoices' | 'notifications' || 'profile';
-  const [tab, setTab] = useState<'profile' | 'history' | 'favorites' | 'invoices' | 'notifications'>(initialTab);
+  const initialTab = searchParams.get('tab') as 'profile' | 'history' | 'favorites' | 'payment-methods' | 'invoices' | 'notifications' || 'profile';
+  const [tab, setTab] = useState<'profile' | 'history' | 'favorites' | 'payment-methods' | 'invoices' | 'notifications'>(initialTab);
   const [me, setMe] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
@@ -667,8 +668,9 @@ export default function AccountClient() {
               {[
                 { id: 'profile', label: 'Profile', icon: '👤' },
                 { id: 'history', label: 'Booking History', icon: '📋' },
-                { id: 'favorites', label: 'Favorite Addresses', icon: '⭐' },
+                { id: 'payment-methods', label: 'Payment Methods', icon: '💳' },
                 { id: 'invoices', label: 'Invoices', icon: '📄' },
+                { id: 'favorites', label: 'Favorite Addresses', icon: '⭐' },
                 { id: 'notifications', label: 'Notification Preferences', icon: '🔔' },
               ].map((t) => (
                 <button
@@ -1127,6 +1129,16 @@ export default function AccountClient() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === 'payment-methods' && (
+            <div className="p-6">
+              <h2 className="text-xl font-semibold text-slate-800 mb-6">Payment Methods</h2>
+              <p className="text-sm text-slate-600 mb-6">
+                Manage your saved payment methods for automatic post-trip payments.
+              </p>
+              <PaymentMethodsClient />
             </div>
           )}
 

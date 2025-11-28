@@ -256,6 +256,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check payment method requirements - validation moved to client side
+    const paymentMethod = rawData.paymentMethod || 'card';
+
     // Calculate distance and duration
     const { distanceKm, durationMin } = await safeEstimateDistance(
       {
@@ -274,7 +277,35 @@ export async function POST(request: NextRequest) {
     const pickupTime = new Date(validatedData.pickupTime);
     const price = await computePrice(distanceKm, durationMin, pickupTime, validatedData.vehicleTypeId);
 
-    // Create booking
+    // Get selected payment method for booking association
+    let selectedPaymentMethodId: number | null = null;
+    if (paymentMethod === 'card') {
+      // Find the default or first active card payment method
+      const defaultCard = await (prisma as any).userPaymentMethod.findFirst({
+        where: {
+          userId: user.id,
+          type: 'card',
+          isActive: true,
+          isDefault: true
+        }
+      });
+
+      if (defaultCard) {
+        selectedPaymentMethodId = defaultCard.id;
+      } else {
+        // Get first active card if no default
+        const firstCard = await (prisma as any).userPaymentMethod.findFirst({
+          where: {
+            userId: user.id,
+            type: 'card',
+            isActive: true
+          }
+        });
+        selectedPaymentMethodId = firstCard?.id || null;
+      }
+    }
+
+    // Create booking with CONFIRMED status (no immediate payment)
     const booking = await prisma.ride.create({
       data: {
         userId: user.id,
@@ -287,8 +318,11 @@ export async function POST(request: NextRequest) {
         distanceKm: Number(distanceKm.toFixed(2)),
         durationMin,
         price,
-        status: 'PENDING',
-        vehicleTypeId: validatedData.vehicleTypeId
+        status: 'CONFIRMED', // Changed from PENDING
+        paymentStatus: 'PENDING_PAYMENT', // New status for post-trip payment
+        paymentMethod: paymentMethod,
+        vehicleTypeId: validatedData.vehicleTypeId,
+        ...(selectedPaymentMethodId && { savedPaymentMethodId: selectedPaymentMethodId })
       },
       include: {
         vehicleType: {
@@ -327,23 +361,25 @@ export async function POST(request: NextRequest) {
       // Fetch current cancellation fees from settings
       const settings = await prisma.settings.findFirst();
 
-      const title = validatedData.scheduled ? 'Scheduled booking' : 'Immediate booking';
+      const title = 'New scheduled booking (post-trip payment)';
       import('@/lib/email').then(({ sendEmail }) =>
         sendEmail(
           adminEmail,
           `${title} #${booking.id}`,
-          `<p>New booking details:</p>
+          `<p>New booking details (payment will be collected after trip completion):</p>
           <ul>
             <li><strong>Booking ID:</strong> ${booking.id}</li>
             <li><strong>Customer:</strong> ${(user as any).firstName} ${(user as any).lastName} (${(user as any).email})</li>
             <li><strong>Rider:</strong> ${booking.riderName}</li>
-            <li><strong>Vehicle:</strong> ${booking.vehicleType.title}</li>
+            <li><strong>Vehicle:</strong> ${(booking as any).vehicleType?.title || 'Standard'}</li>
             <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
             <li><strong>Dropoff:</strong> ${booking.dropoffAddress}</li>
             <li><strong>Time:</strong> ${booking.pickupTime.toISOString()}</li>
             <li><strong>Distance:</strong> ${booking.distanceKm} km</li>
             <li><strong>Duration:</strong> ${booking.durationMin} minutes</li>
             <li><strong>Price:</strong> ${booking.price} DKK</li>
+            <li><strong>Payment Method:</strong> ${paymentMethod}</li>
+            <li><strong>Status:</strong> CONFIRMED (payment pending after trip)</li>
           </ul>
           <h3>Cancellation Policy</h3>
           <p>Please inform the customer about our current cancellation policy:</p>
@@ -352,11 +388,6 @@ export async function POST(request: NextRequest) {
             <li><strong>1-2 hours before pickup:</strong> ${settings?.scheduledCancellationFee2 || 25}% cancellation fee</li>
             <li><strong>Less than 1 hour before pickup:</strong> ${settings?.scheduledCancellationFee3 || 50}% cancellation fee</li>
             <li><strong>After pickup time:</strong> No cancellation allowed</li>
-          </ul>
-          <h4>Immediate Bookings:</h4>
-          <ul>
-            <li><strong>After driver dispatch:</strong> ${settings?.immediateCancellationFee || 50} DKK fixed cancellation fee</li>
-            <li><strong>Before driver dispatch:</strong> No cancellation fee</li>
           </ul>`
         )
       ).catch((error) => {
@@ -374,8 +405,11 @@ export async function POST(request: NextRequest) {
         pickupTime: booking.pickupTime.toISOString(),
         price: booking.price,
         status: booking.status,
-        vehicleType: booking.vehicleType
-      }
+        paymentStatus: booking.paymentStatus,
+        paymentMethod: booking.paymentMethod,
+        vehicleType: (booking as any).vehicleType || { title: 'Standard', capacity: 4 }
+      },
+      message: 'Booking confirmed successfully. Payment will be collected after trip completion.'
     }, { status: 201 });
 
   } catch (error) {
