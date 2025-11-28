@@ -15,6 +15,7 @@ export default async function SiteNavbarServer(){
       lastName: String((meFull as any).lastName || ''),
       email: String((meFull as any).email || ''),
       role: (meFull as any).role || 'USER',
+      language: String((meFull as any).language || 'dk'),
       type: 'user'
     }
   ) : null;

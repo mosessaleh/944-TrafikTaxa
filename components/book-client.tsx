@@ -13,6 +13,14 @@ if (typeof window !== 'undefined') {
   }
 }
 import AddressAutocomplete, { Suggestion } from '@/components/address-autocomplete';
+import dkMessages from '@/messages/dk.json';
+import enMessages from '@/messages/en.json';
+
+// Translation messages
+const messages = {
+  dk: dkMessages,
+  en: enMessages
+};
 
 function Field({label, children}:{label:string; children:React.ReactNode}){
   return (<div className="grid gap-1"><div className="label">{label}</div>{children}</div>);
@@ -29,17 +37,33 @@ type FavItem = { id:number; label:string; address:string; lat:number|null; lon:n
 type Me = { id:number; firstName:string; lastName:string; email?:string; role?:string } | null;
 
 export default function BookClient(){
-   const router = useRouter();
-   const { data: profileData, error: profileError } = useSWR('/api/profile', (url) =>
-     fetch(url, { credentials: 'include' }).then(r => r.json()).then(j => j?.me ? {
-       id: j.me.id,
-       firstName: j.me.firstName,
-       lastName: j.me.lastName,
-       email: j.me.email,
-       role: j.me.role
-     } : null)
-   );
-   const me = profileData || null;
+    const router = useRouter();
+    const [language, setLanguage] = useState('dk');
+
+    useEffect(() => {
+      const saved = localStorage.getItem('language') || 'dk';
+      setLanguage(saved);
+    }, []);
+
+    const t = (key: string) => {
+      const keys = key.split('.');
+      let value: any = messages[language as keyof typeof messages];
+      for (const k of keys) {
+        value = value?.[k];
+      }
+      return value || key;
+    };
+
+    const { data: profileData, error: profileError } = useSWR('/api/profile', (url) =>
+      fetch(url, { credentials: 'include' }).then(r => r.json()).then(j => j?.me ? {
+        id: j.me.id,
+        firstName: j.me.firstName,
+        lastName: j.me.lastName,
+        email: j.me.email,
+        role: j.me.role
+      } : null)
+    );
+    const me = profileData || null;
 
   // Booking form state
   const [pickup, setPickup] = useState('');
@@ -635,17 +659,17 @@ export default function BookClient(){
         <div className="mb-8 flex flex-col md:flex-row md:items-end md:justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
-              Book your ride
+              {t('book.title')}
             </h1>
             <p className="mt-2 text-sm md:text-base text-slate-600">
-              Choose your pickup and destination, select the right vehicle, and see the price before you confirm.
+              {t('book.subtitle')}
             </p>
           </div>
           {quote && (
             <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
               <div>
                 <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                  Current estimate
+                  {t('book.current_estimate')}
                 </div>
                 <div className="flex items-center gap-2">
                   {quote.discountAmount && quote.discountAmount > 0 ? (
@@ -687,11 +711,11 @@ export default function BookClient(){
           <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-start gap-3">
             <div className="text-2xl leading-none">ℹ️</div>
             <div>
-              <h3 className="text-sm font-semibold text-blue-800">Booking Information</h3>
+              <h3 className="text-sm font-semibold text-blue-800">{t('book.booking_info')}</h3>
               <ul className="text-xs sm:text-sm text-blue-700 mt-1 space-y-1">
-                <li>• Instant booking is currently disabled. Only scheduled bookings are available.</li>
-                <li>• Your booking will be confirmed within 10 minutes.</li>
-                <li>• Please note that there is a possibility the trip may be canceled due to vehicle unavailability.</li>
+                {t('book.booking_info_items').map((item: string, i: number) => (
+                  <li key={i}>• {item}</li>
+                ))}
               </ul>
             </div>
           </div>
@@ -700,9 +724,9 @@ export default function BookClient(){
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
               <div className="text-2xl leading-none">🔐</div>
               <div>
-                <h3 className="text-sm font-semibold text-amber-800">Login required</h3>
+                <h3 className="text-sm font-semibold text-amber-800">{t('book.login_required')}</h3>
                 <p className="text-xs sm:text-sm text-amber-700 mt-1">
-                  You need to be logged in to complete your booking. Please sign in to continue.
+                  {t('book.login_required_desc')}
                 </p>
               </div>
             </div>
@@ -712,9 +736,9 @@ export default function BookClient(){
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 flex items-start gap-3">
               <div className="text-2xl leading-none">⚠️</div>
               <div>
-                <h3 className="text-sm font-semibold text-rose-800">Authentication error</h3>
+                <h3 className="text-sm font-semibold text-rose-800">{t('book.auth_error')}</h3>
                 <p className="text-xs sm:text-sm text-rose-700 mt-1">
-                  We couldn't verify your session. Try refreshing the page or logging in again.
+                  {t('book.auth_error_desc')}
                 </p>
               </div>
             </div>
@@ -729,10 +753,10 @@ export default function BookClient(){
               <div className="mb-5">
                 <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
                   <span className="text-cyan-600 text-xl">📍</span>
-                  Trip details
+                  {t('book.trip_details')}
                 </h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  Start with pickup and destination, then choose vehicle and time.
+                  {t('book.trip_details_desc')}
                 </p>
               </div>
 
@@ -742,7 +766,7 @@ export default function BookClient(){
                   <div className="flex items-center justify-between gap-3">
                     <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                       <span className="text-green-600">🚀</span>
-                      Pickup address
+                      {t('book.pickup_address')}
                     </label>
                     <div className="flex items-center gap-2">
                       <button
@@ -757,7 +781,7 @@ export default function BookClient(){
                         ) : (
                           <span>📍</span>
                         )}
-                        Use my location
+                        {t('book.use_my_location')}
                       </button>
                       <button
                         type="button"
@@ -765,7 +789,7 @@ export default function BookClient(){
                         className="text-xs text-cyan-600 hover:text-cyan-700 font-medium inline-flex items-center gap-1"
                       >
                         <span>⭐</span>
-                        Favorites
+                        {t('book.favorites')}
                       </button>
                     </div>
                   </div>
@@ -810,7 +834,7 @@ export default function BookClient(){
                   <div className="flex items-center justify-between gap-3">
                     <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                       <span className="text-red-600">🎯</span>
-                      Dropoff address
+                      {t('book.dropoff_address')}
                     </label>
                     <button
                       type="button"
@@ -818,7 +842,7 @@ export default function BookClient(){
                       className="text-xs text-cyan-600 hover:text-cyan-700 font-medium inline-flex items-center gap-1"
                     >
                       <span>⭐</span>
-                      Favorites
+                      {t('book.favorites')}
                     </button>
                   </div>
                   <div className="flex gap-3">
@@ -858,7 +882,7 @@ export default function BookClient(){
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                         <span className="text-purple-600">🚙</span>
-                        Vehicle type
+                        {t('book.vehicle_type')}
                       </label>
                       <select
                         value={vehicleId ?? ''}
@@ -875,12 +899,12 @@ export default function BookClient(){
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                         <span className="text-blue-600">👤</span>
-                        Passenger name
+                        {t('book.passenger_name')}
                       </label>
                       <input
                         value={riderName}
                         onChange={e => setRiderName(e.target.value)}
-                        placeholder="Who is the ride for?"
+                        placeholder={t('book.passenger_placeholder')}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                       />
                     </div>
@@ -891,21 +915,21 @@ export default function BookClient(){
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                         <span className="text-indigo-600">🕐</span>
-                        Schedule pickup time
+                        {t('book.schedule_pickup')}
                       </label>
                       <select
                         value={whenType}
                         onChange={e => setWhenType(e.target.value as 'now' | 'later')}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                       >
-                        <option value="later">📅 Schedule for later</option>
+                        <option value="later">📅 {t('book.schedule_later')}</option>
                       </select>
                     </div>
                     {whenType === 'later' && (
                       <div className="space-y-2">
                         <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
                           <span className="text-emerald-600">📆</span>
-                          Pickup date & time
+                          {t('book.pickup_datetime')}
                         </label>
                         <input
                           type="datetime-local"
@@ -926,19 +950,19 @@ export default function BookClient(){
                       {!me && !profileError && (
                         <span className="flex items-center gap-1 text-amber-600">
                           <span>⚠️</span>
-                          Login required to confirm your booking.
+                          {t('book.login_required_booking')}
                         </span>
                       )}
                       {profileError && (
                         <span className="flex items-center gap-1 text-red-600">
                           <span>❌</span>
-                          There is a problem with your session.
+                          {t('book.session_problem')}
                         </span>
                       )}
                       {me && quote && (
                         <span className="flex items-center gap-1 text-emerald-600">
                           <span>✅</span>
-                          All set – you can confirm your booking.
+                          {t('book.ready_to_book')}
                         </span>
                       )}
                     </div>
@@ -969,12 +993,12 @@ export default function BookClient(){
                       {bookingLoading ? (
                         <>
                           <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                          Creating booking...
+                          {t('book.creating_booking')}
                         </>
                       ) : (
                         <>
                           <span>✅</span>
-                          Confirm booking
+                          {t('book.confirm_booking')}
                         </>
                       )}
                     </button>
@@ -990,7 +1014,7 @@ export default function BookClient(){
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div>
                   <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">
-                    Estimated price
+                    {t('book.estimated_price')}
                   </div>
                   <div className="mt-2">
                     {quote && quote.discountAmount && quote.discountAmount > 0 ? (
@@ -1031,7 +1055,7 @@ export default function BookClient(){
                   </div>
                 ) : (
                   <p className="text-slate-500">
-                    Select both pickup and dropoff addresses to see distance and estimated price.
+                    {t('book.select_addresses')}
                   </p>
                 )}
               </div>
@@ -1040,11 +1064,11 @@ export default function BookClient(){
               <div className="mt-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="text-xs text-slate-600">
-                    🗺️ Click on the map to select pickup or dropoff location
+                    🗺️ {t('book.map_click')}
                   </div>
                   {currentLocation && (
                     <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                      📍 Your location shown
+                      📍 {t('book.location_shown')}
                     </div>
                   )}
                 </div>
@@ -1053,7 +1077,7 @@ export default function BookClient(){
                   {!pickupSel && !dropoffSel && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/5 pointer-events-none">
                       <div className="bg-white/90 px-4 py-2 rounded-lg shadow-sm text-sm text-slate-600">
-                        Click anywhere on the map to set your pickup location
+                        {t('book.click_map_pickup')}
                       </div>
                     </div>
                   )}
@@ -1063,7 +1087,7 @@ export default function BookClient(){
               {qLoading && (
                 <div className="flex items-center justify-center gap-2 mt-3 text-cyan-700 text-sm">
                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-cyan-600 border-t-transparent"></div>
-                  Calculating price...
+                  {t('book.calculating_price')}
                 </div>
               )}
 
@@ -1085,16 +1109,16 @@ export default function BookClient(){
             onClick={e => e.stopPropagation()}
           >
             <div className="grid gap-3">
-              <h3 className="text-lg font-semibold text-slate-900">Save to favorites</h3>
-              <Field label="Label">
+              <h3 className="text-lg font-semibold text-slate-900">{t('book.save_favorite')}</h3>
+              <Field label={t('book.favorite_label_placeholder')}>
                 <input
                   value={saveModal.name}
                   onChange={e => setSaveModal(s => ({ ...s, name: e.target.value }))}
-                  placeholder="e.g. Home, Work"
+                  placeholder={t('book.favorite_label_placeholder')}
                   className="input"
                 />
               </Field>
-              <Field label="Address">
+              <Field label={t('book.address')}>
                 <input
                   value={saveModal.address}
                   onChange={e => setSaveModal(s => ({ ...s, address: e.target.value }))}
@@ -1106,10 +1130,10 @@ export default function BookClient(){
                   onClick={() => setSaveModal({ open: false, target: null, name: '', address: '' })}
                   className="btn-ghost"
                 >
-                  Cancel
+                  {t('book.cancel')}
                 </button>
                 <button onClick={saveFavorite} className="btn-primary">
-                  Save
+                  {t('book.save')}
                 </button>
               </div>
             </div>
@@ -1125,11 +1149,11 @@ export default function BookClient(){
             onClick={e => e.stopPropagation()}
           >
             <div className="grid gap-3">
-              <h3 className="text-lg font-semibold text-slate-900">Choose from favorites</h3>
+              <h3 className="text-lg font-semibold text-slate-900">{t('book.choose_favorite')}</h3>
               <div className="max-h-80 overflow-y-auto">
                 {favorites.length === 0 && (
                   <div className="text-sm text-gray-600">
-                    No favorites yet. Select an address and use the star to save it.
+                    {t('book.no_favorites')}
                   </div>
                 )}
                 {favorites.length > 0 && (
@@ -1154,7 +1178,7 @@ export default function BookClient(){
                   onClick={() => setPickModal({ open: false, target: null })}
                   className="btn-ghost"
                 >
-                  Close
+                  {t('book.close')}
                 </button>
               </div>
             </div>

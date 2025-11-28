@@ -3,6 +3,27 @@ import { useState, useEffect } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
 
+// Import translation files
+import dkMessages from '../messages/dk.json';
+import enMessages from '../messages/en.json';
+
+// Translation function
+function useTranslations() {
+  const language = typeof window !== 'undefined' ? (localStorage.getItem('language') || 'dk') : 'dk';
+
+  const t = (key: string) => {
+    const keys = key.split('.');
+    const messages = language === 'dk' ? dkMessages : enMessages;
+    let value: any = messages;
+    for (const k of keys) {
+      value = value?.[k];
+    }
+    return value || key;
+  };
+
+  return t;
+}
+
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
 
 // Stripe Elements appearance
@@ -29,6 +50,7 @@ function CardForm({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: ()
   const elements = useElements();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const t = useTranslations();
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -50,13 +72,13 @@ function CardForm({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: ()
       const setupData = await setupResponse.json();
 
       if (!setupData.success) {
-        throw new Error(setupData.error || 'Failed to create setup intent');
+        throw new Error(setupData.error || t('account.paymentMethods.failedToCreateSetupIntent'));
       }
 
       const cardElement = elements.getElement(CardElement);
 
       if (!cardElement) {
-        throw new Error('Card element not found');
+        throw new Error(t('account.paymentMethods.cardElementNotFound'));
       }
 
       // Confirm the setup intent
@@ -67,7 +89,7 @@ function CardForm({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: ()
       });
 
       if (confirmError) {
-        throw new Error(confirmError.message || 'Failed to save card');
+        throw new Error(confirmError.message || t('account.paymentMethods.failedToSaveCard'));
       }
 
       // Confirm the setup and save payment method to database
@@ -84,13 +106,13 @@ function CardForm({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: ()
       const confirmData = await confirmResponse.json();
 
       if (!confirmData.success) {
-        throw new Error(confirmData.error || 'Failed to save payment method');
+        throw new Error(confirmData.error || t('account.paymentMethods.failedToSavePaymentMethod'));
       }
 
       // Success - refresh the payment methods list
       onSuccess();
     } catch (err: any) {
-      setError(err.message || 'Failed to add payment method');
+      setError(err.message || t('account.paymentMethods.failedToAddPaymentMethod'));
     } finally {
       setLoading(false);
     }
@@ -100,7 +122,7 @@ function CardForm({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: ()
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
         <label className="block text-sm font-medium text-gray-700">
-          Card Information
+          {t('account.paymentMethods.cardInformation')}
         </label>
         <div className="p-3 border border-gray-300 rounded-lg bg-white">
           <CardElement options={cardElementOptions} />
@@ -120,14 +142,14 @@ function CardForm({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: ()
           className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
           disabled={loading}
         >
-          Cancel
+          {t('account.paymentMethods.cancel')}
         </button>
         <button
           type="submit"
           disabled={!stripe || loading}
           className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading ? 'Adding Card...' : 'Add Card'}
+          {loading ? t('account.paymentMethods.addingCard') : t('account.paymentMethods.addCard')}
         </button>
       </div>
     </form>
@@ -151,6 +173,7 @@ export default function PaymentMethodsClient() {
   const [showAddCard, setShowAddCard] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const t = useTranslations();
 
   // Load payment methods
   const loadPaymentMethods = async () => {
@@ -163,10 +186,10 @@ export default function PaymentMethodsClient() {
       if (data.success) {
         setPaymentMethods(data.paymentMethods);
       } else {
-        setError(data.error || 'Failed to load payment methods');
+        setError(data.error || t('account.paymentMethods.failedToLoadPaymentMethods'));
       }
     } catch (err) {
-      setError('Failed to load payment methods');
+      setError(t('account.paymentMethods.failedToLoadPaymentMethods'));
     } finally {
       setLoading(false);
     }
@@ -185,7 +208,7 @@ export default function PaymentMethodsClient() {
 
   const handleCardAdded = () => {
     setShowAddCard(false);
-    setMessage('Payment method added successfully!');
+    setMessage(t('account.paymentMethods.paymentMethodAdded'));
     loadPaymentMethods();
   };
 
@@ -206,19 +229,19 @@ export default function PaymentMethodsClient() {
       const data = await response.json();
 
       if (data.success) {
-        setMessage('Default payment method updated');
+        setMessage(t('account.paymentMethods.defaultPaymentMethodUpdated'));
         loadPaymentMethods();
       } else {
-        setError(data.error || 'Failed to update default payment method');
+        setError(data.error || t('account.paymentMethods.failedToUpdateDefault'));
       }
     } catch (err) {
-      setError('Failed to update default payment method');
+      setError(t('account.paymentMethods.failedToUpdateDefault'));
     }
   };
 
   // Delete payment method
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this payment method?')) {
+    if (!confirm(t('account.paymentMethods.deletePaymentMethodConfirm'))) {
       return;
     }
 
@@ -231,13 +254,13 @@ export default function PaymentMethodsClient() {
       const data = await response.json();
 
       if (data.success) {
-        setMessage('Payment method deleted successfully');
+        setMessage(t('account.paymentMethods.paymentMethodDeleted'));
         loadPaymentMethods();
       } else {
-        setError(data.error || 'Failed to delete payment method');
+        setError(data.error || t('account.paymentMethods.failedToDeletePaymentMethod'));
       }
     } catch (err) {
-      setError('Failed to delete payment method');
+      setError(t('account.paymentMethods.failedToDeletePaymentMethod'));
     }
   };
 
@@ -256,12 +279,12 @@ export default function PaymentMethodsClient() {
     <>
       <section className="grid gap-4 bg-white border rounded-2xl p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Payment Methods</h2>
+          <h2 className="text-xl font-semibold">{t('account.paymentMethods.title')}</h2>
           <button
             onClick={handleAddCard}
             className="px-4 py-2 bg-black text-white rounded-xl hover:bg-gray-800"
           >
-            + Add Card
+            {t('account.paymentMethods.addCard')}
           </button>
         </div>
 
@@ -281,8 +304,8 @@ export default function PaymentMethodsClient() {
           {paymentMethods.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               <div className="text-4xl mb-2">💳</div>
-              <p>No payment methods saved yet.</p>
-              <p className="text-sm">Add a card to enable post-trip payments.</p>
+              <p>{t('account.paymentMethods.noPaymentMethods')}</p>
+              <p className="text-sm">{t('account.paymentMethods.addCardToEnablePayments')}</p>
             </div>
           ) : (
             paymentMethods.map((method) => (
@@ -294,12 +317,12 @@ export default function PaymentMethodsClient() {
                       •••• •••• •••• {method.last4}
                       {method.isDefault && (
                         <span className="ml-2 px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full">
-                          Default
+                          {t('account.paymentMethods.default')}
                         </span>
                       )}
                     </div>
                     <div className="text-sm text-gray-600">
-                      Expires {method.expiryMonth?.toString().padStart(2, '0')}/{method.expiryYear}
+                      {t('account.paymentMethods.expires').replace('{month}', method.expiryMonth?.toString().padStart(2, '0') || '').replace('{year}', method.expiryYear?.toString() || '')}
                     </div>
                   </div>
                 </div>
@@ -310,14 +333,14 @@ export default function PaymentMethodsClient() {
                       onClick={() => handleSetDefault(method.id)}
                       className="px-3 py-1 text-sm border rounded-lg hover:bg-gray-50"
                     >
-                      Set Default
+                      {t('account.paymentMethods.setDefault')}
                     </button>
                   )}
                   <button
                     onClick={() => handleDelete(method.id)}
                     className="px-3 py-1 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
                   >
-                    Delete
+                    {t('account.paymentMethods.delete')}
                   </button>
                 </div>
               </div>
@@ -326,10 +349,9 @@ export default function PaymentMethodsClient() {
         </div>
 
         <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <h3 className="font-medium text-blue-900 mb-2">About Post-Trip Payments</h3>
+          <h3 className="font-medium text-blue-900 mb-2">{t('account.paymentMethods.aboutPostTripPayments')}</h3>
           <p className="text-sm text-blue-800">
-            Your saved payment methods will be used to automatically charge for completed rides.
-            Payment is collected only after your trip is successfully completed, ensuring a secure and convenient experience.
+            {t('account.paymentMethods.postTripPaymentsDesc')}
           </p>
         </div>
       </section>
@@ -338,7 +360,7 @@ export default function PaymentMethodsClient() {
       {showAddCard && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md">
-            <h3 className="text-xl font-semibold mb-4">Add Payment Method</h3>
+            <h3 className="text-xl font-semibold mb-4">{t('account.paymentMethods.addPaymentMethod')}</h3>
             <Elements stripe={stripePromise}>
               <CardForm onSuccess={handleCardAdded} onCancel={handleCancelAdd} />
             </Elements>

@@ -1,15 +1,49 @@
 "use client";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getAdminPath } from '@/lib/admin-route';
+import dkMessages from '@/messages/dk.json';
+import enMessages from '@/messages/en.json';
 
-export type NavUser = { id:number; firstName:string; lastName:string; email:string; role?: 'ADMIN'|'USER'; type?: 'user' } | { id:number; comUserName:string; comName:string; type: 'partner' } | null;
+export type NavUser = { id:number; firstName:string; lastName:string; email:string; role?: 'ADMIN'|'USER'; language?: string; type?: 'user' } | { id:number; comUserName:string; comName:string; type: 'partner' } | null;
+
+// Translation messages
+const messages = {
+  dk: dkMessages,
+  en: enMessages
+};
 
 export default function SiteNavbar({ me }: { me: NavUser }){
   const isAdmin = me?.type === 'user' && me?.role === 'ADMIN';
   const isPartner = me?.type === 'partner';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [language, setLanguage] = useState('dk');
+
+  useEffect(() => {
+    if (me?.type === 'user') {
+      // Logged-in user: use database language, clear localStorage
+      const userLang = (me as any).language || 'dk';
+      setLanguage(userLang);
+      localStorage.removeItem('language');
+    } else if (me === null) {
+      // User just logged out: store current language to localStorage
+      localStorage.setItem('language', language);
+    } else {
+      // Guest: use localStorage or default
+      const saved = localStorage.getItem('language') || 'dk';
+      setLanguage(saved);
+    }
+  }, [me]);
+
+  const t = (key: string) => {
+    const keys = key.split('.');
+    let value: any = messages[language as keyof typeof messages];
+    for (const k of keys) {
+      value = value?.[k];
+    }
+    return value || key;
+  };
 
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-lg border-b border-slate-200/50 shadow-lg" suppressHydrationWarning>
@@ -40,46 +74,119 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               href="/"
               className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
             >
-              Home
+              {t('nav.home')}
             </Link>
             {!isPartner && (
               <Link
                 href="/book"
                 className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
               >
-                Book ride
+                {t('nav.book')}
               </Link>
             )}
             <Link
               href="/pricing"
               className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
             >
-              Pricing
+              {t('nav.pricing')}
             </Link>
             <Link
               href="/terms"
               className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
             >
-              Terms & rules
+              {t('nav.terms')}
             </Link>
             <Link
               href="/knowledge-base"
               className="px-3 py-2 rounded-lg text-sm font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors"
             >
-              Help
+              {t('nav.help')}
             </Link>
           </nav>
         </div>
 
-        {/* Right: auth actions */}
+        {/* Right: language switcher and auth actions */}
         <div className="hidden md:flex items-center gap-3">
+          {/* Language Switcher */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                const newLang = 'dk';
+                if (me) {
+                  localStorage.removeItem('language');
+                  try {
+                    // Get CSRF token
+                    const csrfRes = await fetch('/api/csrf', { credentials: 'include' });
+                    const csrfData = await csrfRes.json();
+                    if (csrfData.success) {
+                      await fetch('/api/profile/update', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-CSRF-Token': csrfData.token
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                          language: newLang
+                        })
+                      });
+                    }
+                  } catch (e) {
+                    console.error('Failed to update language:', e);
+                  }
+                } else {
+                  localStorage.setItem('language', newLang);
+                }
+                setLanguage(newLang);
+                window.location.reload();
+              }}
+              className={`px-2 py-1 text-xs font-medium rounded ${language === 'dk' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              DK
+            </button>
+            <button
+              onClick={async () => {
+                const newLang = 'en';
+                if (me) {
+                  localStorage.removeItem('language');
+                  try {
+                    // Get CSRF token
+                    const csrfRes = await fetch('/api/csrf', { credentials: 'include' });
+                    const csrfData = await csrfRes.json();
+                    if (csrfData.success) {
+                      await fetch('/api/profile/update', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'X-CSRF-Token': csrfData.token
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                          language: newLang
+                        })
+                      });
+                    }
+                  } catch (e) {
+                    console.error('Failed to update language:', e);
+                  }
+                } else {
+                  localStorage.setItem('language', newLang);
+                }
+                setLanguage(newLang);
+                window.location.reload();
+              }}
+              className={`px-2 py-1 text-xs font-medium rounded ${language === 'en' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              EN
+            </button>
+          </div>
           {!me && (
             <>
               <Link href="/login" className="btn-ghost text-sm">
-                Log in
+                {t('auth.login')}
               </Link>
               <Link href="/register" className="btn-primary shadow-md text-sm">
-                Create account
+                {t('auth.register')}
               </Link>
             </>
           )}
@@ -100,10 +207,10 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               </button>
               {dropdownOpen && (
                 <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50">
-                  <Link href="/account?tab=profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Profile</Link>
-                  {isAdmin && <Link href={getAdminPath()} onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Admin Dashboard</Link>}
-                  {isPartner && <Link href="/partner/dashboard" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Dashboard</Link>}
-                  <a href="/logout" onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setDropdownOpen(false); }} className="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" suppressHydrationWarning>Logout</a>
+                  <Link href="/account?tab=profile" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">{t('auth.profile')}</Link>
+                  {isAdmin && <Link href={getAdminPath()} onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">{t('admin.dashboard')}</Link>}
+                  {isPartner && <Link href="/partner/dashboard" onClick={() => setDropdownOpen(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">{t('partner.dashboard')}</Link>}
+                  <a href="/logout" onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setDropdownOpen(false); }} className="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100" suppressHydrationWarning>{t('auth.logout')}</a>
                 </div>
               )}
             </div>
@@ -135,7 +242,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Home
+              {t('nav.home')}
             </Link>
             {!isPartner && (
               <Link
@@ -143,7 +250,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                 className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
                 onClick={() => setMobileMenuOpen(false)}
               >
-                Book ride
+                {t('nav.book')}
               </Link>
             )}
             <Link
@@ -151,23 +258,99 @@ export default function SiteNavbar({ me }: { me: NavUser }){
               className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Pricing
+              {t('nav.pricing')}
             </Link>
             <Link
               href="/terms"
               className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Terms & rules
+              {t('nav.terms')}
             </Link>
             <Link
               href="/knowledge-base"
               className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Help
+              {t('nav.help')}
             </Link>
 
+            {/* Language Switcher Mobile */}
+            <div className="border-t border-slate-200 pt-4 mt-4">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="text-sm font-medium text-slate-700">{t('ui.language')}:</span>
+                <button
+                  onClick={async () => {
+                    const newLang = 'dk';
+                    if (me) {
+                      localStorage.removeItem('language');
+                      try {
+                        // Get CSRF token
+                        const csrfRes = await fetch('/api/csrf', { credentials: 'include' });
+                        const csrfData = await csrfRes.json();
+                        if (csrfData.success) {
+                          await fetch('/api/profile/update', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'X-CSRF-Token': csrfData.token
+                            },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                              language: newLang
+                            })
+                          });
+                        }
+                      } catch (e) {
+                        console.error('Failed to update language:', e);
+                      }
+                    } else {
+                      localStorage.setItem('language', newLang);
+                    }
+                    setLanguage(newLang);
+                    window.location.reload();
+                  }}
+                  className={`px-3 py-1 text-sm font-medium rounded ${language === 'dk' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  DK
+                </button>
+                <button
+                  onClick={async () => {
+                    const newLang = 'en';
+                    if (me) {
+                      localStorage.removeItem('language');
+                      try {
+                        // Get CSRF token
+                        const csrfRes = await fetch('/api/csrf', { credentials: 'include' });
+                        const csrfData = await csrfRes.json();
+                        if (csrfData.success) {
+                          await fetch('/api/profile/update', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'X-CSRF-Token': csrfData.token
+                            },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                              language: newLang
+                            })
+                          });
+                        }
+                      } catch (e) {
+                        console.error('Failed to update language:', e);
+                      }
+                    } else {
+                      localStorage.setItem('language', newLang);
+                    }
+                    setLanguage(newLang);
+                    window.location.reload();
+                  }}
+                  className={`px-3 py-1 text-sm font-medium rounded ${language === 'en' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  EN
+                </button>
+              </div>
+            </div>
             <div className="border-t border-slate-200 pt-4 mt-4">
               {!me ? (
                 <div className="space-y-2">
@@ -177,7 +360,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     onClick={() => setMobileMenuOpen(false)}
                     suppressHydrationWarning
                   >
-                    Log in
+                    {t('auth.login')}
                   </Link>
                   <Link
                     href="/register"
@@ -185,7 +368,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     onClick={() => setMobileMenuOpen(false)}
                     suppressHydrationWarning
                   >
-                    Create account
+                    {t('auth.register')}
                   </Link>
                 </div>
               ) : (
@@ -195,7 +378,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     className="block px-4 py-3 rounded-lg hover:bg-slate-50 text-slate-700 hover:text-slate-900 font-medium transition-colors text-sm"
                     onClick={() => setMobileMenuOpen(false)}
                   >
-                    Profile
+                    {t('auth.profile')}
                   </Link>
                   {isAdmin && (
                     <Link
@@ -221,7 +404,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     onClick={() => { sessionStorage.setItem('logoutIntent', 'true'); setMobileMenuOpen(false); }}
                     suppressHydrationWarning
                   >
-                    Logout
+                    {t('auth.logout')}
                   </a>
                 </div>
               )}

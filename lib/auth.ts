@@ -140,6 +140,7 @@ export async function getUserFromCookie(){
           phone: true,
           address: true,
           role: true,
+          language: true as any,
           emailVerified: true,
           pendingEmail: true,
           canPayByInvoice: true,

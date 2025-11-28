@@ -1,6 +1,27 @@
 "use client";
 import { useState } from 'react';
 
+// Import translation files
+import dkMessages from '../messages/dk.json';
+import enMessages from '../messages/en.json';
+
+// Translation function
+function useTranslations() {
+  const language = typeof window !== 'undefined' ? (localStorage.getItem('language') || 'dk') : 'dk';
+
+  const t = (key: string) => {
+    const keys = key.split('.');
+    const messages = language === 'dk' ? dkMessages : enMessages;
+    let value: any = messages;
+    for (const k of keys) {
+      value = value?.[k];
+    }
+    return value || key;
+  };
+
+  return t;
+}
+
 interface Complaint {
   id: number;
   rideId: number;
@@ -26,6 +47,7 @@ export default function ComplaintConversationModal({
 }: ComplaintConversationModalProps) {
   const [replyText, setReplyText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const t = useTranslations();
 
   if (!isOpen || !complaint) return null;
 
@@ -38,7 +60,7 @@ export default function ComplaintConversationModal({
 
   const handleReply = async () => {
     if (!replyText.trim()) {
-      alert('Please enter a reply message');
+      alert(t('account.complaints.enterReplyMessage'));
       return;
     }
 
@@ -49,7 +71,7 @@ export default function ComplaintConversationModal({
       // Modal will be closed by parent component after successful reply
     } catch (error) {
       console.error('Failed to send reply:', error);
-      alert('Failed to send reply. Please try again.');
+      alert(t('account.complaints.failedToSendReply'));
     } finally {
       setIsSubmitting(false);
     }
@@ -57,7 +79,7 @@ export default function ComplaintConversationModal({
 
   const handleCloseComplaint = async () => {
     // This would need to be implemented in the API
-    alert('Close complaint functionality not implemented yet');
+    alert(t('account.history.closeComplaintNotImplemented'));
   };
 
   return (
@@ -65,8 +87,8 @@ export default function ComplaintConversationModal({
       <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-hidden">
         {/* Header */}
         <div className="bg-blue-600 text-white px-6 py-4">
-          <h2 className="text-xl font-bold">Complaint Conversation</h2>
-          <p className="text-blue-100">Booking #{complaint.rideId}</p>
+          <h2 className="text-xl font-bold">{t('account.complaints.conversation')}</h2>
+          <p className="text-blue-100">{t('account.complaints.bookingIdShort').replace('{id}', complaint.rideId.toString())}</p>
         </div>
 
         {/* Content */}
@@ -75,11 +97,11 @@ export default function ComplaintConversationModal({
           <div className="mb-6 space-y-3">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700">Booking ID</label>
+                <label className="block text-sm font-medium text-gray-700">{t('account.complaints.bookingID')}</label>
                 <p className="text-gray-900 font-medium">{complaint.rideId}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Status</label>
+                <label className="block text-sm font-medium text-gray-700">{t('account.complaints.status')}</label>
                 <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
                   complaint.status === 'OPEN' ? 'bg-yellow-100 text-yellow-800' :
                   complaint.status === 'CLOSED' ? 'bg-green-100 text-green-800' :
@@ -91,13 +113,13 @@ export default function ComplaintConversationModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">Created</label>
+              <label className="block text-sm font-medium text-gray-700">{t('account.complaints.created')}</label>
               <p className="text-gray-900">{new Date(complaint.createdAt).toLocaleString()}</p>
             </div>
 
             {complaint.adminDecision && (
               <div>
-                <label className="block text-sm font-medium text-gray-700">Admin Decision</label>
+                <label className="block text-sm font-medium text-gray-700">{t('account.complaints.adminDecision')}</label>
                 <p className="text-gray-900">{complaint.adminDecision}</p>
               </div>
             )}
@@ -105,7 +127,7 @@ export default function ComplaintConversationModal({
 
           {/* Conversation */}
           <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Conversation</h3>
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">{t('account.complaints.conversationTitle')}</h3>
             <div className="space-y-3 max-h-60 overflow-y-auto">
               {conversation.map((message, index) => {
                 // Parse the message format "Sender: message content"
@@ -121,7 +143,7 @@ export default function ComplaintConversationModal({
                   }`}>
                     <div className="flex items-start gap-2">
                       <span className="font-bold text-sm text-gray-700 min-w-0 flex-shrink-0">
-                        {sender === 'Me' ? 'You:' : sender === 'Admin' ? 'Admin:' : sender + ':'}
+                        {sender === 'Me' ? t('account.complaints.you') : sender === 'Admin' ? t('account.complaints.admin') : sender + ':'}
                       </span>
                       <p className="text-sm text-gray-800 whitespace-pre-wrap flex-1">{content}</p>
                     </div>
@@ -134,12 +156,12 @@ export default function ComplaintConversationModal({
           {/* Reply Section */}
           {complaint.status === 'OPEN' && (
             <div className="space-y-3">
-              <label className="block text-sm font-medium text-gray-700">Your Reply</label>
+              <label className="block text-sm font-medium text-gray-700">{t('account.complaints.yourReply')}</label>
               <textarea
                 value={replyText}
                 onChange={(e) => setReplyText(e.target.value)}
                 disabled={!canReply}
-                placeholder={canReply ? "Type your reply here..." : "Waiting for admin response..."}
+                placeholder={canReply ? t('account.complaints.typeReply') : t('account.complaints.waitingForAdmin')}
                 className={`w-full p-3 border rounded-lg resize-none ${
                   canReply
                     ? 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
@@ -157,7 +179,7 @@ export default function ComplaintConversationModal({
             onClick={onClose}
             className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
           >
-            Back
+            {t('account.complaints.back')}
           </button>
 
           <div className="flex gap-3">
@@ -172,14 +194,14 @@ export default function ComplaintConversationModal({
                       : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   }`}
                 >
-                  {isSubmitting ? 'Sending...' : 'Send Reply'}
+                  {isSubmitting ? t('account.complaints.sending') : t('account.complaints.sendReply')}
                 </button>
 
                 <button
                   onClick={handleCloseComplaint}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
                 >
-                  Close Issue
+                  {t('account.complaints.closeIssue')}
                 </button>
               </>
             )}

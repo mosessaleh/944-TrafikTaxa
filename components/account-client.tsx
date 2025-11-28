@@ -8,65 +8,58 @@ import ComplaintConversationModal from './ComplaintConversationModal';
 import ProfileEditClient from './profile-edit-client';
 import PaymentMethodsClient from './payment-methods-client';
 
-// Invoice Actions Component
-function InvoiceActions({ bookingId }: { bookingId: number }) {
-  const [invoiceStatus, setInvoiceStatus] = useState<'loading' | 'available' | 'not_available'>('loading');
-  const [invoiceId, setInvoiceId] = useState<number | null>(null);
+// Import translation files
+import dkMessages from '../messages/dk.json';
+import enMessages from '../messages/en.json';
+
+// Translation function
+function useTranslations(user: User | null) {
+  const [language, setLanguage] = useState('dk');
 
   useEffect(() => {
-    const checkInvoice = async () => {
-      try {
-        // First, get the invoice ID by checking the invoices API
-        const invoiceResponse = await fetch(`/api/bookings/${bookingId}/invoice-id`, {
-          method: 'GET',
-          credentials: 'include',
-        });
-        
-        if (invoiceResponse.ok) {
-          const invoiceData = await invoiceResponse.json();
-          setInvoiceId(invoiceData.invoiceId);
-          setInvoiceStatus('available');
-        } else {
-          setInvoiceStatus('not_available');
-        }
-      } catch (error) {
-        console.error('Error checking invoice:', error);
-        setInvoiceStatus('not_available');
+    // Priority: user database language > localStorage > default 'dk'
+    if (user?.language) {
+      setLanguage(user.language);
+    } else {
+      const saved = localStorage.getItem('language') || 'dk';
+      setLanguage(saved);
+    }
+
+    // Listen for storage changes (when other components change language)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'language') {
+        setLanguage(e.newValue || 'dk');
       }
     };
 
-    checkInvoice();
-  }, [bookingId]);
+    // Listen for custom language change events
+    const handleLanguageChange = (e: CustomEvent) => {
+      setLanguage(e.detail || 'dk');
+    };
 
-  if (invoiceStatus === 'loading') {
-    return (
-      <div className="text-sm text-slate-600">
-        Checking receipt/invoice status...
-      </div>
-    );
-  }
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('languageChange' as any, handleLanguageChange);
 
-  if (invoiceStatus === 'available' && invoiceId) {
-    return (
-      <div className="flex gap-3 text-sm">
-        <a
-          href={`/invoices/${invoiceId}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-600 hover:text-blue-800 underline font-medium"
-        >
-          📄 View Receipt/Invoice
-        </a>
-      </div>
-    );
-  }
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('languageChange' as any, handleLanguageChange);
+    };
+  }, [user]);
 
-  return (
-    <div className="text-sm text-amber-600">
-      Receipt/Invoice not available yet
-    </div>
-  );
+  const t = (key: string) => {
+    const keys = key.split('.');
+    const messages = language === 'dk' ? dkMessages : enMessages;
+    let value: any = messages;
+    for (const k of keys) {
+      value = value?.[k];
+    }
+    return value || key;
+  };
+
+  return t;
 }
+
+// Invoice Actions Component (moved inside AccountClient to access t)
 
 interface User {
   id: string;
@@ -78,6 +71,7 @@ interface User {
   emailVerified: boolean;
   address: string;
   pendingEmail: string | null;
+  language?: string;
 }
 
 interface Ride {
@@ -161,6 +155,68 @@ export default function AccountClient() {
   const [expandedBooking, setExpandedBooking] = useState<number | null>(null);
   const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'unpaid' | 'overdue'>('all');
 
+  const t = useTranslations(me);
+
+  // Invoice Actions Component
+  function InvoiceActions({ bookingId }: { bookingId: number }) {
+    const [invoiceStatus, setInvoiceStatus] = useState<'loading' | 'available' | 'not_available'>('loading');
+    const [invoiceId, setInvoiceId] = useState<number | null>(null);
+
+    useEffect(() => {
+      const checkInvoice = async () => {
+        try {
+          // First, get the invoice ID by checking the invoices API
+          const invoiceResponse = await fetch(`/api/bookings/${bookingId}/invoice-id`, {
+            method: 'GET',
+            credentials: 'include',
+          });
+
+          if (invoiceResponse.ok) {
+            const invoiceData = await invoiceResponse.json();
+            setInvoiceId(invoiceData.invoiceId);
+            setInvoiceStatus('available');
+          } else {
+            setInvoiceStatus('not_available');
+          }
+        } catch (error) {
+          console.error('Error checking invoice:', error);
+          setInvoiceStatus('not_available');
+        }
+      };
+
+      checkInvoice();
+    }, [bookingId]);
+
+    if (invoiceStatus === 'loading') {
+      return (
+        <div className="text-sm text-slate-600">
+          {t('account.history.checkingReceipt')}
+        </div>
+      );
+    }
+
+    if (invoiceStatus === 'available' && invoiceId) {
+      return (
+        <div className="flex gap-3 text-sm">
+          <a
+            href={`/invoices/${invoiceId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 underline font-medium"
+          >
+            {t('account.history.viewReceipt')}
+          </a>
+        </div>
+      );
+    }
+
+    return (
+      <div className="text-sm text-amber-600">
+        {t('account.history.receiptNotAvailable')}
+      </div>
+    );
+  }
+
   // Fetch user profile
   useEffect(() => {
     const fetchUser = async () => {
@@ -214,10 +270,10 @@ export default function AccountClient() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Please log in to view your bookings');
+          throw new Error(t('account.history.loginRequiredBookings'));
         }
         if (response.status === 403) {
-          throw new Error('Email verification required');
+          throw new Error(t('account.history.emailVerificationRequired'));
         }
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Failed to fetch bookings: ${response.status}`);
@@ -259,10 +315,10 @@ export default function AccountClient() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Please log in to view your favorites');
+          throw new Error(t('account.favorites.loginRequiredFavorites'));
         }
         if (response.status === 403) {
-          throw new Error('Email verification required');
+          throw new Error(t('account.favorites.emailVerificationRequired'));
         }
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Failed to fetch favorites: ${response.status}`);
@@ -301,10 +357,10 @@ export default function AccountClient() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          throw new Error('Please log in to view your invoices');
+          throw new Error(t('account.invoices.loginRequiredInvoices'));
         }
         if (response.status === 403) {
-          throw new Error('Email verification required');
+          throw new Error(t('account.invoices.emailVerificationRequired'));
         }
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Failed to fetch invoices: ${response.status}`);
@@ -362,7 +418,7 @@ export default function AccountClient() {
 
      if (!response.ok) {
        if (response.status === 401) {
-         throw new Error('Please log in to manage notification settings');
+         throw new Error(t('account.notifications.loginRequiredNotifications'));
        }
        const errorData = await response.json().catch(() => ({}));
        throw new Error(errorData.error || `Failed to load notification settings: ${response.status}`);
@@ -410,10 +466,10 @@ export default function AccountClient() {
      }
 
      await mutateNotifSettings();
-     alert('Notification preferences updated.');
+     alert(t('account.notifications.preferencesUpdated'));
    } catch (error) {
      console.error('Failed to update notification settings:', error);
-     alert('Failed to update notification preferences. Please try again.');
+     alert(t('account.notifications.failedToUpdatePreferences'));
    }
  };
 
@@ -436,7 +492,7 @@ export default function AccountClient() {
       // Find the booking to determine cancellation fee
       const booking = ridesData?.find((r: Ride) => r.id === bookingId);
       if (!booking) {
-        alert('Booking not found');
+        alert(t('account.history.bookingNotFound'));
         return;
       }
 
@@ -464,8 +520,8 @@ export default function AccountClient() {
       const refundAmount = booking.price - cancellationFee;
 
       const message = cancellationFee > 0
-        ? `Are you sure you want to cancel this booking?\n\nCancellation Fee: ${cancellationFee} DKK\nRefund Amount: ${refundAmount} DKK\n\nYour refund will be processed within 3-5 business days.`
-        : 'Are you sure you want to cancel this booking? Your payment will be refunded within 3-5 business days.';
+        ? t('account.history.cancelBookingWithFee').replace('{fee}', cancellationFee.toString()).replace('{refund}', refundAmount.toString())
+        : t('account.history.cancelBooking');
 
       if (!confirm(message)) {
         return;
@@ -490,13 +546,13 @@ export default function AccountClient() {
       if (response.ok) {
         // Refresh the bookings data
         mutateRides();
-        alert('Booking cancelled successfully. You will receive a confirmation email and your refund will be processed within 3-5 business days.');
+        alert(t('account.history.bookingCancelled'));
       } else {
         const errorData = await response.json();
-        alert(`Failed to cancel booking: ${errorData.error || 'Unknown error'}`);
+        alert(t('account.history.failedToCancelBooking').replace('{error}', errorData.error || 'Unknown error'));
       }
     } catch (error) {
-      alert('Failed to cancel booking. Please try again.');
+      alert(t('account.history.failedToCancelBookingGeneral'));
     }
   };
 
@@ -517,17 +573,17 @@ export default function AccountClient() {
       });
 
       if (response.ok) {
-        alert('Complaint submitted successfully. We will review it and get back to you.');
+        alert(t('account.history.complaintSubmittedSuccess'));
         // Refresh the bookings data to show complaint status
         mutateRides();
       } else {
         const errorData = await response.json().catch(() => ({}));
         console.error('Complaint submission error:', errorData);
-        throw new Error(errorData.error || 'Failed to submit complaint');
+        throw new Error(errorData.error || t('account.history.failedToSubmitComplaint'));
       }
     } catch (error) {
       console.error('Failed to submit complaint:', error);
-      alert('Failed to submit complaint. Please try again.');
+      alert(t('account.history.failedToSubmitComplaintGeneral'));
       throw error;
     }
   };
@@ -547,10 +603,10 @@ export default function AccountClient() {
         if (data.ok && data.hasComplaint) {
           setComplaintConversationModal({ isOpen: true, complaint: data.complaint });
         } else {
-          alert('No complaint found for this booking.');
+          alert(t('account.history.noComplaintFound'));
         }
       } else {
-        alert('Failed to load complaint details.');
+        alert(t('account.history.failedToLoadComplaint'));
       }
     } catch (error) {
       console.error('Failed to fetch complaint:', error);
@@ -572,18 +628,18 @@ export default function AccountClient() {
       });
 
       if (response.ok) {
-        alert('Reply sent successfully.');
+        alert(t('account.history.replySent'));
         // Refresh the complaint data by closing and reopening modal
         setComplaintConversationModal({ isOpen: false, complaint: null });
         // Refresh the bookings data to update complaint status
         mutateRides();
       } else {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to send reply');
+        throw new Error(errorData.error || t('account.history.failedToSendReply'));
       }
     } catch (error) {
       console.error('Failed to send reply:', error);
-      alert('Failed to send reply. Please try again.');
+      alert(t('account.history.failedToSendReply'));
       throw error;
     }
   };
@@ -619,13 +675,13 @@ export default function AccountClient() {
       <div className="min-h-screen pt-20 pb-8">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-800 mb-4">Access Denied</h1>
-            <p className="text-slate-600 mb-6">Please log in to view your account.</p>
+            <h1 className="text-2xl font-bold text-slate-800 mb-4">{t('auth.accessDenied')}</h1>
+            <p className="text-slate-600 mb-6">{t('auth.loginRequired')}</p>
             <button
               onClick={() => router.push('/login')}
               className="btn-primary"
             >
-              Go to Login
+              {t('auth.goToLogin')}
             </button>
           </div>
         </div>
@@ -656,8 +712,8 @@ export default function AccountClient() {
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-800 mb-2">My Account</h1>
-          <p className="text-slate-600">Manage your profile, notifications, and booking history</p>
+          <h1 className="text-3xl font-bold text-slate-800 mb-2">{t('account.title')}</h1>
+          <p className="text-slate-600">{t('account.subtitle')}</p>
         </div>
 
         {/* Dashboard Layout: Sidebar + Content */}
@@ -666,27 +722,27 @@ export default function AccountClient() {
           <aside className="w-full lg:w-64">
             <nav className="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100">
               {[
-                { id: 'profile', label: 'Profile', icon: '👤' },
-                { id: 'history', label: 'Booking History', icon: '📋' },
-                { id: 'payment-methods', label: 'Payment Methods', icon: '💳' },
-                { id: 'invoices', label: 'Invoices', icon: '📄' },
-                { id: 'favorites', label: 'Favorite Addresses', icon: '⭐' },
-                { id: 'notifications', label: 'Notification Preferences', icon: '🔔' },
-              ].map((t) => (
+                { id: 'profile', label: t('account.profile.title'), icon: '👤' },
+                { id: 'history', label: t('account.history.title'), icon: '📋' },
+                { id: 'payment-methods', label: t('account.paymentMethods.title'), icon: '💳' },
+                { id: 'invoices', label: t('account.invoices.title'), icon: '📄' },
+                { id: 'favorites', label: t('account.favorites.title'), icon: '⭐' },
+                { id: 'notifications', label: t('account.notifications.title'), icon: '🔔' },
+              ].map((item) => (
                 <button
-                  key={t.id}
-                  onClick={() => setTab(t.id as any)}
+                  key={item.id}
+                  onClick={() => setTab(item.id as any)}
                   className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-sm font-medium transition-colors ${
-                    tab === t.id
+                    tab === item.id
                       ? 'bg-slate-900 text-white'
                       : 'text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   <span className="flex items-center gap-2">
-                    <span>{t.icon}</span>
-                    <span>{t.label}</span>
+                    <span>{item.icon}</span>
+                    <span>{item.label}</span>
                   </span>
-                  {tab === t.id && (
+                  {tab === item.id && (
                     <span className="inline-flex h-2 w-2 rounded-full bg-emerald-400" />
                   )}
                 </button>
@@ -699,23 +755,23 @@ export default function AccountClient() {
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200">
               {tab === 'profile' && (
                 <div className="p-6">
-                  <h1 className="text-3xl font-bold mb-6">My Profile</h1>
+                  <h1 className="text-3xl font-bold mb-6">{t('account.profile.title')}</h1>
    
                   {!me.emailVerified && (
                     <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200 mb-6">
-                      <div className="font-medium text-orange-800">Email not verified</div>
-                      <div className="text-sm text-orange-700">Your email <b>{me.email}</b> is not verified. Please verify your email to access all features.</div>
-                      <Link href={`/verify?email=${encodeURIComponent(me.email)}`} className="px-4 py-2 rounded-xl border border-orange-300 bg-orange-600 text-white hover:bg-orange-700 transition-colors w-fit">Send verification code</Link>
+                      <div className="font-medium text-orange-800">{t('account.profile.unverified')}</div>
+                      <div className="text-sm text-orange-700" dangerouslySetInnerHTML={{ __html: t('account.profile.verifyEmail').replace('{email}', `<b>${me.email}</b>`) }} />
+                      <Link href={`/verify?email=${encodeURIComponent(me.email)}`} className="px-4 py-2 rounded-xl border border-orange-300 bg-orange-600 text-white hover:bg-orange-700 transition-colors w-fit">{t('account.profile.sendVerification')}</Link>
                     </div>
                   )}
    
                   <section className="grid gap-4 bg-white border rounded-2xl p-6 mb-6">
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="grid gap-1">
-                        <div className="text-sm text-gray-500">Email</div>
-                        <div className="font-semibold flex items-center gap-2">{me.email} <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${me.emailVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{me.emailVerified ? 'Verified' : 'Unverified'}</span></div>
+                        <div className="text-sm text-gray-500">{t('account.profile.email')}</div>
+                        <div className="font-semibold flex items-center gap-2">{me.email} <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${me.emailVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{me.emailVerified ? t('account.profile.verified') : t('account.profile.unverified')}</span></div>
                         {!me.emailVerified && (
-                          <div className="text-sm text-gray-600">You need to verify your email to book rides or view history. <Link href={`/verify?email=${encodeURIComponent(me.email)}`} className="underline">Verify now</Link></div>
+                          <div className="text-sm text-gray-600" dangerouslySetInnerHTML={{ __html: t('account.profile.needVerification').replace('<Link>', `<a href="/verify?email=${encodeURIComponent(me.email)}" class="underline">`).replace('</Link>', '</a>') }} />
                         )}
                       </div>
                     </div>
@@ -735,7 +791,7 @@ export default function AccountClient() {
                       onClick={handleLogout}
                       className="btn-ghost text-red-600 hover:text-red-700 hover:bg-red-50"
                     >
-                      🚪 Logout
+                      {t('account.profile.logout')}
                     </button>
                   </div>
                 </div>
@@ -743,25 +799,25 @@ export default function AccountClient() {
 
           {tab === 'history' && (
             <div className="p-6">
-              <h2 className="text-xl font-semibold text-slate-800 mb-6">Booking History</h2>
+              <h2 className="text-xl font-semibold text-slate-800 mb-6">{t('account.history.title')}</h2>
               {ridesLoading ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
-                  <p className="mt-2 text-slate-600">Loading bookings...</p>
+                  <p className="mt-2 text-slate-600">{t('account.history.loading')}</p>
                 </div>
               ) : ridesError ? (
                 <div className="text-center py-8">
-                  <p className="text-red-600 mb-4">Failed to load bookings</p>
+                  <p className="text-red-600 mb-4">{t('account.history.error')}</p>
                   <p className="text-slate-600 text-sm">{ridesError.message}</p>
                 </div>
               ) : !ridesData || ridesData.length === 0 ? (
                 <div className="text-center py-8">
-                  <p className="text-slate-600">No bookings found</p>
+                  <p className="text-slate-600">{t('account.history.noBookings')}</p>
                   <button
                     onClick={() => router.push('/book')}
                     className="btn-primary mt-4"
                   >
-                    Book Your First Ride
+                    {t('account.history.bookFirst')}
                   </button>
                 </div>
               ) : (
@@ -907,7 +963,7 @@ export default function AccountClient() {
                                 <div>
                                   <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
                                     <span>📍</span>
-                                    Route
+                                    {t('account.history.route')}
                                   </h4>
                                   <div className="bg-slate-50 rounded-lg p-3">
                                     <div className="flex items-start gap-3">
@@ -918,11 +974,11 @@ export default function AccountClient() {
                                       </div>
                                       <div className="flex-1 space-y-2">
                                         <div>
-                                          <p className="text-xs font-medium text-slate-700">From</p>
+                                          <p className="text-xs font-medium text-slate-700">{t('account.history.from')}</p>
                                           <p className="text-sm text-slate-600">{ride.pickupAddress}</p>
                                         </div>
                                         <div>
-                                          <p className="text-xs font-medium text-slate-700">To</p>
+                                          <p className="text-xs font-medium text-slate-700">{t('account.history.to')}</p>
                                           <p className="text-sm text-slate-600">{ride.dropoffAddress}</p>
                                         </div>
                                       </div>
@@ -933,11 +989,11 @@ export default function AccountClient() {
                                 {/* Trip Details */}
                                 <div className="grid grid-cols-2 gap-4">
                                   <div className="bg-blue-50 rounded-lg p-3">
-                                    <p className="text-xs text-blue-600 font-medium">Distance</p>
+                                    <p className="text-xs text-blue-600 font-medium">{t('account.history.distance')}</p>
                                     <p className="text-base font-bold text-blue-800">{ride.distanceKm?.toFixed(1) || 'N/A'} km</p>
                                   </div>
                                   <div className="bg-purple-50 rounded-lg p-3">
-                                    <p className="text-xs text-purple-600 font-medium">Vehicle Type</p>
+                                    <p className="text-xs text-purple-600 font-medium">{t('account.history.vehicleType')}</p>
                                     <p className="text-base font-bold text-purple-800">
                                       {ride.vehicleType?.title || 'Standard'}
                                     </p>
@@ -950,16 +1006,16 @@ export default function AccountClient() {
                                 <div>
                                   <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
                                     <span>🕐</span>
-                                    Time Details
+                                    {t('account.history.timeDetails')}
                                   </h4>
                                   <div className="bg-slate-50 rounded-lg p-3 space-y-2">
                                     <div className="flex items-center gap-2">
                                       <span className="text-sm text-slate-600">
-                                        {ride.scheduled ? '📅 Scheduled' : '🚗 Immediate'}
+                                        {ride.scheduled ? t('account.history.scheduled') : t('account.history.immediate')}
                                       </span>
                                     </div>
                                     <div>
-                                      <p className="text-xs font-medium text-slate-700">Pickup Time</p>
+                                      <p className="text-xs font-medium text-slate-700">{t('account.history.pickupTime')}</p>
                                       <p className="text-sm text-slate-600">
                                         {new Date(ride.pickupTime).toLocaleString('en-US', {
                                           year: 'numeric',
@@ -972,7 +1028,7 @@ export default function AccountClient() {
                                     </div>
                                     {ride.durationMin && (
                                       <div>
-                                        <p className="text-xs font-medium text-slate-700">Estimated Duration</p>
+                                        <p className="text-xs font-medium text-slate-700">{t('account.history.estimatedDuration')}</p>
                                         <p className="text-sm text-slate-600">{ride.durationMin} min</p>
                                       </div>
                                     )}
@@ -984,7 +1040,7 @@ export default function AccountClient() {
                                   <div>
                                     <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
                                       <span>💳</span>
-                                      Payment Method
+                                      {t('account.history.paymentMethod')}
                                     </h4>
                                     <div className="bg-emerald-50 rounded-lg p-3">
                                       <p className="text-sm font-medium text-emerald-700">
@@ -999,7 +1055,7 @@ export default function AccountClient() {
                                   <div>
                                     <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
                                       <span>📄</span>
-                                      Receipt/Invoice
+                                      {t('account.history.receipt')}
                                     </h4>
                                     <div className="bg-blue-50 rounded-lg p-3">
                                       <InvoiceActions bookingId={ride.id} />
@@ -1009,7 +1065,7 @@ export default function AccountClient() {
 
                                 {/* Status Explanation */}
                                 <div>
-                                  <h4 className="font-semibold text-slate-700 mb-2">Status</h4>
+                                  <h4 className="font-semibold text-slate-700 mb-2">{t('account.history.statusExplanation')}</h4>
                                   <div className="bg-slate-50 rounded-lg p-3">
                                     <p className="text-sm text-slate-600">{ride.explanation}</p>
                                   </div>
@@ -1023,7 +1079,7 @@ export default function AccountClient() {
                                       href={`/pay?booking_id=${ride.id}`}
                                       className="w-full sm:w-auto px-4 py-2 text-sm rounded-lg transition-colors font-medium bg-green-600 text-white hover:bg-green-700 shadow-sm"
                                     >
-                                      💳 Pay Now
+                                      {t('account.history.payNow')}
                                     </a>
                                   )}
 
@@ -1034,7 +1090,7 @@ export default function AccountClient() {
                                       onClick={() => handleCancelBooking(ride.id)}
                                       className="w-full sm:w-auto px-4 py-2 text-sm rounded-lg transition-colors font-medium bg-red-600 text-white hover:bg-red-700 shadow-sm"
                                     >
-                                      ❌ Cancel
+                                      {t('account.history.cancel')}
                                     </button>
                                   )}
 
@@ -1048,7 +1104,7 @@ export default function AccountClient() {
                                         : 'bg-amber-600 text-white hover:bg-amber-700'
                                     }`}
                                   >
-                                    {ride.hasComplaint ? '📋 View Complaint' : '📝 Submit Complaint'}
+                                    {ride.hasComplaint ? t('account.history.viewComplaint') : t('account.history.submitComplaint')}
                                   </button>
                                 </div>
                               </div>
@@ -1065,25 +1121,25 @@ export default function AccountClient() {
 
           {tab === 'favorites' && (
             <div className="p-6">
-              <h2 className="text-xl font-semibold text-slate-800 mb-6">Favorite Addresses</h2>
+              <h2 className="text-xl font-semibold text-slate-800 mb-6">{t('account.favorites.title')}</h2>
               {favsLoading ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
-                  <p className="mt-2 text-slate-600">Loading favorites...</p>
+                  <p className="mt-2 text-slate-600">{t('account.favorites.loading')}</p>
                 </div>
               ) : favsError ? (
                 <div className="text-center py-8">
-                  <p className="text-red-600 mb-4">Failed to load favorites</p>
+                  <p className="text-red-600 mb-4">{t('account.favorites.error')}</p>
                   <p className="text-slate-600 text-sm">{favsError.message}</p>
                 </div>
               ) : !favsData || favsData.length === 0 ? (
                 <div className="text-center py-8">
-                  <p className="text-slate-600">No favorite addresses yet</p>
+                  <p className="text-slate-600">{t('account.favorites.noFavorites')}</p>
                   <button
                     onClick={() => router.push('/book')}
                     className="btn-primary mt-4"
                   >
-                    Start Booking to Add Favorites
+                    {t('account.favorites.startBooking')}
                   </button>
                 </div>
               ) : (
@@ -1102,7 +1158,7 @@ export default function AccountClient() {
                         </div>
                         <button
                           onClick={async () => {
-                            if (confirm('Remove this favorite address?')) {
+                            if (confirm(t('account.favorites.removeFavoriteConfirm'))) {
                               try {
                                 const response = await fetch(`/api/favorites?id=${fav.id}`, {
                                   method: 'DELETE',
@@ -1111,11 +1167,11 @@ export default function AccountClient() {
                                 if (response.ok) {
                                   mutateFavs();
                                 } else {
-                                  alert('Failed to remove favorite address');
+                                  alert(t('account.favorites.failedToRemoveFavorite'));
                                 }
                               } catch (error) {
                                 console.error('Failed to remove favorite:', error);
-                                alert('Failed to remove favorite address');
+                                alert(t('account.favorites.failedToRemoveFavorite'));
                               }
                             }
                           }}
@@ -1134,9 +1190,9 @@ export default function AccountClient() {
 
           {tab === 'payment-methods' && (
             <div className="p-6">
-              <h2 className="text-xl font-semibold text-slate-800 mb-6">Payment Methods</h2>
+              <h2 className="text-xl font-semibold text-slate-800 mb-6">{t('account.paymentMethods.title')}</h2>
               <p className="text-sm text-slate-600 mb-6">
-                Manage your saved payment methods for automatic post-trip payments.
+                {t('account.paymentMethods.subtitle')}
               </p>
               <PaymentMethodsClient />
             </div>
@@ -1145,7 +1201,7 @@ export default function AccountClient() {
           {tab === 'invoices' && (
             <div className="p-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                <h2 className="text-xl font-semibold text-slate-800">Invoices</h2>
+                <h2 className="text-xl font-semibold text-slate-800">{t('account.invoices.title')}</h2>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setInvoiceFilter('all')}
@@ -1155,7 +1211,7 @@ export default function AccountClient() {
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
-                    All
+                    {t('account.invoices.all')}
                   </button>
                   <button
                     onClick={() => setInvoiceFilter('unpaid')}
@@ -1165,7 +1221,7 @@ export default function AccountClient() {
                         : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
                     }`}
                   >
-                    Unpaid
+                    {t('account.invoices.unpaid')}
                   </button>
                   <button
                     onClick={() => setInvoiceFilter('overdue')}
@@ -1175,24 +1231,24 @@ export default function AccountClient() {
                         : 'bg-red-100 text-red-700 hover:bg-red-200'
                     }`}
                   >
-                    Overdue
+                    {t('account.invoices.overdue')}
                   </button>
                 </div>
               </div>
               {invoicesLoading ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
-                  <p className="mt-2 text-slate-600">Loading invoices...</p>
+                  <p className="mt-2 text-slate-600">{t('account.invoices.loading')}</p>
                 </div>
               ) : invoicesError ? (
                 <div className="text-center py-8">
-                  <p className="text-red-600 mb-4">Failed to load invoices</p>
+                  <p className="text-red-600 mb-4">{t('account.invoices.error')}</p>
                   <p className="text-slate-600 text-sm">{invoicesError.message}</p>
                 </div>
               ) : !invoicesData || invoicesData.length === 0 ? (
                 <div className="text-center py-8">
-                  <p className="text-slate-600">No invoices found</p>
-                  <p className="text-slate-500 text-sm mt-2">Invoices will appear here when you book with invoice payment method</p>
+                  <p className="text-slate-600">{t('account.invoices.noInvoices')}</p>
+                  <p className="text-slate-500 text-sm mt-2">{t('account.invoices.noInvoicesDesc')}</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1228,18 +1284,18 @@ export default function AccountClient() {
                           <div className="grid md:grid-cols-2 gap-4 text-sm">
                             <div>
                               <p className="text-slate-600">
-                                <strong>Amount:</strong> {((invoice.ride?.price || 0) + (invoice.lateFee1 || 0) + (invoice.lateFee2 || 0)).toFixed(2)} DKK
+                                <strong>{t('account.invoices.amount')}:</strong> {((invoice.ride?.price || 0) + (invoice.lateFee1 || 0) + (invoice.lateFee2 || 0)).toFixed(2)} DKK
                               </p>
                               <p className="text-slate-600">
-                                <strong>Due Date:</strong> {effectiveDueDate ? new Date(effectiveDueDate).toLocaleDateString() : 'N/A'}
+                                <strong>{t('account.invoices.dueDate')}:</strong> {effectiveDueDate ? new Date(effectiveDueDate).toLocaleDateString() : 'N/A'}
                               </p>
                             </div>
                             <div>
                               <p className="text-slate-600">
-                                <strong>Booking:</strong> #{invoice.rideId}
+                                <strong>{t('account.invoices.booking')}:</strong> #{invoice.rideId}
                               </p>
                               <p className="text-slate-600">
-                                <strong>Date:</strong> {new Date(invoice.createdAt).toLocaleDateString()}
+                                <strong>{t('account.invoices.date')}:</strong> {new Date(invoice.createdAt).toLocaleDateString()}
                               </p>
                             </div>
                           </div>
@@ -1251,7 +1307,7 @@ export default function AccountClient() {
                             rel="noopener noreferrer"
                             className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
                           >
-                            View Invoice
+                            {t('account.invoices.viewInvoice')}
                           </a>
                         </div>
                       </div>
@@ -1265,24 +1321,24 @@ export default function AccountClient() {
 
           {tab === 'notifications' && (
             <div className="p-6">
-              <h2 className="text-xl font-semibold text-slate-800 mb-2">Notification Preferences</h2>
+              <h2 className="text-xl font-semibold text-slate-800 mb-2">{t('account.notifications.title')}</h2>
               <p className="text-sm text-slate-600 mb-6">
-                Choose which email notifications you want to receive.
+                {t('account.notifications.subtitle')}
               </p>
 
               {notifSettingsLoading ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
-                  <p className="mt-2 text-slate-600">Loading notification settings...</p>
+                  <p className="mt-2 text-slate-600">{t('account.notifications.loading')}</p>
                 </div>
               ) : notifSettingsError ? (
                 <div className="text-center py-8">
-                  <p className="text-red-600 mb-2">Failed to load notification settings</p>
+                  <p className="text-red-600 mb-2">{t('account.notifications.error')}</p>
                   <p className="text-slate-600 text-sm">{(notifSettingsError as Error).message}</p>
                 </div>
               ) : !notifSettingsData ? (
                 <div className="text-center py-8">
-                  <p className="text-slate-600">Notification settings are not available.</p>
+                  <p className="text-slate-600">{t('account.notifications.notAvailable')}</p>
                 </div>
               ) : (
                 <form onSubmit={handleSaveNotificationSettings} className="space-y-6 max-w-lg">
@@ -1295,9 +1351,9 @@ export default function AccountClient() {
                         className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                       />
                       <div>
-                        <div className="font-medium text-slate-800">Booking emails</div>
+                        <div className="font-medium text-slate-800">{t('account.notifications.bookingEmails')}</div>
                         <div className="text-sm text-slate-600">
-                          Receive confirmation and status updates for your bookings.
+                          {t('account.notifications.bookingDesc')}
                         </div>
                       </div>
                     </label>
@@ -1310,9 +1366,9 @@ export default function AccountClient() {
                         className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                       />
                       <div>
-                        <div className="font-medium text-slate-800">Payment emails</div>
+                        <div className="font-medium text-slate-800">{t('account.notifications.paymentEmails')}</div>
                         <div className="text-sm text-slate-600">
-                          Receive emails when payments are received or updated.
+                          {t('account.notifications.paymentDesc')}
                         </div>
                       </div>
                     </label>
@@ -1325,9 +1381,9 @@ export default function AccountClient() {
                         className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                       />
                       <div>
-                        <div className="font-medium text-slate-800">Invoice emails</div>
+                        <div className="font-medium text-slate-800">{t('account.notifications.invoiceEmails')}</div>
                         <div className="text-sm text-slate-600">
-                          Receive emails when invoices are generated or updated.
+                          {t('account.notifications.invoiceDesc')}
                         </div>
                       </div>
                     </label>
@@ -1340,9 +1396,9 @@ export default function AccountClient() {
                         className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                       />
                       <div>
-                        <div className="font-medium text-slate-800">Marketing emails</div>
+                        <div className="font-medium text-slate-800">{t('account.notifications.marketingEmails')}</div>
                         <div className="text-sm text-slate-600">
-                          Receive occasional offers, news, and promotions from 944 Trafik.
+                          {t('account.notifications.marketingDesc')}
                         </div>
                       </div>
                     </label>
@@ -1353,7 +1409,7 @@ export default function AccountClient() {
                       type="submit"
                       className="inline-flex items-center px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-medium shadow-sm hover:bg-slate-800"
                     >
-                      Save preferences
+                      {t('account.notifications.savePreferences')}
                     </button>
                   </div>
                 </form>

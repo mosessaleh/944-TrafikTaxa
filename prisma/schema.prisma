@@ -57,6 +57,7 @@ model User {
   phone               String
   address             String
   role                Role      @default(USER)
+  language            String    @default("dk")
   emailVerified       Boolean   @default(false)
   emailVerifyCode     String?
   emailVerifyExpires  DateTime?

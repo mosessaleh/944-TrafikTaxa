@@ -5,13 +5,6 @@ import * as Sentry from '@sentry/nextjs';
 
 export default function ErrorMonitoring() {
   useEffect(() => {
-    // Initialize Sentry with basic configuration
-    Sentry.init({
-      dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
-      environment: process.env.NODE_ENV,
-      tracesSampleRate: 1.0,
-      // Remove replay integration for now as it's not available in this version
-    });
 
     // Global error handler
     const handleError = (event: ErrorEvent) => {

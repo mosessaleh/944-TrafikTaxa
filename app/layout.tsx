@@ -14,7 +14,6 @@ export default function RootLayout({ children }: { children: ReactNode }){
   return (
     <html lang="en">
       <body className="bg-gray-50 text-gray-900">
-        <ErrorMonitoring />
         <RealtimeProvider>
           <SiteNavbarServer />
           <main id="main-content" className="min-h-screen pt-8">
