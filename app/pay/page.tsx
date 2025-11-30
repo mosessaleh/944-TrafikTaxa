@@ -20,7 +20,7 @@ function PayIndexContent(){
 
 
   // State for booking data
-  const [bookingData, setBookingData] = useState<{ price: number; scheduled?: boolean; pickupTime?: string | null } | null>(null);
+  const [bookingData, setBookingData] = useState<{ price: number; scheduled?: boolean; pickupTime?: string | null; paymentMethod?: string | null } | null>(null);
   const [loadingBooking, setLoadingBooking] = useState(false);
   const [hasInvoicePaymentMethod, setHasInvoicePaymentMethod] = useState(false);
   const [userCanPayByInvoice, setUserCanPayByInvoice] = useState(false);
@@ -53,6 +53,7 @@ function PayIndexContent(){
                 price: totalAmount, // Always use calculated total for invoices (includes late fees)
                 scheduled: invoiceData.invoice.ride.scheduled,
                 pickupTime: invoiceData.invoice.ride.pickupTime,
+                paymentMethod: invoiceData.invoice.ride.paymentMethod,
               });
               // Verify payment method stored in the database
               setHasInvoicePaymentMethod(invoiceData.invoice.ride.paymentMethod === 'invoice');
@@ -85,6 +86,7 @@ function PayIndexContent(){
                 price: bookingData.ride.price,
                 scheduled: bookingData.ride.scheduled,
                 pickupTime: bookingData.ride.pickupTime,
+                paymentMethod: bookingData.ride.paymentMethod,
               });
               // Verify payment method stored in the database
               setHasInvoicePaymentMethod(bookingData.ride.paymentMethod === 'invoice');
@@ -192,8 +194,34 @@ function PayIndexContent(){
       } else {
         router.push(`/book?payment_method=invoice&amount_dkk=${encodeURIComponent(paymentAmount.toString())}`);
       }
+    } else if (selectedMethod === 'card' && bookingId && !bookingData?.paymentMethod) {
+      // Special handling for card payment on new bookings (paymentMethod = null)
+      // Check if booking has payment method set, if not, authorize card first
+      console.log('💳 Processing card payment for booking without payment method...');
+
+      try {
+        const response = await fetch(`/api/bookings/${bookingId}/payment-method`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentMethod: 'card' })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          console.log('✅ Card payment authorized successfully:', result);
+          alert('🎉 Payment authorized! You will be redirected to confirm your booking.');
+          router.push(`/bookings/${bookingId}?payment=card`);
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          console.error('❌ Error authorizing card payment:', errorData);
+          alert(`❌ Error authorizing payment: ${errorData.error || 'Unknown error'}`);
+        }
+      } catch (networkError) {
+        console.error('❌ Network error:', networkError);
+        alert('❌ Network error. Please try again.');
+      }
     } else {
-      // For all other payment methods (card, crypto, PayPal, Revolut)
+      // For other payment methods (crypto, PayPal, Revolut) or existing bookings
       // an invoice will be created as a receipt after successful payment
       router.push(`/pay/${selectedMethod}?${params.toString()}`);
     }

@@ -568,8 +568,8 @@ export default function BookClient(){
         dropoffLon: quotePayload.dropoffLon,
         vehicleTypeId: vehicleId!,
         scheduled: whenType === 'later',
-        pickupTime: whenType === 'later' ? new Date(when).toISOString() : new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        paymentMethod: 'card' // Default to card, will be selected on payment page
+        pickupTime: whenType === 'later' ? new Date(when).toISOString() : new Date(Date.now() + 5 * 60 * 1000).toISOString()
+        // paymentMethod will be selected on payment page
       };
 
       const response = await fetch('/api/bookings', {

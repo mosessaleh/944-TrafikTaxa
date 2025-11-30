@@ -257,7 +257,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check payment method requirements - validation moved to client side
-    const paymentMethod = rawData.paymentMethod || 'card';
+    const paymentMethod = rawData.paymentMethod; // No default, allow null
 
     // Calculate distance and duration
     const { distanceKm, durationMin } = await safeEstimateDistance(
@@ -305,6 +305,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    console.log('[DEBUG] About to create booking with paymentMethod:', paymentMethod);
     // Create booking with CONFIRMED status (no immediate payment)
     const booking = await prisma.ride.create({
       data: {
@@ -414,6 +415,7 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('[API] Error creating booking:', error);
+    console.error('[API] Error stack:', (error as any)?.stack);
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(

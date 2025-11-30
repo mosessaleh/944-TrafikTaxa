@@ -184,6 +184,9 @@ model Ride {
   paymentMethod  String?
   savedPaymentMethodId Int?
 
+  // Payment reference for external payment processors (Stripe Payment Intent ID, etc.)
+  paymentRef     String?
+
   // Payment Processing Fields
   paymentRetryCount    Int?         @default(0)    // Number of payment retry attempts
   paymentNextRetry     DateTime?                   // Next scheduled retry time
@@ -213,6 +216,7 @@ model Ride {
   @@index([pickupTime])
   @@index([createdAt])
   @@index([savedPaymentMethodId])
+  @@index([paymentRef])
   @@index([riskScore])
   @@index([riskLevel])
   @@index([riskReviewed])

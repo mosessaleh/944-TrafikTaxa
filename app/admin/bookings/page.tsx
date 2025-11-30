@@ -417,6 +417,7 @@ export default function AdminBookings(){
                          <option value="">Actions</option>
                          <option value="CONFIRM">✅ Confirm</option>
                          <option value="DISPATCH">🚗 Dispatch</option>
+                         <option value="DELIVERED">🚚 Mark Delivered</option>
                          <option value="COMPLETE">📦 Complete</option>
                          <option value="CANCEL">❌ Cancel</option>
                          <option value="MARK_PAID">💳 Mark Paid</option>
