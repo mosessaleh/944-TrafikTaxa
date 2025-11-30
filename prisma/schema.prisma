@@ -220,6 +220,8 @@ model Ride {
   @@index([riskScore])
   @@index([riskLevel])
   @@index([riskReviewed])
+  @@index([pickupLat, pickupLon])              // For location-based queries
+  @@index([dropoffLat, dropoffLon])            // For destination-based queries
   @@index([userId, status])                    // For user ride filtering
   @@index([userId, createdAt])                 // For user history
   @@index([status, pickupTime])                // For admin dashboard queries

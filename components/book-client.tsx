@@ -73,8 +73,26 @@ export default function BookClient(){
   const [dropoffSel, setDropoffSel] = useState<Suggestion|null>(null);
   const [riderName, setRiderName] = useState('');
   const [vehicleId, setVehicleId] = useState<number|null>(null);
+
+  // Clear arrival message when vehicle type changes
+  const handleVehicleChange = (newVehicleId: number | null) => {
+    setVehicleId(newVehicleId);
+    setArrivalMessage(null); // Clear arrival message to force recalculation
+    setArrivalLoading(true); // Show loading state immediately
+
+    // Vehicle type selection handled
+    const selectedVehicleType = vehicleTypes.find((v: Vehicle) => v.id === newVehicleId);
+  };
   const [whenType, setWhenType] = useState<'now'|'later'>('later');
-  const [when, setWhen] = useState(() => new Date(Date.now()+15*60*1000).toISOString().slice(0,16));
+  const [when, setWhen] = useState(() => {
+    const futureTime = new Date(Date.now() + 60 * 60 * 1000);
+    const year = futureTime.getFullYear();
+    const month = String(futureTime.getMonth() + 1).padStart(2, '0');
+    const day = String(futureTime.getDate()).padStart(2, '0');
+    const hours = String(futureTime.getHours()).padStart(2, '0');
+    const minutes = String(futureTime.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  });
 
   // Quote state
   const [quote, setQuote] = useState<{price:number; distanceKm:number; durationMin:number; originalPrice?:number; discountAmount?:number}|null>(null);
@@ -129,10 +147,10 @@ export default function BookClient(){
   const { data: vehicleData } = useSWR('/api/vehicle-types', (url) =>
     fetch(url).then(r => r.json()).then(j => j?.ok ? j.items || [] : [])
   );
-  const vehicles = vehicleData || [];
+  const vehicleTypes = vehicleData || [];
   useEffect(() => {
-    if (vehicles.length && vehicleId == null) setVehicleId(vehicles[0].id);
-  }, [vehicles, vehicleId]);
+    if (vehicleTypes.length && vehicleId == null) setVehicleId(vehicleTypes[0].id);
+  }, [vehicleTypes, vehicleId]);
 
   const { data: favoritesData, error: favoritesError, mutate: mutateFavorites } = useSWR(me ? '/api/favorites' : null, (url) =>
     fetch(url, { credentials: 'include' }).then(r => r.status === 200 ? r.json().then(j => j?.ok ? j.favorites || [] : []) : [])
@@ -614,6 +632,10 @@ export default function BookClient(){
         const vehicles = data.vehicles as any[];
         setAvailableVehicles(vehicles);
 
+        // Get selected vehicle type for smart filtering
+        const selectedVehicleType = vehicleTypes?.find((v: Vehicle) => v.id === vehicleId);
+        const selectedVehicleKey = selectedVehicleType?.key;
+
         // Separate available and busy vehicles
         const availableVehicles = vehicles.filter((v: any) => !v.isBusy);
         const busyVehicles = vehicles.filter((v: any) => v.isBusy);
@@ -621,8 +643,37 @@ export default function BookClient(){
         let closestVehicle = null;
         let minTotalTime = Infinity;
 
-        // First, check available vehicles
-        for (const vehicle of availableVehicles) {
+        // Smart vehicle selection based on selected vehicle type
+        const getFilteredVehicles = (vehicleList: any[], isBusy: boolean = false) => {
+          if (!selectedVehicleKey) return vehicleList;
+
+          switch (selectedVehicleKey) {
+            case 'SEDAN5': // سيارة عادية (Regular Car)
+              // Only SEDAN5 vehicles (no fallback for display)
+              return vehicleList.filter((v: any) => v.vehicleType === 'SEDAN5' || v.vehicleType === '1');
+
+            case 'SEVEN_NO_BAG': // سيارة 7 ركاب (7-seater car)
+              // Only SEVEN_NO_BAG vehicles (no fallback for display)
+              return vehicleList.filter((v: any) => v.vehicleType === 'SEVEN_NO_BAG' || v.vehicleType === '2');
+
+            case 'VAN': // فان (Van)
+              // Only VAN vehicles
+              return vehicleList.filter((v: any) => v.vehicleType === 'VAN' || v.vehicleType === '3');
+
+            case 'LIMO': // ليموزين (Limousine)
+              // Only LIMO vehicles
+              return vehicleList.filter((v: any) => v.vehicleType === 'LIMO' || v.vehicleType === '4');
+
+            default:
+              return vehicleList;
+          }
+        };
+
+        const filteredAvailableVehicles = getFilteredVehicles(availableVehicles);
+        const filteredBusyVehicles = getFilteredVehicles(busyVehicles, true);
+
+        // Simple closest vehicle selection from filtered list (exact type match only)
+        for (const vehicle of filteredAvailableVehicles) {
           if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
             const distance = calculateDistance(
               pickupSel.lat,
@@ -637,10 +688,9 @@ export default function BookClient(){
             }
           }
         }
-
-        // If no available vehicles, check busy vehicles
-        if (!closestVehicle && busyVehicles.length > 0) {
-          for (const vehicle of busyVehicles) {
+        // If no available vehicles found, check filtered busy vehicles (exact type match only)
+        if (!closestVehicle && filteredBusyVehicles.length > 0) {
+          for (const vehicle of filteredBusyVehicles) {
             if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
               const distance = calculateDistance(
                 pickupSel.lat,
@@ -658,17 +708,17 @@ export default function BookClient(){
         }
 
         if (closestVehicle && minTotalTime < Infinity) {
-          // Only show arrival time if total time is within 45 minutes (including busy vehicle time)
-          if (minTotalTime <= 45) {
-            const timeText = formatArrivalTime(minTotalTime);
-            const busyText = closestVehicle.isBusy ? " (currently busy, will finish current ride first)" : "";
-            setArrivalMessage(`The closest car to you arrives in ${timeText}${busyText}`);
-          } else {
-            setArrivalMessage("No cars available currently");
-          }
-        } else {
-          setArrivalMessage("No cars available currently");
-        }
+           // Only show arrival time if total time is within 45 minutes (including busy vehicle time)
+           if (minTotalTime <= 45) {
+             const timeText = formatArrivalTime(minTotalTime);
+             const busyText = closestVehicle.isBusy ? " (currently busy, will finish current ride first)" : "";
+             setArrivalMessage(`The closest car to you arrives in ${timeText}${busyText}`);
+           } else {
+             setArrivalMessage("No cars available currently");
+           }
+         } else {
+           setArrivalMessage("No cars available currently");
+         }
       } catch (error) {
         console.error('Failed to calculate vehicle arrival:', error);
         setArrivalMessage(null);
@@ -678,10 +728,21 @@ export default function BookClient(){
     };
 
     calculateArrival();
-  }, [pickupSel]);
+  }, [pickupSel, vehicleId]);
 
   async function handleBookAndConfirm(){
     if(!quote || !me) return;
+
+    // Validate pickup time for scheduled bookings
+    if (whenType === 'later') {
+      const selectedTime = new Date(when);
+      const minTime = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+
+      if (selectedTime < minTime) {
+        alert(t('book.booking_time_validation') || 'For scheduled bookings, pickup time must be at least 1 hour from now.');
+        return;
+      }
+    }
 
     setBookingLoading(true);
     try{
@@ -774,7 +835,7 @@ export default function BookClient(){
     </button>
   );
 
-  const currentVehicle = vehicles.find((v: Vehicle) => v.id === vehicleId);
+  const currentVehicle = vehicleTypes.find((v: Vehicle) => v.id === vehicleId);
   const vehicleEmoji =
     currentVehicle && currentVehicle.capacity >= 6
       ? "🚐"
@@ -1029,10 +1090,10 @@ export default function BookClient(){
                       </label>
                       <select
                         value={vehicleId ?? ''}
-                        onChange={e => setVehicleId(e.target.value ? Number(e.target.value) : null)}
+                        onChange={e => handleVehicleChange(e.target.value ? Number(e.target.value) : null)}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                       >
-                        {vehicles.map((v: Vehicle) => (
+                        {vehicleTypes.map((v: Vehicle) => (
                           <option key={v.id} value={v.id}>
                             {v.title}
                           </option>
@@ -1077,7 +1138,30 @@ export default function BookClient(){
                         <input
                           type="datetime-local"
                           value={when}
-                          onChange={e => setWhen(e.target.value)}
+                          min={(() => {
+                            const futureTime = new Date(Date.now() + 60 * 60 * 1000);
+                            const year = futureTime.getFullYear();
+                            const month = String(futureTime.getMonth() + 1).padStart(2, '0');
+                            const day = String(futureTime.getDate()).padStart(2, '0');
+                            const hours = String(futureTime.getHours()).padStart(2, '0');
+                            const minutes = String(futureTime.getMinutes()).padStart(2, '0');
+                            return `${year}-${month}-${day}T${hours}:${minutes}`;
+                          })()}
+                          onChange={e => {
+                            const selectedTime = new Date(e.target.value);
+                            const minTime = new Date(Date.now() + 60 * 60 * 1000);
+                            if (selectedTime >= minTime) {
+                              setWhen(e.target.value);
+                            } else {
+                              // Reset to minimum time if invalid selection
+                              const year = minTime.getFullYear();
+                              const month = String(minTime.getMonth() + 1).padStart(2, '0');
+                              const day = String(minTime.getDate()).padStart(2, '0');
+                              const hours = String(minTime.getHours()).padStart(2, '0');
+                              const minutes = String(minTime.getMinutes()).padStart(2, '0');
+                              setWhen(`${year}-${month}-${day}T${hours}:${minutes}`);
+                            }
+                          }}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                         />
                       </div>

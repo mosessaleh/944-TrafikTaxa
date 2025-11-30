@@ -57,7 +57,8 @@
     "save": "Gem",
     "choose_favorite": "Vælg fra favoritter",
     "no_favorites": "Ingen favoritter endnu. Vælg en adresse og brug stjernen for at gemme den.",
-    "close": "Luk"
+    "close": "Luk",
+    "booking_time_validation": "For planlagte bookinger skal afhentningstiden være mindst 1 time fra nu."
   },
   "account": {
     "title": "Min Konto",
