@@ -15,6 +15,7 @@ if (typeof window !== 'undefined') {
 import AddressAutocomplete, { Suggestion } from '@/components/address-autocomplete';
 import dkMessages from '@/messages/dk.json';
 import enMessages from '@/messages/en.json';
+import { calculateDistance, estimateArrivalTime, formatArrivalTime } from '@/lib/distance';
 
 // Translation messages
 const messages = {
@@ -97,9 +98,33 @@ export default function BookClient(){
   const [saveModal, setSaveModal] = useState<{open:boolean; target: FavApply|null; name:string; address:string}>({open:false, target:null, name:'', address:''});
   const [pickModal, setPickModal] = useState<{open:boolean; target: FavApply|null}>({open:false, target:null});
 
+  // Vehicle arrival state
+  const [arrivalMessage, setArrivalMessage] = useState<string|null>(null);
+  const [arrivalLoading, setArrivalLoading] = useState(false);
+
+  // Available vehicles for map display
+  const [availableVehicles, setAvailableVehicles] = useState<any[]>([]);
+
   useEffect(() => {
     if(me) setRiderName(`${me.firstName} ${me.lastName}`.trim());
   }, [me]);
+
+  // Load available vehicles for map display on mount
+  useEffect(() => {
+    const loadVehicles = async () => {
+      try {
+        const response = await fetch('/api/available-vehicles');
+        const data = await response.json();
+        if (response.ok && data.ok && data.vehicles) {
+          setAvailableVehicles(data.vehicles);
+        }
+      } catch (error) {
+        console.error('Failed to load vehicles for map:', error);
+      }
+    };
+
+    loadVehicles();
+  }, []);
 
   const { data: vehicleData } = useSWR('/api/vehicle-types', (url) =>
     fetch(url).then(r => r.json()).then(j => j?.ok ? j.items || [] : [])
@@ -351,6 +376,24 @@ export default function BookClient(){
         dropoffMarker.bindPopup(`<strong>Destination:</strong><br>${dropoffSel.text}`);
         markers.push(dropoffMarker);
       }
+
+      // Add available vehicle markers (black cars)
+      if (availableVehicles.length > 0) {
+        availableVehicles.forEach(vehicle => {
+          if (vehicle.lastLat && vehicle.lastLon) {
+            const vehicleMarker = L.marker([vehicle.lastLat, vehicle.lastLon], {
+              icon: L.divIcon({
+                className: 'vehicle-marker',
+                html: `<span style="font-size: 20px;">🚗</span>`,
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+              })
+            }).addTo(map);
+            const statusText = vehicle.isBusy ? 'Busy' : 'Available';
+            vehicleMarker.bindPopup(`<strong>${vehicle.make} ${vehicle.model}</strong><br>License: ${vehicle.regNumber}<br>Status: ${statusText}`);
+          }
+        });
+      }
  
       // Adjust map view based on available markers
       if (markers.length === 1) {
@@ -403,15 +446,10 @@ export default function BookClient(){
     }
   };
  
-  // Update map when locations are selected
+  // Update map when locations are selected or vehicles are loaded
   useEffect(() => {
-    const hasPickup = !!(pickupSel && pickupSel.lat && pickupSel.lon);
-    const hasDropoff = !!(dropoffSel && dropoffSel.lat && dropoffSel.lon);
-
-    if (!hasPickup && !hasDropoff) return;
-
     updateMapWithLocations();
-  }, [pickupSel, dropoffSel]);
+  }, [pickupSel, dropoffSel, availableVehicles]);
 
   // Check location permission on mount
   useEffect(() => {
@@ -551,6 +589,96 @@ export default function BookClient(){
     }, 200);
     return () => { if(qTimer.current) clearTimeout(qTimer.current); };
   }, [bothSelected, quotePayload, vehicleId]);
+
+  // Calculate nearest vehicle arrival time when pickup is selected
+  useEffect(() => {
+    if (!pickupSel || !pickupSel.lat || !pickupSel.lon) {
+      setArrivalMessage(null);
+      return;
+    }
+
+    const calculateArrival = async () => {
+      try {
+        setArrivalLoading(true);
+        setArrivalMessage(null);
+
+        const response = await fetch('/api/available-vehicles');
+        const data = await response.json();
+
+        if (!response.ok || !data.ok || !data.vehicles?.length) {
+          setArrivalMessage(null);
+          setAvailableVehicles([]);
+          return;
+        }
+
+        const vehicles = data.vehicles as any[];
+        setAvailableVehicles(vehicles);
+
+        // Separate available and busy vehicles
+        const availableVehicles = vehicles.filter((v: any) => !v.isBusy);
+        const busyVehicles = vehicles.filter((v: any) => v.isBusy);
+
+        let closestVehicle = null;
+        let minTotalTime = Infinity;
+
+        // First, check available vehicles
+        for (const vehicle of availableVehicles) {
+          if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
+            const distance = calculateDistance(
+              pickupSel.lat,
+              pickupSel.lon,
+              vehicle.lastLat,
+              vehicle.lastLon
+            );
+            const arrivalMinutes = estimateArrivalTime(distance);
+            if (arrivalMinutes < minTotalTime) {
+              minTotalTime = arrivalMinutes;
+              closestVehicle = vehicle;
+            }
+          }
+        }
+
+        // If no available vehicles, check busy vehicles
+        if (!closestVehicle && busyVehicles.length > 0) {
+          for (const vehicle of busyVehicles) {
+            if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
+              const distance = calculateDistance(
+                pickupSel.lat,
+                pickupSel.lon,
+                vehicle.lastLat,
+                vehicle.lastLon
+              );
+              const arrivalMinutes = estimateArrivalTime(distance) + (vehicle.estimatedExtraTime || 0);
+              if (arrivalMinutes < minTotalTime) {
+                minTotalTime = arrivalMinutes;
+                closestVehicle = vehicle;
+              }
+            }
+          }
+        }
+
+        if (closestVehicle && minTotalTime < Infinity) {
+          // Only show arrival time if total time is within 45 minutes (including busy vehicle time)
+          if (minTotalTime <= 45) {
+            const timeText = formatArrivalTime(minTotalTime);
+            const busyText = closestVehicle.isBusy ? " (currently busy, will finish current ride first)" : "";
+            setArrivalMessage(`The closest car to you arrives in ${timeText}${busyText}`);
+          } else {
+            setArrivalMessage("No cars available currently");
+          }
+        } else {
+          setArrivalMessage("No cars available currently");
+        }
+      } catch (error) {
+        console.error('Failed to calculate vehicle arrival:', error);
+        setArrivalMessage(null);
+      } finally {
+        setArrivalLoading(false);
+      }
+    };
+
+    calculateArrival();
+  }, [pickupSel]);
 
   async function handleBookAndConfirm(){
     if(!quote || !me) return;
@@ -822,6 +950,21 @@ export default function BookClient(){
                       />
                     )}
                   </div>
+                  {arrivalLoading && (
+                    <div className="text-xs text-blue-600 bg-blue-50 px-3 py-2 rounded-lg border border-blue-200 flex items-center gap-2">
+                      <div className="animate-spin rounded-full h-3 w-3 border border-current border-t-transparent"></div>
+                      Finding nearest vehicle...
+                    </div>
+                  )}
+                  {arrivalMessage && !arrivalLoading && (
+                    <div className={`text-xs px-3 py-2 rounded-lg border ${
+                      arrivalMessage.includes("No cars available")
+                        ? "text-orange-600 bg-orange-50 border-orange-200"
+                        : "text-green-600 bg-green-50 border-green-200"
+                    }`}>
+                      {arrivalMessage.includes("No cars available") ? "⚠️" : "🚗"} {arrivalMessage}
+                    </div>
+                  )}
                   {locationError && (
                     <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-200">
                       ⚠️ {locationError}
