@@ -27,7 +27,7 @@ async function main() {
 
     if (results.errors.length > 0) {
       console.log('Errors encountered:');
-      results.errors.forEach(error => console.log(`  - ${error}`));
+      results.errors.forEach((error: string) => console.log(`  - ${error}`));
     }
 
     // Process retry payments (optional - can be run less frequently)
