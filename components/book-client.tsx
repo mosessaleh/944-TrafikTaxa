@@ -241,29 +241,32 @@ export default function BookClient(){
       map.on('click', async (e: any) => {
         const { lat, lng } = e.latlng;
 
-        // Reverse geocode the clicked location
+        // Reverse geocode the clicked location using Nominatim
         try {
           const response = await fetch(
-            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+            {
+              headers: {
+                'User-Agent': '944-Taxi-App/1.0'
+              }
+            }
           );
 
           if (response.ok) {
             const data = await response.json();
-            const address = [
-              data.localityInfo?.administrative?.[2]?.name,
-              data.city,
-              data.principalSubdivision,
-              data.countryName
-            ].filter(Boolean).join(', ');
+            let address = data.display_name;
 
             if (address) {
+              // Clean up the address, remove country if it's Denmark
+              address = address.replace(/, Denmark$/, '').trim();
+
               const suggestion: Suggestion = {
                 id: null,
                 text: address,
                 lat: lat,
                 lon: lng,
-                postcode: data.postcode || null,
-                city: data.city || null
+                postcode: data.address?.postcode || null,
+                city: data.address?.city || data.address?.town || data.address?.village || null
               };
 
               // Determine if this should be pickup or dropoff based on current state
@@ -278,30 +281,15 @@ export default function BookClient(){
                 setPickupSel(suggestion);
                 setPickup(address);
               }
+            } else {
+              alert('Unable to determine address for this location. Please enter address manually.');
             }
+          } else {
+            alert('Unable to determine address for this location. Please enter address manually.');
           }
         } catch (error) {
           console.warn('Reverse geocoding failed for map click:', error);
-          // Fallback to coordinates
-          const suggestion: Suggestion = {
-            id: null,
-            text: `${lat.toFixed(6)}, ${lng.toFixed(6)}`,
-            lat: lat,
-            lon: lng,
-            postcode: null,
-            city: null
-          };
-
-          if (!pickupSel) {
-            setPickupSel(suggestion);
-            setPickup(suggestion.text);
-          } else if (!dropoffSel) {
-            setDropoffSel(suggestion);
-            setDropoff(suggestion.text);
-          } else {
-            setPickupSel(suggestion);
-            setPickup(suggestion.text);
-          }
+          alert('Unable to determine address for this location. Please enter address manually.');
         }
       });
   
@@ -509,50 +497,46 @@ export default function BookClient(){
       setCurrentLocation(location);
       setLocationPermission('granted');
 
-      // Reverse geocode to get address
+      // Reverse geocode to get address using Nominatim
       try {
         const response = await fetch(
-          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`,
+          {
+            headers: {
+              'User-Agent': '944-Taxi-App/1.0'
+            }
+          }
         );
 
         if (response.ok) {
           const data = await response.json();
-          const address = [
-            data.localityInfo?.administrative?.[2]?.name,
-            data.city,
-            data.principalSubdivision,
-            data.countryName
-          ].filter(Boolean).join(', ');
+          let address = data.display_name;
 
           if (address) {
+            // Clean up the address, remove country if it's Denmark
+            address = address.replace(/, Denmark$/, '').trim();
+
             // Set as pickup location
             const suggestion: Suggestion = {
               id: null,
               text: address,
               lat: latitude,
               lon: longitude,
-              postcode: data.postcode || null,
-              city: data.city || null
+              postcode: data.address?.postcode || null,
+              city: data.address?.city || data.address?.town || data.address?.village || null
             };
 
             setPickupSel(suggestion);
             setPickup(address);
+          } else {
+            alert('Unable to determine address for your location. Please enter address manually.');
           }
+        } else {
+          alert('Unable to determine address for your location. Please enter address manually.');
         }
       } catch (geocodeError) {
         console.warn('Reverse geocoding failed:', geocodeError);
-        // Still set the location even if geocoding fails
-        const suggestion: Suggestion = {
-          id: null,
-          text: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
-          lat: latitude,
-          lon: longitude,
-          postcode: null,
-          city: null
-        };
-
-        setPickupSel(suggestion);
-        setPickup(suggestion.text);
+        alert('Unable to determine address for your location. Please enter address manually.');
       }
 
     } catch (error: any) {
@@ -643,82 +627,162 @@ export default function BookClient(){
         let closestVehicle = null;
         let minTotalTime = Infinity;
 
-        // Smart vehicle selection based on selected vehicle type
-        const getFilteredVehicles = (vehicleList: any[], isBusy: boolean = false) => {
+        // Smart vehicle selection with priority rules
+        const getVehiclesByPriority = (vehicleList: any[], isBusy: boolean = false) => {
           if (!selectedVehicleKey) return vehicleList;
+
+          let exactType: string[] = [];
+          let compatibleTypes: string[] = [];
 
           switch (selectedVehicleKey) {
             case 'SEDAN5': // سيارة عادية (Regular Car)
-              // Only SEDAN5 vehicles (no fallback for display)
-              return vehicleList.filter((v: any) => v.vehicleType === 'SEDAN5' || v.vehicleType === '1');
-
+              exactType = ['SEDAN5', '1'];
+              compatibleTypes = ['SEVEN_NO_BAG', '2', 'VAN', '3'];
+              break;
             case 'SEVEN_NO_BAG': // سيارة 7 ركاب (7-seater car)
-              // Only SEVEN_NO_BAG vehicles (no fallback for display)
-              return vehicleList.filter((v: any) => v.vehicleType === 'SEVEN_NO_BAG' || v.vehicleType === '2');
-
+              exactType = ['SEVEN_NO_BAG', '2'];
+              compatibleTypes = ['VAN', '3'];
+              break;
             case 'VAN': // فان (Van)
-              // Only VAN vehicles
-              return vehicleList.filter((v: any) => v.vehicleType === 'VAN' || v.vehicleType === '3');
-
+              exactType = ['VAN', '3'];
+              compatibleTypes = []; // No compatible types
+              break;
             case 'LIMO': // ليموزين (Limousine)
-              // Only LIMO vehicles
-              return vehicleList.filter((v: any) => v.vehicleType === 'LIMO' || v.vehicleType === '4');
-
+              exactType = ['LIMO', '4'];
+              compatibleTypes = ['SEDAN5', '1'];
+              break;
             default:
               return vehicleList;
           }
-        };
 
-        const filteredAvailableVehicles = getFilteredVehicles(availableVehicles);
-        const filteredBusyVehicles = getFilteredVehicles(busyVehicles, true);
+          // First, check if any exact type vehicles are within 15 minutes
+          const exactVehicles = vehicleList.filter((v: any) =>
+            exactType.includes(v.vehicleType)
+          );
 
-        // Simple closest vehicle selection from filtered list (exact type match only)
-        for (const vehicle of filteredAvailableVehicles) {
-          if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
-            const distance = calculateDistance(
-              pickupSel.lat,
-              pickupSel.lon,
-              vehicle.lastLat,
-              vehicle.lastLon
-            );
-            const arrivalMinutes = estimateArrivalTime(distance);
-            if (arrivalMinutes < minTotalTime) {
-              minTotalTime = arrivalMinutes;
-              closestVehicle = vehicle;
-            }
-          }
-        }
-        // If no available vehicles found, check filtered busy vehicles (exact type match only)
-        if (!closestVehicle && filteredBusyVehicles.length > 0) {
-          for (const vehicle of filteredBusyVehicles) {
-            if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
+          const exactWithin15 = exactVehicles.filter((v: any) => {
+            if (v.lastLat && v.lastLon && pickupSel.lat && pickupSel.lon) {
               const distance = calculateDistance(
                 pickupSel.lat,
                 pickupSel.lon,
-                vehicle.lastLat,
-                vehicle.lastLon
+                v.lastLat,
+                v.lastLon
               );
-              const arrivalMinutes = estimateArrivalTime(distance) + (vehicle.estimatedExtraTime || 0);
-              if (arrivalMinutes < minTotalTime) {
-                minTotalTime = arrivalMinutes;
-                closestVehicle = vehicle;
+              const arrivalMinutes = isBusy ? estimateArrivalTime(distance) + (v.estimatedExtraTime || 0) : estimateArrivalTime(distance);
+              return arrivalMinutes <= 15;
+            }
+            return false;
+          });
+
+          if (exactWithin15.length > 0) {
+            // Use only exact type vehicles within 15 min
+            return exactWithin15;
+          } else {
+            // Use exact type + compatible types
+            return vehicleList.filter((v: any) =>
+              exactType.includes(v.vehicleType) || compatibleTypes.includes(v.vehicleType)
+            );
+          }
+        };
+
+        const filteredAvailableVehicles = getVehiclesByPriority(availableVehicles);
+        const filteredBusyVehicles = getVehiclesByPriority(busyVehicles, true);
+
+        // Find closest vehicle using real routing
+        const findClosestVehicle = async (vehicleList: any[], isBusy: boolean = false) => {
+          let closest = null;
+          let minTime = Infinity;
+
+          for (const vehicle of vehicleList) {
+            if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
+              try {
+                // Call route API for real driving time
+                const routeResponse = await fetch(`/api/route?startLat=${vehicle.lastLat}&startLon=${vehicle.lastLon}&endLat=${pickupSel.lat}&endLon=${pickupSel.lon}`);
+                if (routeResponse.ok) {
+                  const routeData = await routeResponse.json();
+                  if (routeData.ok && routeData.route?.duration) {
+                    const durationMinutes = Math.ceil(routeData.route.duration / 60); // Convert seconds to minutes
+                    const totalTime = isBusy ? durationMinutes + (vehicle.estimatedExtraTime || 0) : durationMinutes;
+                    if (totalTime < minTime) {
+                      minTime = totalTime;
+                      closest = vehicle;
+                    }
+                  } else {
+                    // Fallback to simple calculation
+                    const distance = calculateDistance(
+                      pickupSel.lat,
+                      pickupSel.lon,
+                      vehicle.lastLat,
+                      vehicle.lastLon
+                    );
+                    const arrivalMinutes = estimateArrivalTime(distance);
+                    const totalTime = isBusy ? arrivalMinutes + (vehicle.estimatedExtraTime || 0) : arrivalMinutes;
+                    if (totalTime < minTime) {
+                      minTime = totalTime;
+                      closest = vehicle;
+                    }
+                  }
+                } else {
+                  // Fallback
+                  const distance = calculateDistance(
+                    pickupSel.lat,
+                    pickupSel.lon,
+                    vehicle.lastLat,
+                    vehicle.lastLon
+                  );
+                  const arrivalMinutes = estimateArrivalTime(distance);
+                  const totalTime = isBusy ? arrivalMinutes + (vehicle.estimatedExtraTime || 0) : arrivalMinutes;
+                  if (totalTime < minTime) {
+                    minTime = totalTime;
+                    closest = vehicle;
+                  }
+                }
+              } catch (error) {
+                // Fallback
+                const distance = calculateDistance(
+                  pickupSel.lat,
+                  pickupSel.lon,
+                  vehicle.lastLat,
+                  vehicle.lastLon
+                );
+                const arrivalMinutes = estimateArrivalTime(distance);
+                const totalTime = isBusy ? arrivalMinutes + (vehicle.estimatedExtraTime || 0) : arrivalMinutes;
+                if (totalTime < minTime) {
+                  minTime = totalTime;
+                  closest = vehicle;
+                }
               }
             }
+          }
+          return { vehicle: closest, time: minTime };
+        };
+
+        // Find closest available vehicle
+        const availableResult = await findClosestVehicle(filteredAvailableVehicles);
+        if (availableResult.vehicle) {
+          closestVehicle = availableResult.vehicle;
+          minTotalTime = availableResult.time;
+        } else if (filteredBusyVehicles.length > 0) {
+          // Check busy vehicles if no available
+          const busyResult = await findClosestVehicle(filteredBusyVehicles, true);
+          if (busyResult.vehicle) {
+            closestVehicle = busyResult.vehicle;
+            minTotalTime = busyResult.time;
           }
         }
 
         if (closestVehicle && minTotalTime < Infinity) {
-           // Only show arrival time if total time is within 45 minutes (including busy vehicle time)
-           if (minTotalTime <= 45) {
-             const timeText = formatArrivalTime(minTotalTime);
-             const busyText = closestVehicle.isBusy ? " (currently busy, will finish current ride first)" : "";
-             setArrivalMessage(`The closest car to you arrives in ${timeText}${busyText}`);
-           } else {
-             setArrivalMessage("No cars available currently");
-           }
-         } else {
-           setArrivalMessage("No cars available currently");
-         }
+            // Only show arrival time if total time is within 45 minutes (including busy vehicle time)
+            if (minTotalTime <= 45) {
+              const timeText = formatArrivalTime(minTotalTime);
+              const busyText = closestVehicle.isBusy ? " (currently busy, will finish current ride first)" : "";
+              setArrivalMessage(`The closest car to you arrives in ${timeText}${busyText}`);
+            } else {
+              setArrivalMessage("No cars available currently");
+            }
+          } else {
+            setArrivalMessage("No cars available currently");
+          }
       } catch (error) {
         console.error('Failed to calculate vehicle arrival:', error);
         setArrivalMessage(null);

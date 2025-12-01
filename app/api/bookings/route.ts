@@ -7,6 +7,7 @@ import { computePrice } from '@/lib/price';
 import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 import { sanitizeInput } from '@/lib/sanitize';
 import { assessBookingRisk, updateBookingRisk } from '@/lib/risk-assessment';
+import { calculateDistance } from '@/lib/distance';
 
 // Validation schema for booking creation
 const createBookingSchema = z.object({
@@ -334,6 +335,136 @@ export async function POST(request: NextRequest) {
         }
       }
     });
+
+    // Assign closest available vehicle based on pickup location and vehicle type with priority rules
+    try {
+      // Get vehicle type key for filtering
+      const vehicleType = await prisma.vehicleType.findUnique({
+        where: { id: validatedData.vehicleTypeId },
+        select: { key: true }
+      });
+
+      if (vehicleType && validatedData.pickupLat && validatedData.pickupLon) {
+        // Get available vehicles
+        const availableVehicles = await prisma.comDriver.findMany({
+          where: {
+            isOnline: true,
+            isActive: true,
+            car: { not: null },
+            currentRideId: null // Not busy
+          },
+          select: {
+            id: true,
+            car: true,
+            lastLocation: true
+          }
+        });
+
+        const carPlates = availableVehicles.map(d => d.car).filter((car): car is string => car !== null);
+
+        // Get all vehicles with locations
+        const allVehicles = await prisma.comVehicles.findMany({
+          where: {
+            regNumber: { in: carPlates },
+            lastLat: { not: null },
+            lastLon: { not: null },
+            lastLocationUpdate: {
+              gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
+            }
+          },
+          select: {
+            id: true,
+            regNumber: true,
+            lastLat: true,
+            lastLon: true,
+            vehicleType: true
+          }
+        });
+
+        // Priority filtering based on selected type
+        let candidateVehicles = allVehicles;
+        let exactType: string[] = [];
+        let compatibleTypes: string[] = [];
+
+        switch (vehicleType.key) {
+          case 'SEDAN5':
+            exactType = ['SEDAN5', '1'];
+            compatibleTypes = ['SEVEN_NO_BAG', '2', 'VAN', '3'];
+            break;
+          case 'SEVEN_NO_BAG':
+            exactType = ['SEVEN_NO_BAG', '2'];
+            compatibleTypes = ['VAN', '3'];
+            break;
+          case 'VAN':
+            exactType = ['VAN', '3'];
+            compatibleTypes = [];
+            break;
+          case 'LIMO':
+            exactType = ['LIMO', '4'];
+            compatibleTypes = ['SEDAN5', '1'];
+            break;
+        }
+
+        // Check if any exact type vehicles are within 15 minutes
+        const exactVehicles = allVehicles.filter((v: any) =>
+          exactType.includes(v.vehicleType)
+        );
+
+        const exactWithin15 = exactVehicles.filter((v: any) => {
+          if (v.lastLat && v.lastLon && validatedData.pickupLat && validatedData.pickupLon) {
+            const distance = calculateDistance(
+              validatedData.pickupLat,
+              validatedData.pickupLon,
+              v.lastLat,
+              v.lastLon
+            );
+            const arrivalMinutes = Math.ceil((distance / 30) * 60); // 30 km/h
+            return arrivalMinutes <= 15;
+          }
+          return false;
+        });
+
+        if (exactWithin15.length > 0) {
+          candidateVehicles = exactWithin15;
+        } else {
+          candidateVehicles = allVehicles.filter((v: any) =>
+            exactType.includes(v.vehicleType) || compatibleTypes.includes(v.vehicleType)
+          );
+        }
+
+        // Find closest vehicle from candidates
+        let closestVehicle = null;
+        let minDistance = Infinity;
+
+        for (const vehicle of candidateVehicles) {
+          if (vehicle.lastLat && vehicle.lastLon && validatedData.pickupLat && validatedData.pickupLon) {
+            const distance = calculateDistance(
+              validatedData.pickupLat,
+              validatedData.pickupLon,
+              vehicle.lastLat,
+              vehicle.lastLon
+            );
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestVehicle = vehicle;
+            }
+          }
+        }
+
+        // Notify the closest vehicle to be ready (preparation phase)
+        if (closestVehicle) {
+          const notificationMessage = `Ride ${booking.id}: There is an upcoming ride with cost ${price} DKK, please be ready.`;
+          await prisma.comVehicles.update({
+            where: { id: closestVehicle.id },
+            data: { notes: notificationMessage }
+          });
+          console.log(`Notified vehicle ${closestVehicle.regNumber} for booking ${booking.id}: ${notificationMessage}`);
+        }
+      }
+    } catch (assignError) {
+      console.warn('Failed to assign vehicle to booking:', assignError);
+      // Don't fail the booking if assignment fails
+    }
 
     // Perform risk assessment
     try {

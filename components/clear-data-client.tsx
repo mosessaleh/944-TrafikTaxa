@@ -41,7 +41,7 @@ export default function ClearDataClient() {
 
   const handleClearData = async (table: string) => {
     let warningMessage = `Are you absolutely sure you want to clear ALL data from the "${table}" table? This action cannot be undone!`;
-    
+
     // Add cascade warning for rides
     if (table === 'ride') {
       warningMessage += '\n\nWARNING: This will also delete all related complaints and invoices!';
@@ -78,6 +78,44 @@ export default function ClearDataClient() {
     } catch (error) {
       console.error('Error clearing data:', error);
       alert('Failed to clear data. Please check the console for details.');
+    } finally {
+      setClearing(null);
+    }
+  };
+
+  const handleTruncateTransactionTables = async () => {
+    const warningMessage = `Are you absolutely sure you want to TRUNCATE ALL transaction tables? This will permanently delete ALL data from: auditlog, cardpayment, cryptopayment, invoice, notification, notificationsettings, ride. IDs will reset to 1. This action cannot be undone!`;
+
+    if (!confirm(warningMessage)) {
+      return;
+    }
+
+    const confirmation = prompt(`Type "TRUNCATE ALL TRANSACTION TABLES" to confirm:`);
+    if (confirmation !== 'TRUNCATE ALL TRANSACTION TABLES') {
+      alert('Confirmation failed. Action cancelled.');
+      return;
+    }
+
+    setClearing('transaction-tables');
+    try {
+      const response = await fetch('/api/admin/truncate-transaction-tables', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        alert(result.message || 'Transaction tables truncated successfully!');
+        await fetchTableCounts(); // Refresh counts
+      } else {
+        const error = await response.json();
+        alert(`Failed to truncate tables: ${error.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error truncating tables:', error);
+      alert('Failed to truncate tables. Please check the console for details.');
     } finally {
       setClearing(null);
     }
@@ -123,6 +161,41 @@ export default function ClearDataClient() {
             Clearing data will permanently delete all records from the selected table. 
             The table will be reset and IDs will start from 1 again. This action cannot be undone.
             </p>
+        </div>
+      </div>
+
+      {/* Truncate Transaction Tables */}
+      <div className="bg-red-50 border border-red-200 rounded-xl p-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-red-100 rounded-lg text-red-600">
+              <AlertOctagon size={20} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-red-900">Truncate Transaction Tables</h3>
+              <p className="text-red-700 text-sm mt-1">
+                Reset all transaction-related tables: auditlog, cardpayment, cryptopayment, invoice, notification, notificationsettings, ride.
+                IDs will restart from 1.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleTruncateTransactionTables}
+            disabled={clearing === 'transaction-tables'}
+            className="px-6 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-sm"
+          >
+            {clearing === 'transaction-tables' ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                Truncating...
+              </>
+            ) : (
+              <>
+                <Trash2 size={16} />
+                Truncate All
+              </>
+            )}
+          </button>
         </div>
       </div>
 

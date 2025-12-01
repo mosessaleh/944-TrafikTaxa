@@ -5,6 +5,85 @@ import { notifyUserInvoiceReady } from '@/lib/notify';
 import { authorizeCardPayment } from '@/lib/payment-processor';
 import { sendEmail } from '@/lib/email';
 
+// Function to assign driver to ride based on booking explanation
+async function assignDriverToRide(rideId: number) {
+  try {
+    console.log(`Assigning driver for ride ${rideId}`);
+
+    // Get the ride to find the assigned vehicle from explanation
+    const ride = await prisma.ride.findUnique({
+      where: { id: rideId },
+      select: {
+        explanation: true
+      }
+    });
+
+    if (!ride || !ride.explanation) {
+      console.warn(`No explanation found for ride ${rideId}`);
+      return;
+    }
+
+    // Extract vehicle regNumber from explanation (format: "Assigned vehicle: XX XX XXX (distance)")
+    const match = ride.explanation.match(/Assigned vehicle: ([A-Z]{2} \d{2} \d{3})/);
+    if (!match) {
+      console.warn(`No vehicle regNumber found in explanation: ${ride.explanation}`);
+      return;
+    }
+
+    const regNumber = match[1];
+    console.log(`Extracted vehicle regNumber: ${regNumber} from explanation: ${ride.explanation}`);
+
+    // Find the vehicle
+    const vehicle = await prisma.comVehicles.findFirst({
+      where: { regNumber },
+      select: {
+        id: true,
+        regNumber: true
+      }
+    });
+
+    if (!vehicle) {
+      console.warn(`Vehicle ${regNumber} not found`);
+      return;
+    }
+
+    // Find driver who drives this vehicle
+    const driver = await prisma.comDriver.findFirst({
+      where: {
+        car: regNumber,
+        isOnline: true,
+        isActive: true,
+        currentRideId: null // Not busy
+      },
+      select: {
+        id: true,
+        drFname: true,
+        drLname: true,
+        currentRideId: true
+      }
+    });
+
+    if (!driver) {
+      console.warn(`No available driver found for vehicle ${regNumber}`);
+      return;
+    }
+
+    console.log(`Found driver ${driver.drFname} ${driver.drLname} with currentRideId: ${driver.currentRideId}`);
+
+    // Assign ride to driver
+    await prisma.comDriver.update({
+      where: { id: driver.id },
+      data: {
+        currentRideId: rideId
+      }
+    });
+
+    console.log(`Assigned ride ${rideId} to driver ${driver.drFname} ${driver.drLname} (vehicle: ${regNumber})`);
+  } catch (error) {
+    console.error('Failed to assign driver to ride:', error);
+  }
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -104,6 +183,9 @@ export async function POST(
         }
       });
 
+      // Assign driver for the ride
+      await assignDriverToRide(bookingId);
+
       // Send email (non-critical)
       try {
         await notifyUserInvoiceReady(fullBooking.user.email, fullBooking.user.firstName, {
@@ -177,6 +259,9 @@ export async function POST(
           }
         });
         console.log('✅ Booking updated with card payment method');
+
+        // Assign driver for the ride
+        await assignDriverToRide(bookingId);
       } catch (updateError) {
         console.error('❌ Booking update failed:', updateError);
         return NextResponse.json({
