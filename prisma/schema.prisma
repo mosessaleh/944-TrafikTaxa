@@ -200,6 +200,7 @@ model Ride {
   riskReviewed   Boolean    @default(false) // Whether admin has reviewed
   riskApproved   Boolean?   // Admin approval status
   riskNotes      String?    // Admin notes about risk assessment
+  driverQueue    Json?      @default("[]") // Array of top 3 vehicle IDs prioritized for assignment
 
   vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
   vehicleTypeId Int
@@ -220,8 +221,6 @@ model Ride {
   @@index([riskScore])
   @@index([riskLevel])
   @@index([riskReviewed])
-  @@index([pickupLat, pickupLon])              // For location-based queries
-  @@index([dropoffLat, dropoffLon])            // For destination-based queries
   @@index([userId, status])                    // For user ride filtering
   @@index([userId, createdAt])                 // For user history
   @@index([status, pickupTime])                // For admin dashboard queries

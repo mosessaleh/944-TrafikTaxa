@@ -307,6 +307,10 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[DEBUG] About to create booking with paymentMethod:', paymentMethod);
+
+    // Initialize driver queue (will be populated during vehicle assignment)
+    let driverQueue: string[] = [];
+
     // Create booking with CONFIRMED status (no immediate payment)
     const booking = await prisma.ride.create({
       data: {
@@ -324,6 +328,7 @@ export async function POST(request: NextRequest) {
         paymentStatus: 'PENDING_PAYMENT', // New status for post-trip payment
         paymentMethod: paymentMethod,
         vehicleTypeId: validatedData.vehicleTypeId,
+        driverQueue,
         ...(selectedPaymentMethodId && { savedPaymentMethodId: selectedPaymentMethodId })
       },
       include: {
@@ -432,24 +437,29 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Find closest vehicle from candidates
-        let closestVehicle = null;
-        let minDistance = Infinity;
-
-        for (const vehicle of candidateVehicles) {
-          if (vehicle.lastLat && vehicle.lastLon && validatedData.pickupLat && validatedData.pickupLon) {
-            const distance = calculateDistance(
-              validatedData.pickupLat,
-              validatedData.pickupLon,
-              vehicle.lastLat,
-              vehicle.lastLon
-            );
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestVehicle = vehicle;
+        // Calculate distances and sort vehicles by proximity
+        const vehiclesWithDistance = candidateVehicles
+          .map(vehicle => {
+            if (vehicle.lastLat && vehicle.lastLon && validatedData.pickupLat && validatedData.pickupLon) {
+              const distance = calculateDistance(
+                validatedData.pickupLat,
+                validatedData.pickupLon,
+                vehicle.lastLat,
+                vehicle.lastLon
+              );
+              return { ...vehicle, distance };
             }
-          }
-        }
+            return null;
+          })
+          .filter(vehicle => vehicle !== null)
+          .sort((a, b) => a.distance - b.distance);
+
+        // Get top 3 vehicles for driver queue
+        const top3Vehicles = vehiclesWithDistance.slice(0, 3);
+        const driverQueue = top3Vehicles.map(v => v.id);
+
+        // Assign closest vehicle (first in sorted list)
+        const closestVehicle = top3Vehicles[0] || null;
 
         // Notify the closest vehicle to be ready (preparation phase)
         if (closestVehicle) {
