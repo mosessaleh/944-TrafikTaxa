@@ -5,6 +5,7 @@ import { hashPassword, requireAdmin } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
 import { encryptCPR, decryptCPR } from '@/lib/crypto';
 import { AuditLogger, AuditEvent } from '@/lib/audit-log';
+import { randomUUID } from 'crypto';
 
 const CreateSchema = z.object({
   comId: z.number().int().positive(),
@@ -122,6 +123,8 @@ export async function POST(req: Request) {
     // Encrypt CPR before storing
     const encryptedCPR = encryptCPR(data.cpr);
 
+    const apiKey = randomUUID();
+
     const driver = await prisma.comDriver.create({
       data: {
         comId: data.comId,
@@ -142,6 +145,7 @@ export async function POST(req: Request) {
         currentRideId: data.currentRideId,
         drUsername: data.drUsername,
         drPass: hashedPassword,
+        apiKey: apiKey,
         lastLocation: data.lastLocation ? JSON.stringify(data.lastLocation) : undefined,
       }
     });
@@ -160,8 +164,8 @@ export async function POST(req: Request) {
       severity: 'high'
     });
 
-    // Return driver data with decrypted CPR for immediate display
-    const driverWithDecryptedCPR = { ...driver, cpr: data.cpr };
+    // Return driver data with decrypted CPR and API key for immediate display
+    const driverWithDecryptedCPR = { ...driver, cpr: data.cpr, apiKey: apiKey };
 
     return NextResponse.json({ ok: true, data: driverWithDecryptedCPR }, { status: 201 });
   } catch (e: any) {

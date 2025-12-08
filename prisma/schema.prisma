@@ -170,6 +170,8 @@ model Ride {
   passengers     Int        @default(1)
   pickupAddress  String
   dropoffAddress String
+  startLatLon    Json?      // [lat, lon] for pickup coordinates
+  endLatLon      Json?      // [lat, lon] for dropoff coordinates
   scheduled      Boolean    @default(false)
   pickupTime     DateTime
   distanceKm     Float?
@@ -181,6 +183,9 @@ model Ride {
   driverId       Int?
   car            String?
   createdAt      DateTime   @default(now())
+  acceptedAt     DateTime?
+  pickedAt       DateTime?
+  droppedAt      DateTime?
   paymentMethod  String?
   savedPaymentMethodId Int?
 
@@ -493,6 +498,7 @@ model comDriver {
   currentRideId  Int?
   drUsername     String      @unique
   drPass         String      // Will store hashed password
+  apiKey         String?     @unique // API key for server-to-server calls
   lastLocation   Json?       // {lat: float, lon: float}
   createdAt      DateTime    @default(now())
 
@@ -501,6 +507,7 @@ model comDriver {
   @@index([comId])
   @@index([isOnline])
   @@index([currentRideId])
+  @@index([apiKey])
 }
 
 model comVehicles {

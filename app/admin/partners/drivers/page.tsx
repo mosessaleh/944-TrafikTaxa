@@ -51,6 +51,7 @@ export default async function AdminDrivers() {
       car: d.car,
       currentRideId: d.currentRideId,
       drUsername: d.drUsername,
+      apiKey: (d as any).apiKey,
       createdAt: d.createdAt ? d.createdAt.toISOString() : null,
     };
   }));

@@ -24,15 +24,12 @@ export async function GET(request: Request) {
 
     const carPlates = onlineDrivers.map(d => d.car).filter((car): car is string => car !== null);
 
-    // Get vehicles with recent location updates
+    // Get vehicles with location data
     const vehicles = await prisma.comVehicles.findMany({
       where: {
         regNumber: { in: carPlates },
         lastLat: { not: null },
-        lastLon: { not: null },
-        lastLocationUpdate: {
-          gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
-        }
+        lastLon: { not: null }
       },
       select: {
         id: true,

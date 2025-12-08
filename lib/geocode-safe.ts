@@ -47,15 +47,44 @@ async function geocode(addr:string){
 export type LocInput = { address?: string|null; lat?: number|null; lon?: number|null };
 
 export async function safeEstimateDistance(a: LocInput, b: LocInput){
+  console.log('[DEBUG] safeEstimateDistance called with:', { a, b });
+
   // 1) Prefer coordinates when available
   if (Number.isFinite(a.lat as any) && Number.isFinite(a.lon as any) && Number.isFinite(b.lat as any) && Number.isFinite(b.lon as any)){
-    return osrmDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
+    console.log('[DEBUG] Using coordinates for OSRM');
+    try {
+      const result = await osrmDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
+      console.log('[DEBUG] OSRM success:', result);
+      return result;
+    } catch (error) {
+      console.warn('[DEBUG] OSRM routing failed, falling back to straight-line distance:', error);
+      // Fallback to straight-line distance calculation
+      const { calculateDistance, estimateArrivalTime } = await import('@/lib/distance');
+      const distanceKm = calculateDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
+      const durationMin = estimateArrivalTime(distanceKm);
+      console.log('[DEBUG] Fallback result:', { distanceKm, durationMin });
+      return { distanceKm, durationMin };
+    }
   }
   // 2) Fallback to text addresses (sanitize)
+  console.log('[DEBUG] Using addresses for geocoding');
   const at = (a.address||'').trim();
   const bt = (b.address||'').trim();
   if (badText(at) || badText(bt)) throw new Error('Invalid address input');
   const A = await geocode(at);
   const B = await geocode(bt);
-  return osrmDistance(A.lat, A.lon, B.lat, B.lon);
+  console.log('[DEBUG] Geocoded addresses:', { A, B });
+  try {
+    const result = await osrmDistance(A.lat, A.lon, B.lat, B.lon);
+    console.log('[DEBUG] OSRM success for geocoded:', result);
+    return result;
+  } catch (error) {
+    console.warn('[DEBUG] OSRM routing failed for geocoded addresses, falling back to straight-line distance:', error);
+    // Fallback to straight-line distance calculation
+    const { calculateDistance, estimateArrivalTime } = await import('@/lib/distance');
+    const distanceKm = calculateDistance(A.lat, A.lon, B.lat, B.lon);
+    const durationMin = estimateArrivalTime(distanceKm);
+    console.log('[DEBUG] Fallback result for geocoded:', { distanceKm, durationMin });
+    return { distanceKm, durationMin };
+  }
 }

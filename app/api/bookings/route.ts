@@ -261,6 +261,19 @@ export async function POST(request: NextRequest) {
     const paymentMethod = rawData.paymentMethod; // No default, allow null
 
     // Calculate distance and duration
+    console.log('[DEBUG] Calculating distance for booking:', {
+      pickup: {
+        address: validatedData.pickupAddress,
+        lat: validatedData.pickupLat,
+        lon: validatedData.pickupLon
+      },
+      dropoff: {
+        address: validatedData.dropoffAddress,
+        lat: validatedData.dropoffLat,
+        lon: validatedData.dropoffLon
+      }
+    });
+
     const { distanceKm, durationMin } = await safeEstimateDistance(
       {
         address: validatedData.pickupAddress,
@@ -273,6 +286,8 @@ export async function POST(request: NextRequest) {
         lon: validatedData.dropoffLon || null
       }
     );
+
+    console.log('[DEBUG] Distance calculation result:', { distanceKm, durationMin });
 
     // Calculate price
     const pickupTime = new Date(validatedData.pickupTime);
@@ -319,6 +334,8 @@ export async function POST(request: NextRequest) {
         passengers: 1,
         pickupAddress: validatedData.pickupAddress,
         dropoffAddress: validatedData.dropoffAddress,
+        startLatLon: validatedData.pickupLat && validatedData.pickupLon ? { lat: validatedData.pickupLat, lon: validatedData.pickupLon } : null,
+        endLatLon: validatedData.dropoffLat && validatedData.dropoffLon ? { lat: validatedData.dropoffLat, lon: validatedData.dropoffLon } : null,
         scheduled: validatedData.scheduled,
         pickupTime,
         distanceKm: Number(distanceKm.toFixed(2)),
@@ -330,7 +347,7 @@ export async function POST(request: NextRequest) {
         vehicleTypeId: validatedData.vehicleTypeId,
         driverQueue,
         ...(selectedPaymentMethodId && { savedPaymentMethodId: selectedPaymentMethodId })
-      },
+      } as any,
       include: {
         vehicleType: {
           select: {
@@ -557,6 +574,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[API] Error creating booking:', error);
     console.error('[API] Error stack:', (error as any)?.stack);
+    console.error('[API] Error message:', (error as any)?.message);
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
@@ -566,7 +584,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { ok: false, error: 'Could not place booking. Please refine addresses and try again.' },
+      { ok: false, error: 'Could not place booking. Please refine addresses and try again.', details: (error as any)?.message },
       { status: 400 }
     );
   }

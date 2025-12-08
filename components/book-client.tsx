@@ -688,10 +688,9 @@ export default function BookClient(){
         const filteredAvailableVehicles = getVehiclesByPriority(availableVehicles);
         const filteredBusyVehicles = getVehiclesByPriority(busyVehicles, true);
 
-        // Find closest vehicle using real routing
-        const findClosestVehicle = async (vehicleList: any[], isBusy: boolean = false) => {
-          let closest = null;
-          let minTime = Infinity;
+        // Find top 3 closest vehicles using real routing
+        const findClosestVehicles = async (vehicleList: any[], isBusy: boolean = false, limit: number = 3) => {
+          const vehiclesWithTimes: { vehicle: any; time: number }[] = [];
 
           for (const vehicle of vehicleList) {
             if (vehicle.lastLat && vehicle.lastLon && pickupSel.lat && pickupSel.lon) {
@@ -703,10 +702,7 @@ export default function BookClient(){
                   if (routeData.ok && routeData.route?.duration) {
                     const durationMinutes = Math.ceil(routeData.route.duration / 60); // Convert seconds to minutes
                     const totalTime = isBusy ? durationMinutes + (vehicle.estimatedExtraTime || 0) : durationMinutes;
-                    if (totalTime < minTime) {
-                      minTime = totalTime;
-                      closest = vehicle;
-                    }
+                    vehiclesWithTimes.push({ vehicle, time: totalTime });
                   } else {
                     // Fallback to simple calculation
                     const distance = calculateDistance(
@@ -717,10 +713,7 @@ export default function BookClient(){
                     );
                     const arrivalMinutes = estimateArrivalTime(distance);
                     const totalTime = isBusy ? arrivalMinutes + (vehicle.estimatedExtraTime || 0) : arrivalMinutes;
-                    if (totalTime < minTime) {
-                      minTime = totalTime;
-                      closest = vehicle;
-                    }
+                    vehiclesWithTimes.push({ vehicle, time: totalTime });
                   }
                 } else {
                   // Fallback
@@ -732,10 +725,7 @@ export default function BookClient(){
                   );
                   const arrivalMinutes = estimateArrivalTime(distance);
                   const totalTime = isBusy ? arrivalMinutes + (vehicle.estimatedExtraTime || 0) : arrivalMinutes;
-                  if (totalTime < minTime) {
-                    minTime = totalTime;
-                    closest = vehicle;
-                  }
+                  vehiclesWithTimes.push({ vehicle, time: totalTime });
                 }
               } catch (error) {
                 // Fallback
@@ -747,27 +737,29 @@ export default function BookClient(){
                 );
                 const arrivalMinutes = estimateArrivalTime(distance);
                 const totalTime = isBusy ? arrivalMinutes + (vehicle.estimatedExtraTime || 0) : arrivalMinutes;
-                if (totalTime < minTime) {
-                  minTime = totalTime;
-                  closest = vehicle;
-                }
+                vehiclesWithTimes.push({ vehicle, time: totalTime });
               }
             }
           }
-          return { vehicle: closest, time: minTime };
+
+          // Sort by time and take top limit
+          vehiclesWithTimes.sort((a, b) => a.time - b.time);
+          return vehiclesWithTimes.slice(0, limit);
         };
 
-        // Find closest available vehicle
-        const availableResult = await findClosestVehicle(filteredAvailableVehicles);
-        if (availableResult.vehicle) {
-          closestVehicle = availableResult.vehicle;
-          minTotalTime = availableResult.time;
+        // Find top 3 closest available vehicles
+        const availableResults = await findClosestVehicles(filteredAvailableVehicles);
+        console.log('Top 3 closest available vehicles:', availableResults.map(r => ({ id: r.vehicle.id, time: r.time })));
+        if (availableResults.length > 0) {
+          closestVehicle = availableResults[0].vehicle;
+          minTotalTime = availableResults[0].time;
         } else if (filteredBusyVehicles.length > 0) {
           // Check busy vehicles if no available
-          const busyResult = await findClosestVehicle(filteredBusyVehicles, true);
-          if (busyResult.vehicle) {
-            closestVehicle = busyResult.vehicle;
-            minTotalTime = busyResult.time;
+          const busyResults = await findClosestVehicles(filteredBusyVehicles, true);
+          console.log('Top 3 closest busy vehicles:', busyResults.map(r => ({ id: r.vehicle.id, time: r.time })));
+          if (busyResults.length > 0) {
+            closestVehicle = busyResults[0].vehicle;
+            minTotalTime = busyResults[0].time;
           }
         }
 

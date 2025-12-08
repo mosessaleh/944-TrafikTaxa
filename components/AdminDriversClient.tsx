@@ -40,6 +40,7 @@ export type Driver = {
   car?: string | null;
   currentRideId?: number | null;
   drUsername: string;
+  apiKey?: string | null;
   createdAt?: string | null;
 };
 
@@ -219,6 +220,7 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                 <th className="px-4 py-3 w-16">ID</th>
                 <th className="px-4 py-3">Driver Card</th>
                 <th className="px-4 py-3">Company</th>
+                <th className="px-4 py-3">API Key</th>
                 <th className="px-4 py-3">Active</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -253,6 +255,11 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                   </td>
                   <td className="px-4 py-3 text-gray-600">{d.companyName}</td>
                   <td className="px-4 py-3">
+                    <div className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-800 max-w-32 truncate" title={d.apiKey || 'No API Key'}>
+                      {d.apiKey ? `${d.apiKey.slice(0, 8)}...` : 'No API Key'}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-1 rounded-full ${
                       d.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
@@ -282,7 +289,7 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
               {filteredDrivers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="px-4 py-12 text-center text-gray-500"
                   >
                     <div className="flex flex-col items-center justify-center">
