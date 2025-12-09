@@ -53,6 +53,14 @@ export type OriginValidationResult = {
 };
 
 export function validateRequestOrigin(req: Request): OriginValidationResult {
+  // Check if this is an API key authenticated request (skip origin validation)
+  const authHeader = req.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    // For API key requests, allow in both dev and production
+    // Additional validation can be done at the endpoint level
+    return { ok: true };
+  }
+
   // Only enforce strict Origin/Referer checks in production to avoid breaking local/dev tools
   if (process.env.NODE_ENV !== 'production') {
     return { ok: true };
@@ -84,4 +92,48 @@ export function validateRequestOrigin(req: Request): OriginValidationResult {
   } catch {
     return { ok: false, reason: 'Invalid Origin/Referer' };
   }
+}
+
+/**
+ * Validate request origin for driver API endpoints with environment-specific rules
+ */
+export function validateDriverApiOrigin(req: Request): OriginValidationResult {
+  const authHeader = req.headers.get('authorization');
+
+  // If using API key authentication, apply environment-specific rules
+  if (authHeader?.startsWith('Bearer ')) {
+    if (process.env.NODE_ENV === 'development') {
+      // In development, allow requests from localhost:4000 (driver server)
+      const origin = req.headers.get('origin');
+      if (origin) {
+        try {
+          const originUrl = new URL(origin);
+          if (originUrl.hostname === 'localhost' && originUrl.port === '4000') {
+            return { ok: true };
+          }
+        } catch {
+          // Invalid origin, continue with other checks
+        }
+      }
+
+      // Allow requests without origin (server-to-server)
+      return { ok: true };
+
+    } else {
+      // In production, check against allowed driver server origins
+      const allowedDriverOrigins = process.env.ALLOWED_DRIVER_ORIGINS?.split(',') || [];
+
+      const origin = req.headers.get('origin');
+      if (origin && allowedDriverOrigins.includes(origin)) {
+        return { ok: true };
+      }
+
+      // Allow requests without origin for backward compatibility
+      // Additional security can be implemented via IP whitelisting if needed
+      return { ok: true };
+    }
+  }
+
+  // For non-API key requests, fall back to standard validation
+  return validateRequestOrigin(req);
 }

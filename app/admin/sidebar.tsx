@@ -20,7 +20,8 @@ import {
   Building,
   ChevronDown,
   Menu,
-  FileText
+  FileText,
+  MapPin
 } from 'lucide-react';
 
 export default function AdminSidebar() {
@@ -67,6 +68,7 @@ export default function AdminSidebar() {
           <NavLink href={getAdminPath('/bookings')} icon={<ClipboardList size={18} />} label="Bookings" />
           <NavLink href={getAdminPath('/users')} icon={<Users size={18} />} label="Users" />
           <NavLink href={getAdminPath('/vehicles')} icon={<Car size={18} />} label="Vehicles" />
+          <NavLink href={getAdminPath('/map')} icon={<MapPin size={18} />} label="Map" />
           <NavLink href={getAdminPath('/payments')} icon={<CreditCard size={18} />} label="Payments" />
           <NavLink href={getAdminPath('/invoices')} icon={<FileText size={18} />} label="Invoices" />
           <NavLink href={getAdminPath('/crypto')} icon={<Bitcoin size={18} />} label="Crypto" />

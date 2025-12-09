@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
 import { requireDriverByApiKey } from '@/lib/auth';
 import { chargeSavedPaymentMethod } from '@/lib/payment-processor';
+import { validateDriverApiOrigin } from '@/lib/security-headers';
 
 const Schema = z.object({ id: z.number().int(), action: z.enum(['DELIVERED']) });
 
@@ -12,6 +13,15 @@ function emailTpl(subject:string, body:string){
 }
 
 export async function POST(req: NextRequest){
+  // Validate request origin for driver API
+  const originCheck = validateDriverApiOrigin(req);
+  if (!originCheck.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Invalid request origin' },
+      { status: 403 }
+    );
+  }
+
   try{ await requireDriverByApiKey(req); }catch(e:any){ return NextResponse.json({ ok:false, error:'Forbidden' }, { status: e?.status||403 }); }
 
   try{
@@ -48,7 +58,12 @@ export async function POST(req: NextRequest){
 
     // Special handling for DELIVERED action (complete ride and capture payment)
     if (action==='DELIVERED') {
-      console.log(`🚚 Starting DELIVERED action for ride ${id} by driver`);
+      // Security check: ensure the driver is assigned to this ride
+      if (ride.driverId !== me.id) {
+        return NextResponse.json({ ok:false, error:'Access denied - you are not assigned to this ride' }, { status:403 });
+      }
+
+      console.log(`🚚 Starting DELIVERED action for ride ${id} by driver ${me.id}`);
       try {
         // Step 1: Get ride with payment method info
         const rideWithPayment = await prisma.ride.findUnique({

@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch favorites
-    const favorites = await prisma.favoriteAddress.findMany({
+    const favorites = await prisma.favoriteaddress.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
       select: {
