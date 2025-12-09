@@ -13,26 +13,41 @@ function emailTpl(subject:string, body:string){
 }
 
 export async function POST(req: NextRequest){
+  console.log(`📨 Driver booking update request received at ${new Date().toISOString()}`);
+  console.log(`Request headers:`, Object.fromEntries(req.headers.entries()));
+
   // Validate request origin for driver API
   const originCheck = validateDriverApiOrigin(req);
   if (!originCheck.ok) {
-    return NextResponse.json(
-      { ok: false, error: 'Invalid request origin' },
-      { status: 403 }
-    );
+    console.log(`❌ Origin validation failed: ${originCheck.reason}`);
+    const errorResponse = { ok: false, error: 'Invalid request origin' };
+    console.log(`📤 Error response sent to driver server:`, errorResponse);
+    return NextResponse.json(errorResponse, { status: 403 });
   }
+  console.log(`✅ Origin validation passed`);
 
-  try{ await requireDriverByApiKey(req); }catch(e:any){ return NextResponse.json({ ok:false, error:'Forbidden' }, { status: e?.status||403 }); }
+  let me;
+  try{
+    me = await requireDriverByApiKey(req);
+    console.log(`✅ Driver authenticated: ${me.id} (${me.drUsername})`);
+  }catch(e:any){
+    console.log(`❌ Driver authentication failed: ${e.message}`);
+    const errorResponse = { ok:false, error:'Forbidden' };
+    console.log(`📤 Error response sent to driver server:`, errorResponse);
+    return NextResponse.json(errorResponse, { status: e?.status||403 });
+  }
 
   try{
     const { id, action } = Schema.parse(await req.json());
-    const me = await requireDriverByApiKey(req);
 
     if (!me) {
-      return NextResponse.json({ ok:false, error:'Driver not found' }, { status: 401 });
+      const errorResponse = { ok:false, error:'Driver not found' };
+      console.log(`📤 Error response sent to driver server:`, errorResponse);
+      return NextResponse.json(errorResponse, { status: 401 });
     }
 
     // Enhanced ride fetch with related data
+    console.log(`🔍 Fetching ride ${id} details`);
     const ride = await prisma.ride.findUnique({
       where:{ id },
       include:{
@@ -49,7 +64,13 @@ export async function POST(req: NextRequest){
       }
     });
 
-    if (!ride) return NextResponse.json({ ok:false, error:'Ride not found' },{ status:404 });
+    if (!ride) {
+      console.log(`❌ Ride ${id} not found`);
+      const errorResponse = { ok:false, error:'Ride not found' };
+      console.log(`📤 Error response sent to driver server:`, errorResponse);
+      return NextResponse.json(errorResponse, { status:404 });
+    }
+    console.log(`✅ Ride ${id} found - status: ${ride.status}, driverId: ${ride.driverId}`);
 
     let data:any = {};
     let explanation = '';
@@ -59,46 +80,77 @@ export async function POST(req: NextRequest){
     // Special handling for DELIVERED action (complete ride and capture payment)
     if (action==='DELIVERED') {
       // Security check: ensure the driver is assigned to this ride
+      console.log(`🔍 Checking driver assignment: ride.driverId=${ride.driverId}, me.id=${me.id}`);
       if (ride.driverId !== me.id) {
-        return NextResponse.json({ ok:false, error:'Access denied - you are not assigned to this ride' }, { status:403 });
+        console.log(`❌ Access denied: driver ${me.id} not assigned to ride ${id} (assigned to ${ride.driverId})`);
+        const errorResponse = { ok:false, error:'Access denied - you are not assigned to this ride' };
+        console.log(`📤 Error response sent to driver server:`, errorResponse);
+        return NextResponse.json(errorResponse, { status:403 });
       }
 
+      console.log(`✅ Driver ${me.id} authorized for ride ${id}`);
       console.log(`🚚 Starting DELIVERED action for ride ${id} by driver ${me.id}`);
       try {
         // Step 1: Get ride with payment method info
         const rideWithPayment = await prisma.ride.findUnique({
           where: { id },
           include: {
-            userpaymentmethod: true,
+            savedPaymentMethod: true,
             user: true
           }
         });
 
         if (!rideWithPayment) {
-          return NextResponse.json({ ok:false, error:'Ride not found' }, { status:404 });
+          console.log(`❌ Ride ${id} not found when fetching payment details`);
+          const errorResponse = { ok:false, error:'Ride not found' };
+          console.log(`📤 Error response sent to driver server:`, errorResponse);
+          return NextResponse.json(errorResponse, { status:404 });
         }
 
-        if (!rideWithPayment.userpaymentmethod || rideWithPayment.paymentMethod !== 'card') {
-          return NextResponse.json({ ok:false, error:'No valid card payment method found for this ride' }, { status:400 });
+        console.log(`✅ Ride ${id} payment details:`, {
+          savedPaymentMethodId: rideWithPayment.savedPaymentMethodId,
+          paymentMethod: rideWithPayment.paymentMethod,
+          hasSavedPaymentMethod: !!(rideWithPayment as any).savedPaymentMethod,
+          savedPaymentMethodProvider: (rideWithPayment as any).savedPaymentMethod?.provider
+        });
+
+        if (!(rideWithPayment as any).savedPaymentMethod || rideWithPayment.paymentMethod !== 'card') {
+          console.log(`❌ Invalid payment method for ride ${id}:`, {
+            hasPaymentMethod: !!(rideWithPayment as any).savedPaymentMethod,
+            paymentMethod: rideWithPayment.paymentMethod
+          });
+          const errorResponse = { ok:false, error:'No valid card payment method found for this ride' };
+          console.log(`📤 Error response sent to driver server:`, errorResponse);
+          return NextResponse.json(errorResponse, { status:400 });
         }
 
         // Step 2: Capture payment on Stripe (change from authorized to captured)
         console.log(`💳 Capturing payment for ride ${id}`);
-        const paymentResult = await chargeSavedPaymentMethod(rideWithPayment);
+        const paymentResult = await chargeSavedPaymentMethod({
+          ...rideWithPayment,
+          userpaymentmethod: (rideWithPayment as any).savedPaymentMethod
+        });
 
         if (!paymentResult.success) {
           console.error(`❌ Payment capture failed for ride ${id}:`, paymentResult.error);
           // Update explanation with failure reason
+          const paymentError = paymentResult.error || 'Unknown payment error';
+          const truncatedPaymentError = paymentError.length > 150
+            ? paymentError.substring(0, 150) + '...'
+            : paymentError;
+
           await prisma.ride.update({
             where: { id },
             data: {
-              explanation: `Payment capture failed - ${paymentResult.error}`
+              explanation: `Payment capture failed - ${truncatedPaymentError}`
             }
           });
-          return NextResponse.json({
+          const errorResponse = {
             ok:false,
             error:`Payment capture failed: ${paymentResult.error}`
-          }, { status:400 });
+          };
+          console.log(`📤 Error response sent to driver server:`, errorResponse);
+          return NextResponse.json(errorResponse, { status:400 });
         }
 
         console.log(`✅ Payment captured successfully for ride ${id}, transaction: ${paymentResult.transactionId}`);
@@ -161,7 +213,7 @@ export async function POST(req: NextRequest){
               await prisma.ride.update({
                 where: { id },
                 data: {
-                  explanation: `Invoice creation failed - Error creating invoice in invoices table`
+                  explanation: `Invoice creation failed - Database error`
                 }
               });
               throw altError;
@@ -171,7 +223,7 @@ export async function POST(req: NextRequest){
             await prisma.ride.update({
               where: { id },
               data: {
-                explanation: `Invoice creation failed - Duplicate invoice number in invoices table`
+                explanation: `Invoice creation failed - Duplicate invoice number`
               }
             });
             throw invoiceError;
@@ -183,16 +235,30 @@ export async function POST(req: NextRequest){
 
         console.log(`✅ DELIVERED action completed successfully for ride ${id} by driver`);
 
-      } catch (error) {
-        console.error('Error processing DELIVERED action:', error);
-        // Update explanation with failure reason
+      } catch (error: any) {
+        console.error('❌ Error processing DELIVERED action:', error);
+        console.error('Error details:', {
+          message: error?.message,
+          stack: error?.stack,
+          rideId: id,
+          driverId: me.id
+        });
+
+        // Update explanation with failure reason (truncate to fit column)
+        const errorMessage = error?.message || 'General error in processing';
+        const truncatedMessage = errorMessage.length > 150
+          ? errorMessage.substring(0, 150) + '...'
+          : errorMessage;
+
         await prisma.ride.update({
           where: { id },
           data: {
-            explanation: `Ride delivery failed - General error in processing`
+            explanation: `Ride delivery failed - ${truncatedMessage}`
           }
         });
-        return NextResponse.json({ ok:false, error:'Failed to complete ride delivery' }, { status:500 });
+        const errorResponse = { ok:false, error:'Failed to complete ride delivery' };
+        console.log(`📤 Error response sent to driver server:`, errorResponse);
+        return NextResponse.json(errorResponse, { status:500 });
       }
     }
 
@@ -206,8 +272,11 @@ export async function POST(req: NextRequest){
       }
     }catch(e){ console.warn('[mail] driver update email failed', e); }
 
+    console.log(`✅ Success response sent to driver server:`, { ok: true, message: 'Ride delivered and invoice created successfully' });
     return NextResponse.json({ ok:true, ride: finalRideData || updatedRide, message: 'Ride delivered and invoice created successfully' });
   }catch(e:any){
-    return NextResponse.json({ ok:false, error: e?.message||'Invalid' },{ status:400 });
+    const errorResponse = { ok:false, error: e?.message||'Invalid' };
+    console.log(`📤 Error response sent to driver server:`, errorResponse);
+    return NextResponse.json(errorResponse, { status:400 });
   }
 }

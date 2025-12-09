@@ -179,14 +179,24 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
  * Charge a saved payment method for a completed trip
  */
 export async function chargeSavedPaymentMethod(trip: any): Promise<PaymentResult> {
+  console.log(`💳 chargeSavedPaymentMethod called for trip ${trip.id}`);
+  console.log(`Trip data:`, {
+    savedPaymentMethodId: trip.savedPaymentMethodId,
+    paymentMethod: trip.paymentMethod,
+    hasUserPaymentMethod: !!trip.userpaymentmethod
+  });
+
   const paymentMethod = trip.userpaymentmethod;
 
   if (!paymentMethod) {
+    console.log(`❌ No saved payment method found for trip ${trip.id}`);
     return {
       success: false,
       error: 'No saved payment method found'
     };
   }
+
+  console.log(`✅ Found payment method: ${paymentMethod.provider} for trip ${trip.id}`);
 
   try {
     switch (paymentMethod.provider) {
