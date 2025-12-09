@@ -28,7 +28,7 @@ export async function POST(
 
     // Allowed tables for clearing (excluding protected tables)
     const allowedTables = [
-      'ride', 'invoice', 'complaint', 'favoriteAddress', 'paymentMethod',
+      'ride', 'invoice', 'complaint', 'favoriteaddress', 'paymentMethod',
       'cryptoPayment', 'cardPayment', 'paypalPayment', 'revolutPayment',
       'cryptoWallet', 'auditLog'
     ];
@@ -52,14 +52,14 @@ export async function POST(
       'ride': 'ride',
       'invoice': 'invoice',
       'complaint': 'complaint',
-      'favoriteAddress': 'favoriteAddress',
-      'paymentMethod': 'paymentMethod',
-      'cryptoPayment': 'cryptoPayment',
-      'cardPayment': 'cardPayment',
-      'paypalPayment': 'payPalPayment',
-      'revolutPayment': 'revolutPayment',
-      'cryptoWallet': 'cryptoWallet',
-      'auditLog': 'auditLog'
+      'favoriteaddress': 'favoriteaddress',
+      'paymentMethod': 'paymentmethod',
+      'cryptoPayment': 'cryptopayment',
+      'cardPayment': 'cardpayment',
+      'paypalPayment': 'paypalpayment',
+      'revolutPayment': 'revolutpayment',
+      'cryptoWallet': 'cryptowallet',
+      'auditLog': 'auditlog'
     };
 
     const modelName = modelMap[table];
@@ -93,29 +93,29 @@ export async function POST(
       case 'complaint':
         result = await prisma.complaint.deleteMany({});
         break;
-      case 'favoriteAddress':
-        result = await prisma.favoriteAddress.deleteMany({});
+      case 'favoriteaddress':
+        result = await prisma.favoriteaddress.deleteMany({});
         break;
-      case 'paymentMethod':
-        result = await prisma.paymentMethod.deleteMany({});
+      case 'paymentmethod':
+        result = await prisma.paymentmethod.deleteMany({});
         break;
-      case 'cryptoPayment':
-        result = await prisma.cryptoPayment.deleteMany({});
+      case 'cryptopayment':
+        result = await prisma.cryptopayment.deleteMany({});
         break;
-      case 'cardPayment':
-        result = await prisma.cardPayment.deleteMany({});
+      case 'cardpayment':
+        result = await prisma.cardpayment.deleteMany({});
         break;
-      case 'payPalPayment':
-        result = await prisma.payPalPayment.deleteMany({});
+      case 'paypalpayment':
+        result = await prisma.paypalpayment.deleteMany({});
         break;
-      case 'revolutPayment':
-        result = await prisma.revolutPayment.deleteMany({});
+      case 'revolutpayment':
+        result = await prisma.revolutpayment.deleteMany({});
         break;
-      case 'cryptoWallet':
-        result = await prisma.cryptoWallet.deleteMany({});
+      case 'cryptowallet':
+        result = await prisma.cryptowallet.deleteMany({});
         break;
-      case 'auditLog':
-        result = await prisma.auditLog.deleteMany({});
+      case 'auditlog':
+        result = await prisma.auditlog.deleteMany({});
         break;
       default:
         return NextResponse.json({ error: 'Model not found' }, { status: 400 });
@@ -163,28 +163,28 @@ export async function GET(
       prisma.ride.count(),
       prisma.invoice.count(),
       prisma.complaint.count(),
-      prisma.favoriteAddress.count(),
-      prisma.paymentMethod.count(),
-      prisma.cryptoPayment.count(),
-      prisma.cardPayment.count(),
-      prisma.payPalPayment.count(),
-      prisma.revolutPayment.count(),
-      prisma.cryptoWallet.count(),
-      prisma.auditLog.count()
+      prisma.favoriteaddress.count(),
+      prisma.paymentmethod.count(),
+      prisma.cryptopayment.count(),
+      prisma.cardpayment.count(),
+      prisma.paypalpayment.count(),
+      prisma.revolutpayment.count(),
+      prisma.cryptowallet.count(),
+      prisma.auditlog.count()
     ]);
 
     const tableCounts = [
       { name: 'ride', count: counts[0] },
       { name: 'invoice', count: counts[1] },
       { name: 'complaint', count: counts[2] },
-      { name: 'favoriteAddress', count: counts[3] },
-      { name: 'paymentMethod', count: counts[4] },
-      { name: 'cryptoPayment', count: counts[5] },
-      { name: 'cardPayment', count: counts[6] },
-      { name: 'paypalPayment', count: counts[7] },
-      { name: 'revolutPayment', count: counts[8] },
-      { name: 'cryptoWallet', count: counts[9] },
-      { name: 'auditLog', count: counts[10] }
+      { name: 'favoriteaddress', count: counts[3] },
+      { name: 'paymentmethod', count: counts[4] },
+      { name: 'cryptopayment', count: counts[5] },
+      { name: 'cardpayment', count: counts[6] },
+      { name: 'paypalpayment', count: counts[7] },
+      { name: 'revolutpayment', count: counts[8] },
+      { name: 'cryptowallet', count: counts[9] },
+      { name: 'auditlog', count: counts[10] }
     ];
 
     return NextResponse.json({

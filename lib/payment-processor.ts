@@ -48,7 +48,7 @@ export async function processCompletedTripPayments(): Promise<{
         savedPaymentMethodId: { not: null }
       },
       include: {
-        savedPaymentMethod: true,
+        userpaymentmethod: true,
         user: true
       }
     });
@@ -179,7 +179,7 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
  * Charge a saved payment method for a completed trip
  */
 export async function chargeSavedPaymentMethod(trip: any): Promise<PaymentResult> {
-  const paymentMethod = trip.savedPaymentMethod;
+  const paymentMethod = trip.userpaymentmethod;
 
   if (!paymentMethod) {
     return {
@@ -463,7 +463,7 @@ export async function retryFailedPayments(): Promise<{
         savedPaymentMethodId: { not: null }
       },
       include: {
-        savedPaymentMethod: true,
+        userpaymentmethod: true,
         user: true
       }
     });

@@ -54,7 +54,7 @@ export async function POST(req: NextRequest){
         const rideWithPayment = await prisma.ride.findUnique({
           where: { id },
           include: {
-            savedPaymentMethod: true,
+            userpaymentmethod: true,
             user: true
           }
         });
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest){
           return NextResponse.json({ ok:false, error:'Ride not found' }, { status:404 });
         }
 
-        if (!rideWithPayment.savedPaymentMethod || rideWithPayment.paymentMethod !== 'card') {
+        if (!rideWithPayment.userpaymentmethod || rideWithPayment.paymentMethod !== 'card') {
           return NextResponse.json({ ok:false, error:'No valid card payment method found for this ride' }, { status:400 });
         }
 

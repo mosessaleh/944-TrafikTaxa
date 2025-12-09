@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check for duplicates
-    const existing = await prisma.favoriteAddress.findFirst({
+    const existing = await prisma.favoriteaddress.findFirst({
       where: { userId: user.id, address }
     });
 
@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create favorite
-    const favorite = await prisma.favoriteAddress.create({
+    const favorite = await prisma.favoriteaddress.create({
       data: {
         userId: user.id,
         label,
@@ -188,7 +188,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Find and verify ownership
-    const favorite = await prisma.favoriteAddress.findUnique({
+    const favorite = await prisma.favoriteaddress.findUnique({
       where: { id: Number(id) }
     });
 
@@ -207,7 +207,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Delete favorite
-    await prisma.favoriteAddress.delete({
+    await prisma.favoriteaddress.delete({
       where: { id: Number(id) }
     });
 

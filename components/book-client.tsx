@@ -629,7 +629,7 @@ export default function BookClient(){
 
         // Smart vehicle selection with priority rules
         const getVehiclesByPriority = (vehicleList: any[], isBusy: boolean = false) => {
-          if (!selectedVehicleKey) return vehicleList;
+          if (!selectedVehicleKey) return { vehicles: vehicleList, compatibleTypes: [], exactType: [] };
 
           let exactType: string[] = [];
           let compatibleTypes: string[] = [];
@@ -649,10 +649,10 @@ export default function BookClient(){
               break;
             case 'LIMO': // ليموزين (Limousine)
               exactType = ['LIMO', '4'];
-              compatibleTypes = ['SEDAN5', '1'];
+              compatibleTypes = []; // Only limousines can take limo rides
               break;
             default:
-              return vehicleList;
+              return { vehicles: vehicleList, compatibleTypes: [], exactType: [] };
           }
 
           // First, check if any exact type vehicles are within 15 minutes
@@ -674,19 +674,22 @@ export default function BookClient(){
             return false;
           });
 
+          let filteredVehicles;
           if (exactWithin15.length > 0) {
             // Use only exact type vehicles within 15 min
-            return exactWithin15;
+            filteredVehicles = exactWithin15;
           } else {
             // Use exact type + compatible types
-            return vehicleList.filter((v: any) =>
+            filteredVehicles = vehicleList.filter((v: any) =>
               exactType.includes(v.vehicleType) || compatibleTypes.includes(v.vehicleType)
             );
           }
+
+          return { vehicles: filteredVehicles, compatibleTypes, exactType };
         };
 
-        const filteredAvailableVehicles = getVehiclesByPriority(availableVehicles);
-        const filteredBusyVehicles = getVehiclesByPriority(busyVehicles, true);
+        const { vehicles: filteredAvailableVehicles, compatibleTypes: availableCompatibleTypes, exactType: availableExactType } = getVehiclesByPriority(availableVehicles);
+        const { vehicles: filteredBusyVehicles, compatibleTypes: busyCompatibleTypes, exactType: busyExactType } = getVehiclesByPriority(busyVehicles, true);
 
         // Find top 3 closest vehicles using real routing
         const findClosestVehicles = async (vehicleList: any[], isBusy: boolean = false, limit: number = 3) => {
@@ -748,7 +751,56 @@ export default function BookClient(){
         };
 
         // Find top 3 closest available vehicles
-        const availableResults = await findClosestVehicles(filteredAvailableVehicles);
+        let availableResults = await findClosestVehicles(filteredAvailableVehicles);
+
+        // If less than 3 vehicles after priority filtering, fill with closest from remaining compatible vehicles (using dropoff location if available)
+        if (availableResults.length < 3) {
+          const remainingVehicles = availableVehicles.filter(v => !filteredAvailableVehicles.some(fv => fv.id === v.id) && (availableCompatibleTypes.includes(v.vehicleType) || availableExactType.includes(v.vehicleType)));
+          const fillResults: { vehicle: any; time: number }[] = [];
+          const targetLat = dropoffSel?.lat || pickupSel.lat;
+          const targetLon = dropoffSel?.lon || pickupSel.lon;
+
+          for (const vehicle of remainingVehicles) {
+            if (vehicle.lastLat && vehicle.lastLon && targetLat && targetLon) {
+              try {
+                const routeResponse = await fetch(`/api/route?startLat=${vehicle.lastLat}&startLon=${vehicle.lastLon}&endLat=${targetLat}&endLon=${targetLon}`);
+                if (routeResponse.ok) {
+                  const routeData = await routeResponse.json();
+                  if (routeData.ok && routeData.route?.duration) {
+                    const durationMinutes = Math.ceil(routeData.route.duration / 60);
+                    const totalTime = durationMinutes; // not busy
+                    fillResults.push({ vehicle, time: totalTime });
+                  } else {
+                    const distance = calculateDistance(targetLat, targetLon, vehicle.lastLat, vehicle.lastLon);
+                    const arrivalMinutes = estimateArrivalTime(distance);
+                    const totalTime = arrivalMinutes;
+                    fillResults.push({ vehicle, time: totalTime });
+                  }
+                } else {
+                  const distance = calculateDistance(targetLat, targetLon, vehicle.lastLat, vehicle.lastLon);
+                  const arrivalMinutes = estimateArrivalTime(distance);
+                  const totalTime = arrivalMinutes;
+                  fillResults.push({ vehicle, time: totalTime });
+                }
+              } catch (error) {
+                const distance = calculateDistance(targetLat, targetLon, vehicle.lastLat, vehicle.lastLon);
+                const arrivalMinutes = estimateArrivalTime(distance);
+                const totalTime = arrivalMinutes;
+                fillResults.push({ vehicle, time: totalTime });
+              }
+            }
+          }
+
+          // Sort fillResults by time and take needed amount
+          fillResults.sort((a, b) => a.time - b.time);
+          const needed = 3 - availableResults.length;
+          availableResults.push(...fillResults.slice(0, needed));
+          // Sort again by time to prioritize filtered vehicles
+          availableResults.sort((a, b) => a.time - b.time);
+          // Take top 3
+          availableResults.splice(3);
+        }
+
         console.log('Top 3 closest available vehicles:', availableResults.map(r => ({ id: r.vehicle.id, time: r.time })));
         if (availableResults.length > 0) {
           closestVehicle = availableResults[0].vehicle;
