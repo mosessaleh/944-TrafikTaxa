@@ -57,8 +57,9 @@ export async function GET(req: Request) {
           }
 
           if (city && country === 'Denmark') {
-            text += ', ' + city;
-            if (postcode) text += ' ' + postcode;
+            text += ', ';
+            if (postcode) text += postcode + ' ';
+            text += city;
           }
 
           return {
