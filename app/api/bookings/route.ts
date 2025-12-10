@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
     const validatedData = createBookingSchema.parse(sanitizedData);
 
     // Verify vehicle type exists and is active
-    const vehicleType = await prisma.vehicletype.findUnique({
+    const vehicleType = await prisma.vehicleType.findUnique({
       where: { id: validatedData.vehicleTypeId },
       select: { id: true, active: true }
     });
@@ -377,9 +377,16 @@ export async function POST(request: NextRequest) {
             // Use the selected vehicles for driver queue
             driverQueue = selectionData.vehicles;
 
+            // Update the booking with the driver queue
+            await prisma.ride.update({
+              where: { id: booking.id },
+              data: { driverQueue }
+            });
+            console.log(`Updated booking ${booking.id} with driver queue:`, driverQueue);
+
             // Get the closest vehicle for notification
             const closestVehicleId = selectionData.vehicles[0];
-            const closestVehicle = await prisma.comvehicles.findUnique({
+            const closestVehicle = await prisma.comVehicles.findUnique({
               where: { id: closestVehicleId },
               select: { id: true, regNumber: true }
             });
@@ -387,7 +394,7 @@ export async function POST(request: NextRequest) {
             // Notify the closest vehicle to be ready (preparation phase)
             if (closestVehicle) {
               const notificationMessage = `Ride ${booking.id}: There is an upcoming ride with cost ${price} DKK, please be ready.`;
-              await prisma.comvehicles.update({
+              await prisma.comVehicles.update({
                 where: { id: closestVehicle.id },
                 data: { notes: notificationMessage }
               });

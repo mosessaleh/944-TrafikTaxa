@@ -19,7 +19,7 @@ CREATE TABLE `user_payment_methods` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- AddForeignKey
-ALTER TABLE `user_payment_methods` ADD CONSTRAINT `user_payment_methods_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE `user_payment_methods` ADD CONSTRAINT `user_payment_methods_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- Add savedPaymentMethodId to rides table
 ALTER TABLE `ride` ADD COLUMN `savedPaymentMethodId` INTEGER NULL;

@@ -153,21 +153,31 @@ export async function POST(request: NextRequest) {
       };
     }).filter((item): item is VehicleScore => item !== null);
 
-    // Sort by score (descending) - highest score first
-    let selectedVehicles = vehicleScores.sort((a: VehicleScore, b: VehicleScore) => b.score - a.score);
+    // Define allowed distance for "nearby" vehicles
+    const allowedDistance = 15; // km - matches the distance scoring limit
 
-    // Ensure at least 3 vehicles if available, prioritizing by score then by distance
-    let topVehicles: VehicleScore[];
-    if (selectedVehicles.length <= 3) {
-      topVehicles = selectedVehicles;
+    // Separate vehicles into close (within allowed distance) and far
+    const closeVehicles = vehicleScores.filter(v => v.distance <= allowedDistance).sort((a, b) => b.score - a.score);
+    const farVehicles = vehicleScores.filter(v => v.distance > allowedDistance).sort((a, b) => a.distance - b.distance);
+
+    // Select vehicles: prioritize close vehicles, fill with far vehicles if needed to reach minimum 3
+    let topVehicles: VehicleScore[] = [];
+    const minVehicles = 3;
+
+    if (closeVehicles.length >= minVehicles) {
+      // Enough close vehicles, take top minVehicles (or maxVehicles if smaller)
+      topVehicles = closeVehicles.slice(0, Math.min(minVehicles, maxVehicles));
     } else {
-      topVehicles = selectedVehicles.slice(0, maxVehicles);
-      // If we have less than 3 selected and there are more vehicles, add closest remaining
-      if (topVehicles.length < 3 && selectedVehicles.length > maxVehicles) {
-        const remaining = selectedVehicles.slice(maxVehicles).sort((a, b) => a.distance - b.distance);
-        const needed = 3 - topVehicles.length;
-        topVehicles = topVehicles.concat(remaining.slice(0, needed));
-      }
+      // Not enough close vehicles, take all close and add closest far vehicles to reach minVehicles
+      topVehicles = closeVehicles.slice(0, closeVehicles.length);
+      const needed = minVehicles - topVehicles.length;
+      const farToAdd = farVehicles.slice(0, needed);
+      topVehicles = topVehicles.concat(farToAdd);
+    }
+
+    // Cap at maxVehicles if specified
+    if (topVehicles.length > maxVehicles) {
+      topVehicles = topVehicles.slice(0, maxVehicles);
     }
 
     const finalVehicles = topVehicles.map((item: VehicleScore) => item.vehicleId);
