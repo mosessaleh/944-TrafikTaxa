@@ -494,6 +494,7 @@ model comDriver {
   rating         Decimal     @default(5.00) @db.Decimal(3, 2)
   isOnline       Boolean     @default(false)
   isActive       Boolean     @default(true)
+  isBusy         Boolean     @default(false)
   car            String?     // Car ID or license plate
   currentRideId  Int?
   rideAccepted   Int         @default(0) // Number of rides accepted by this driver

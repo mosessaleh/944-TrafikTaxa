@@ -226,7 +226,7 @@ export default function BookClient(){
             existingScript.addEventListener('error', reject, { once: true });
             return;
           }
-  
+
           const script = document.createElement('script');
           script.src = '/leaflet.js';
           script.async = true;
@@ -261,10 +261,9 @@ export default function BookClient(){
       const map = L.map(mapDiv).setView([55.6761, 12.5683], 12); // Default to Copenhagen
       mapRef.current = map;
 
-      // Use CartoDB tiles which have better CORS support
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© OpenStreetMap contributors © CARTO',
-        crossOrigin: true,
+      // Use OpenStreetMap tiles
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
         maxZoom: 19
       }).addTo(map);
 
@@ -418,12 +417,13 @@ export default function BookClient(){
       if (availableVehicles.length > 0) {
         availableVehicles.forEach(vehicle => {
           if (vehicle.lastLat && vehicle.lastLon) {
+            const vehicleColor = vehicle.isBusy ? '#eab308' : '#22c55e'; // Yellow for busy, green for available
             const vehicleMarker = L.marker([vehicle.lastLat, vehicle.lastLon], {
               icon: L.divIcon({
                 className: 'vehicle-marker',
-                html: `<span style="font-size: 20px;">🚗</span>`,
-                iconSize: [20, 20],
-                iconAnchor: [10, 10]
+                html: `<div style="background-color: white; border: 2px solid black; border-radius: 6px; padding: 2px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="${vehicleColor}" xmlns="http://www.w3.org/2000/svg"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg></div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
               })
             }).addTo(map);
             const statusText = vehicle.isBusy ? 'Busy' : 'Available';

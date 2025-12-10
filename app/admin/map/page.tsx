@@ -20,6 +20,7 @@ export default function AdminMapPage() {
   const mapRef = useRef<any>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchPlate, setSearchPlate] = useState('');
   const [mapInstance, setMapInstance] = useState<any>(null);
   const vehicleMarkersRef = useRef<Map<number, any>>(new Map());
   const previousLocationsRef = useRef<Map<string, {lat: number, lon: number}>>(new Map());
@@ -136,27 +137,35 @@ export default function AdminMapPage() {
       if (vehicle.lastLat && vehicle.lastLon) {
         let marker;
 
+        let markerColor: string;
+        let markerSize: number;
+
         if (vehicle.isOnline) {
-          // Connected vehicle - show as green circle
-          marker = L.marker([vehicle.lastLat, vehicle.lastLon], {
-            icon: L.divIcon({
-              className: 'connected-marker',
-              html: `<div style="background-color: #22c55e; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-              iconSize: [16, 16],
-              iconAnchor: [8, 8]
-            })
-          });
+          if (vehicle.isBusy) {
+            // Online but busy - yellow
+            markerColor = '#eab308';
+            markerSize = 16;
+          } else {
+            // Online and available - green
+            markerColor = '#22c55e';
+            markerSize = 16;
+          }
         } else {
-          // Disconnected vehicle - show as small red circle
-          marker = L.marker([vehicle.lastLat, vehicle.lastLon], {
-            icon: L.divIcon({
-              className: 'disconnected-marker',
-              html: `<div style="background-color: #ef4444; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-              iconSize: [12, 12],
-              iconAnchor: [6, 6]
-            })
-          });
+          // Offline - red
+          markerColor = '#ef4444';
+          markerSize = 12;
         }
+
+        const iconSize = vehicle.isOnline ? 16 : 12;
+        const containerSize = vehicle.isOnline ? 24 : 18;
+        marker = L.marker([vehicle.lastLat, vehicle.lastLon], {
+          icon: L.divIcon({
+            className: vehicle.isOnline ? (vehicle.isBusy ? 'busy-marker' : 'available-marker') : 'offline-marker',
+            html: `<div style="background-color: white; border: 2px solid black; border-radius: 6px; padding: 2px;"><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="${markerColor}" xmlns="http://www.w3.org/2000/svg"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg></div>`,
+            iconSize: [containerSize, containerSize],
+            iconAnchor: [containerSize / 2, containerSize / 2]
+          })
+        });
 
         // Add popup
         const statusText = vehicle.isBusy ? 'Busy' : 'Available';
@@ -206,28 +215,65 @@ export default function AdminMapPage() {
     };
   }, []);
 
+  // Search for vehicle by license plate
+  const handleSearch = () => {
+    if (!searchPlate.trim() || !mapInstance) return;
+
+    const vehicle = vehicles.find(v => v.regNumber.toLowerCase().includes(searchPlate.toLowerCase()));
+    if (vehicle && vehicle.lastLat && vehicle.lastLon) {
+      const marker = vehicleMarkersRef.current.get(vehicle.id);
+      if (marker) {
+        // Open popup and zoom to vehicle
+        marker.openPopup();
+        mapInstance.setView([vehicle.lastLat, vehicle.lastLon], 15);
+      }
+    } else {
+      alert('Vehicle not found or no location data');
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Vehicle Map</h1>
         <p className="text-gray-600">Real-time view of all vehicles in Denmark</p>
+        <div className="mt-4 flex gap-2">
+          <input
+            type="text"
+            placeholder="Search by license plate..."
+            value={searchPlate}
+            onChange={(e) => setSearchPlate(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={handleSearch}
+            className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            Search
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center gap-4 text-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>
-              <span>Connected Vehicles</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-              <span>Disconnected Vehicles</span>
-            </div>
-            <div className="ml-auto text-gray-500">
-              {loading ? 'Loading...' : `${vehicles.length} vehicles`}
-            </div>
-          </div>
+             <div className="flex items-center gap-2">
+               <div className="w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow-sm"></div>
+               <span>Available</span>
+             </div>
+             <div className="flex items-center gap-2">
+               <div className="w-4 h-4 bg-yellow-500 rounded-full border-2 border-white shadow-sm"></div>
+               <span>Busy</span>
+             </div>
+             <div className="flex items-center gap-2">
+               <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+               <span>Offline</span>
+             </div>
+             <div className="ml-auto text-gray-500">
+               {loading ? 'Loading...' : `${vehicles.length} vehicles`}
+             </div>
+           </div>
         </div>
 
         <div className="relative">
