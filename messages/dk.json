@@ -19,7 +19,6 @@
     "current_estimate": "Nuværende estimat",
     "booking_info": "Booking Information",
     "booking_info_items": [
-      "Øjeblikkelig booking er i øjeblikket deaktiveret. Kun planlagte bookinger er tilgængelige.",
       "Din booking vil blive bekræftet inden for 10 minutter.",
       "Bemærk venligst, at der er en mulighed for, at turen kan blive aflyst på grund af køretøjs utilgængelighed."
     ],
@@ -58,7 +57,8 @@
     "choose_favorite": "Vælg fra favoritter",
     "no_favorites": "Ingen favoritter endnu. Vælg en adresse og brug stjernen for at gemme den.",
     "close": "Luk",
-    "booking_time_validation": "For planlagte bookinger skal afhentningstiden være mindst 1 time fra nu."
+    "booking_time_validation": "For planlagte bookinger skal afhentningstiden være mindst 1 time fra nu.",
+    "scheduled_bookings_disabled": "Planlagte bookinger er midlertidigt utilgængelige. Kun øjeblikkelige bookinger understøttes i øjeblikket."
   },
   "account": {
     "title": "Min Konto",

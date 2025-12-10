@@ -83,7 +83,7 @@ export default function BookClient(){
     // Vehicle type selection handled
     const selectedVehicleType = vehicleTypes.find((v: Vehicle) => v.id === newVehicleId);
   };
-  const [whenType, setWhenType] = useState<'now'|'later'>('later');
+  const [whenType, setWhenType] = useState<'now'|'later'>('now');
   const [when, setWhen] = useState(() => {
     const futureTime = new Date(Date.now() + 60 * 60 * 1000);
     const year = futureTime.getFullYear();
@@ -127,22 +127,53 @@ export default function BookClient(){
     if(me) setRiderName(`${me.firstName} ${me.lastName}`.trim());
   }, [me]);
 
-  // Load available vehicles for map display on mount
+  // Load available vehicles for map display when pickup location and vehicle type are selected
   useEffect(() => {
     const loadVehicles = async () => {
+      if (!pickupSel?.lat || !pickupSel?.lon || !vehicleId) {
+        // If no strategy parameters, load all vehicles for basic display
+        try {
+          const response = await fetch('/api/available-vehicles');
+          const data = await response.json();
+          if (response.ok && data.ok && data.vehicles) {
+            setAvailableVehicles(data.vehicles);
+          }
+        } catch (error) {
+          console.error('Failed to load vehicles for map:', error);
+        }
+        return;
+      }
+
+      // Use strategy with pickup location and vehicle type
       try {
-        const response = await fetch('/api/available-vehicles');
+        const params = new URLSearchParams({
+          pickupLat: pickupSel.lat.toString(),
+          pickupLon: pickupSel.lon.toString(),
+          vehicleTypeId: vehicleId.toString()
+        });
+
+        const response = await fetch(`/api/available-vehicles?${params}`);
         const data = await response.json();
         if (response.ok && data.ok && data.vehicles) {
           setAvailableVehicles(data.vehicles);
         }
       } catch (error) {
-        console.error('Failed to load vehicles for map:', error);
+        console.error('Failed to load vehicles with strategy:', error);
+        // Fallback to all vehicles
+        try {
+          const fallbackResponse = await fetch('/api/available-vehicles');
+          const fallbackData = await fallbackResponse.json();
+          if (fallbackResponse.ok && fallbackData.ok && fallbackData.vehicles) {
+            setAvailableVehicles(fallbackData.vehicles);
+          }
+        } catch (fallbackError) {
+          console.error('Fallback vehicle loading also failed:', fallbackError);
+        }
       }
     };
 
     loadVehicles();
-  }, []);
+  }, [pickupSel?.lat, pickupSel?.lon, vehicleId]);
 
   const { data: vehicleData } = useSWR('/api/vehicle-types', (url) =>
     fetch(url).then(r => r.json()).then(j => j?.ok ? j.items || [] : [])
@@ -604,7 +635,18 @@ export default function BookClient(){
         setArrivalLoading(true);
         setArrivalMessage(null);
 
-        const response = await fetch('/api/available-vehicles');
+        // Use strategy parameters if available
+        let apiUrl = '/api/available-vehicles';
+        if (pickupSel?.lat && pickupSel?.lon && vehicleId) {
+          const params = new URLSearchParams({
+            pickupLat: pickupSel.lat.toString(),
+            pickupLon: pickupSel.lon.toString(),
+            vehicleTypeId: vehicleId.toString()
+          });
+          apiUrl = `/api/available-vehicles?${params}`;
+        }
+
+        const response = await fetch(apiUrl);
         const data = await response.json();
 
         if (!response.ok || !data.ok || !data.vehicles?.length) {
@@ -841,15 +883,10 @@ export default function BookClient(){
   async function handleBookAndConfirm(){
     if(!quote || !me) return;
 
-    // Validate pickup time for scheduled bookings
+    // Temporarily disable scheduled bookings
     if (whenType === 'later') {
-      const selectedTime = new Date(when);
-      const minTime = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-
-      if (selectedTime < minTime) {
-        alert(t('book.booking_time_validation') || 'For scheduled bookings, pickup time must be at least 1 hour from now.');
-        return;
-      }
+      alert(t('book.scheduled_bookings_disabled') || 'Scheduled bookings are temporarily unavailable. Only instant bookings are currently supported.');
+      return;
     }
 
     setBookingLoading(true);
@@ -864,8 +901,8 @@ export default function BookClient(){
         dropoffLat: quotePayload.dropoffLat,
         dropoffLon: quotePayload.dropoffLon,
         vehicleTypeId: vehicleId!,
-        scheduled: whenType === 'later',
-        pickupTime: whenType === 'later' ? new Date(when).toISOString() : new Date(Date.now() + 5 * 60 * 1000).toISOString()
+        scheduled: false, // Always instant booking for now
+        pickupTime: new Date(Date.now() + 5 * 60 * 1000).toISOString() // 5 minutes from now
         // paymentMethod will be selected on payment page
       };
 
@@ -1234,6 +1271,7 @@ export default function BookClient(){
                         onChange={e => setWhenType(e.target.value as 'now' | 'later')}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                       >
+                        <option value="now">🕐 {language === 'dk' ? 'Nu' : 'Now'}</option>
                         <option value="later">📅 {t('book.schedule_later')}</option>
                       </select>
                     </div>
@@ -1294,7 +1332,13 @@ export default function BookClient(){
                           {t('book.session_problem')}
                         </span>
                       )}
-                      {me && quote && (
+                      {me && quote && whenType === 'later' && (
+                        <span className="flex items-center gap-1 text-orange-600">
+                          <span>⏰</span>
+                          {t('book.scheduled_bookings_disabled')}
+                        </span>
+                      )}
+                      {me && quote && whenType === 'now' && (
                         <span className="flex items-center gap-1 text-emerald-600">
                           <span>✅</span>
                           {t('book.ready_to_book')}
@@ -1311,7 +1355,8 @@ export default function BookClient(){
                         qLoading ||
                         !bothSelected ||
                         !vehicleId ||
-                        bookingLoading
+                        bookingLoading ||
+                        whenType === 'later'
                       }
                       className={`w-full px-5 py-3.5 rounded-2xl font-semibold text-sm sm:text-base transition-all duration-150 flex items-center justify-center gap-2 min-h-[48px] ${
                         !me ||

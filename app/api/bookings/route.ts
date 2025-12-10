@@ -237,7 +237,7 @@ export async function POST(request: NextRequest) {
     const validatedData = createBookingSchema.parse(sanitizedData);
 
     // Verify vehicle type exists and is active
-    const vehicleType = await prisma.vehicleType.findUnique({
+    const vehicleType = await prisma.vehicletype.findUnique({
       where: { id: validatedData.vehicleTypeId },
       select: { id: true, active: true }
     });
@@ -249,13 +249,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Only allow scheduled bookings (deferred bookings)
-    if (!validatedData.scheduled) {
-      return NextResponse.json(
-        { ok: false, error: 'Instant booking is currently disabled. Please schedule your booking for later.' },
-        { status: 400 }
-      );
-    }
 
     // Check payment method requirements - validation moved to client side
     const paymentMethod = rawData.paymentMethod; // No default, allow null
@@ -358,134 +351,53 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Assign closest available vehicle based on pickup location and vehicle type with priority rules
+    // Assign vehicles using the improved selection strategy
     try {
-      // Get vehicle type key for filtering
-      const vehicleType = await prisma.vehicleType.findUnique({
-        where: { id: validatedData.vehicleTypeId },
-        select: { key: true }
-      });
-
-      if (vehicleType && validatedData.pickupLat && validatedData.pickupLon) {
-        // Get available vehicles
-        const availableVehicles = await prisma.comDriver.findMany({
-          where: {
-            isOnline: true,
-            isActive: true,
-            car: { not: null },
-            currentRideId: null // Not busy
-          },
-          select: {
-            id: true,
-            car: true,
-            lastLocation: true
+      if (validatedData.pickupLat && validatedData.pickupLon) {
+        // Call the new vehicle selection API
+        const selectionResponse = await fetch(
+          `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              pickupLat: validatedData.pickupLat,
+              pickupLon: validatedData.pickupLon,
+              vehicleTypeId: validatedData.vehicleTypeId,
+              maxVehicles: 3
+            })
           }
-        });
-
-        const carPlates = availableVehicles.map(d => d.car).filter((car): car is string => car !== null);
-
-        // Get all vehicles with locations
-        const allVehicles = await prisma.comVehicles.findMany({
-          where: {
-            regNumber: { in: carPlates },
-            lastLat: { not: null },
-            lastLon: { not: null },
-            lastLocationUpdate: {
-              gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
-            }
-          },
-          select: {
-            id: true,
-            regNumber: true,
-            lastLat: true,
-            lastLon: true,
-            vehicleType: true
-          }
-        });
-
-        // Priority filtering based on selected type
-        let candidateVehicles = allVehicles;
-        let exactType: string[] = [];
-        let compatibleTypes: string[] = [];
-
-        switch (vehicleType.key) {
-          case 'SEDAN5':
-            exactType = ['SEDAN5', '1'];
-            compatibleTypes = ['SEVEN_NO_BAG', '2', 'VAN', '3'];
-            break;
-          case 'SEVEN_NO_BAG':
-            exactType = ['SEVEN_NO_BAG', '2'];
-            compatibleTypes = ['VAN', '3'];
-            break;
-          case 'VAN':
-            exactType = ['VAN', '3'];
-            compatibleTypes = [];
-            break;
-          case 'LIMO':
-            exactType = ['LIMO', '4'];
-            compatibleTypes = ['SEDAN5', '1'];
-            break;
-        }
-
-        // Check if any exact type vehicles are within 15 minutes
-        const exactVehicles = allVehicles.filter((v: any) =>
-          exactType.includes(v.vehicleType)
         );
 
-        const exactWithin15 = exactVehicles.filter((v: any) => {
-          if (v.lastLat && v.lastLon && validatedData.pickupLat && validatedData.pickupLon) {
-            const distance = calculateDistance(
-              validatedData.pickupLat,
-              validatedData.pickupLon,
-              v.lastLat,
-              v.lastLon
-            );
-            const arrivalMinutes = Math.ceil((distance / 30) * 60); // 30 km/h
-            return arrivalMinutes <= 15;
-          }
-          return false;
-        });
+        if (selectionResponse.ok) {
+          const selectionData = await selectionResponse.json();
+          if (selectionData.ok && selectionData.vehicles?.length > 0) {
+            // Use the selected vehicles for driver queue
+            driverQueue = selectionData.vehicles;
 
-        if (exactWithin15.length > 0) {
-          candidateVehicles = exactWithin15;
-        } else {
-          candidateVehicles = allVehicles.filter((v: any) =>
-            exactType.includes(v.vehicleType) || compatibleTypes.includes(v.vehicleType)
-          );
-        }
+            // Get the closest vehicle for notification
+            const closestVehicleId = selectionData.vehicles[0];
+            const closestVehicle = await prisma.comvehicles.findUnique({
+              where: { id: closestVehicleId },
+              select: { id: true, regNumber: true }
+            });
 
-        // Calculate distances and sort vehicles by proximity
-        const vehiclesWithDistance = candidateVehicles
-          .map(vehicle => {
-            if (vehicle.lastLat && vehicle.lastLon && validatedData.pickupLat && validatedData.pickupLon) {
-              const distance = calculateDistance(
-                validatedData.pickupLat,
-                validatedData.pickupLon,
-                vehicle.lastLat,
-                vehicle.lastLon
-              );
-              return { ...vehicle, distance };
+            // Notify the closest vehicle to be ready (preparation phase)
+            if (closestVehicle) {
+              const notificationMessage = `Ride ${booking.id}: There is an upcoming ride with cost ${price} DKK, please be ready.`;
+              await prisma.comvehicles.update({
+                where: { id: closestVehicle.id },
+                data: { notes: notificationMessage }
+              });
+              console.log(`Notified vehicle ${closestVehicle.regNumber} for booking ${booking.id}: ${notificationMessage}`);
             }
-            return null;
-          })
-          .filter(vehicle => vehicle !== null)
-          .sort((a, b) => a.distance - b.distance);
-
-        // Get top 3 vehicles for driver queue
-        const top3Vehicles = vehiclesWithDistance.slice(0, 3);
-        const driverQueue = top3Vehicles.map(v => v.id);
-
-        // Assign closest vehicle (first in sorted list)
-        const closestVehicle = top3Vehicles[0] || null;
-
-        // Notify the closest vehicle to be ready (preparation phase)
-        if (closestVehicle) {
-          const notificationMessage = `Ride ${booking.id}: There is an upcoming ride with cost ${price} DKK, please be ready.`;
-          await prisma.comVehicles.update({
-            where: { id: closestVehicle.id },
-            data: { notes: notificationMessage }
-          });
-          console.log(`Notified vehicle ${closestVehicle.regNumber} for booking ${booking.id}: ${notificationMessage}`);
+          } else {
+            console.warn('Vehicle selection API returned no vehicles');
+          }
+        } else {
+          console.warn('Vehicle selection API call failed:', selectionResponse.status);
         }
       }
     } catch (assignError) {

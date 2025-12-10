@@ -19,7 +19,6 @@
     "current_estimate": "Current estimate",
     "booking_info": "Booking Information",
     "booking_info_items": [
-      "Instant booking is currently disabled. Only scheduled bookings are available.",
       "Your booking will be confirmed within 10 minutes.",
       "Please note that there is a possibility the trip may be canceled due to vehicle unavailability."
     ],
@@ -58,7 +57,8 @@
     "choose_favorite": "Choose from favorites",
     "no_favorites": "No favorites yet. Select an address and use the star to save it.",
     "close": "Close",
-    "booking_time_validation": "For scheduled bookings, pickup time must be at least 1 hour from now."
+    "booking_time_validation": "For scheduled bookings, pickup time must be at least 1 hour from now.",
+    "scheduled_bookings_disabled": "Scheduled bookings are temporarily unavailable. Only instant bookings are currently supported."
   },
   "account": {
     "title": "My Account",
