@@ -122,6 +122,8 @@ export default function BookClient(){
 
   // Available vehicles for map display
   const [availableVehicles, setAvailableVehicles] = useState<any[]>([]);
+  const [longWaitWarning, setLongWaitWarning] = useState<{show: boolean; message: string}>({show: false, message: ''});
+  const [longWaitAccepted, setLongWaitAccepted] = useState(false);
 
   useEffect(() => {
     if(me) setRiderName(`${me.firstName} ${me.lastName}`.trim());
@@ -156,6 +158,49 @@ export default function BookClient(){
         const data = await response.json();
         if (response.ok && data.ok && data.vehicles) {
           setAvailableVehicles(data.vehicles);
+
+          // Check for long wait warning if all vehicles are far (>60km)
+          const hasNearbyVehicles = data.vehicles.some((v: any) => !v.distance || v.distance <= 60);
+
+          if (!hasNearbyVehicles && dropoffSel?.lat && dropoffSel?.lon) {
+            // Try vehicle selection API to check for long wait option
+            try {
+              const selectionResponse = await fetch('/api/vehicle-selection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  pickupLat: pickupSel.lat,
+                  pickupLon: pickupSel.lon,
+                  dropoffLat: dropoffSel.lat,
+                  dropoffLon: dropoffSel.lon,
+                  vehicleTypeId: vehicleId,
+                  maxVehicles: 3
+                })
+              });
+
+              if (selectionResponse.ok) {
+                const selectionData = await selectionResponse.json();
+                if (selectionData.ok && selectionData.longWait) {
+                  setLongWaitWarning({
+                    show: true,
+                    message: 'لا توجد سيارات قريبة متوفرة. قد يستغرق الانتظار وقتاً طويلاً (أكثر من ساعة). في حالة الإلغاء قبل وصول السائق، سيتم خصم 500 كرون كتعويض لوقت السائق.'
+                  });
+                  setLongWaitAccepted(false);
+                } else {
+                  setLongWaitWarning({
+                    show: false,
+                    message: 'لا توجد سيارات قريبة متوفرة حالياً. يرجى المحاولة لاحقاً.'
+                  });
+                }
+              }
+            } catch (selectionError) {
+              console.warn('Failed to check vehicle selection for long wait:', selectionError);
+            }
+          } else {
+            // Reset long wait warning when vehicles are available
+            setLongWaitWarning({show: false, message: ''});
+            setLongWaitAccepted(false);
+          }
         }
       } catch (error) {
         console.error('Failed to load vehicles with strategy:', error);
@@ -173,7 +218,7 @@ export default function BookClient(){
     };
 
     loadVehicles();
-  }, [pickupSel?.lat, pickupSel?.lon, vehicleId]);
+  }, [pickupSel?.lat, pickupSel?.lon, dropoffSel?.lat, dropoffSel?.lon, vehicleId]);
 
   const { data: vehicleData } = useSWR('/api/vehicle-types', (url) =>
     fetch(url).then(r => r.json()).then(j => j?.ok ? j.items || [] : [])
@@ -902,7 +947,8 @@ export default function BookClient(){
         dropoffLon: quotePayload.dropoffLon,
         vehicleTypeId: vehicleId!,
         scheduled: false, // Always instant booking for now
-        pickupTime: new Date(Date.now() + 5 * 60 * 1000).toISOString() // 5 minutes from now
+        pickupTime: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
+        longWaitAccepted: longWaitWarning.show ? longWaitAccepted : undefined
         // paymentMethod will be selected on payment page
       };
 
@@ -1316,6 +1362,28 @@ export default function BookClient(){
                 </div>
 
 
+                {/* Long Wait Warning */}
+                {longWaitWarning.show && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <div className="flex items-start">
+                      <div className="text-2xl leading-none mr-3">⚠️</div>
+                      <div className="flex-1">
+                        <h3 className="text-sm font-medium text-yellow-900 mb-2">تحذير: انتظار طويل</h3>
+                        <p className="text-sm text-yellow-800 mb-3">{longWaitWarning.message}</p>
+                        <label className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={longWaitAccepted}
+                            onChange={(e) => setLongWaitAccepted(e.target.checked)}
+                            className="mr-2"
+                          />
+                          <span className="text-sm text-yellow-800">أفهم وأوافق على شروط الانتظار الطويل</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+ 
                 {/* CTA */}
                 <div className="pt-4 border-t border-slate-200">
                   <div className="flex flex-col gap-3">
@@ -1356,7 +1424,8 @@ export default function BookClient(){
                         !bothSelected ||
                         !vehicleId ||
                         bookingLoading ||
-                        whenType === 'later'
+                        whenType === 'later' ||
+                        (longWaitWarning.show && !longWaitAccepted)
                       }
                       className={`w-full px-5 py-3.5 rounded-2xl font-semibold text-sm sm:text-base transition-all duration-150 flex items-center justify-center gap-2 min-h-[48px] ${
                         !me ||

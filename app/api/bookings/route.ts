@@ -231,7 +231,8 @@ export async function POST(request: NextRequest) {
       dropoffLon: rawData.dropoffLon ? parseFloat(rawData.dropoffLon) : null,
       vehicleTypeId: parseInt(rawData.vehicleTypeId),
       scheduled: rawData.scheduled === 'true' || rawData.scheduled === true,
-      pickupTime: rawData.pickupTime // Keep as string for date validation
+      pickupTime: rawData.pickupTime, // Keep as string for date validation
+      longWaitAccepted: rawData.longWaitAccepted === 'true' || rawData.longWaitAccepted === true
     };
 
     const validatedData = createBookingSchema.parse(sanitizedData);
@@ -365,6 +366,8 @@ export async function POST(request: NextRequest) {
             body: JSON.stringify({
               pickupLat: validatedData.pickupLat,
               pickupLon: validatedData.pickupLon,
+              dropoffLat: validatedData.dropoffLat,
+              dropoffLon: validatedData.dropoffLon,
               vehicleTypeId: validatedData.vehicleTypeId,
               maxVehicles: 3
             })

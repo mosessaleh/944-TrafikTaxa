@@ -505,6 +505,7 @@ model comDriver {
   createdAt      DateTime    @default(now())
 
   company PartnerCompany @relation(fields: [comId], references: [id])
+  shifts   driversvagt[]
 
   @@index([comId])
   @@index([isOnline])
@@ -541,4 +542,23 @@ model comVehicles {
   @@index([comId])
   @@index([uId])
   @@index([status])
+}
+
+model driversvagt {
+  id        Int      @id @default(autoincrement())
+  drId      Int
+  startVagt String?  // Time only (HH:MM:SS)
+  endVagt   String?  // Time only (HH:MM:SS)
+  workTime  Float?
+  date      DateTime
+  salary    Float
+  hourSalary Float
+  startKM   Int
+  endKM     Int
+  deffKM    Int
+
+  driver comDriver @relation(fields: [drId], references: [id])
+
+  @@index([drId])
+  @@index([date])
 }
