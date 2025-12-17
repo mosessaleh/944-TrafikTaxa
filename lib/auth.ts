@@ -148,6 +148,7 @@ export async function getUserFromCookie(){
           isOnline: true,
           isActive: true,
           comId: true,
+          car: true,
           company: {
             select: {
               comName: true,
@@ -247,4 +248,48 @@ export async function requireDriverByApiKey(req: Request){
     ...driver,
     type: 'driver'
   };
+}
+
+export async function requireDriverByJWT(req: Request){
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw Object.assign(new Error('Unauthorized'), { status: 401 });
+  }
+  const token = authHeader.substring(7);
+
+  console.log('JWT_SECRET available:', !!process.env.JWT_SECRET);
+  console.log('Token to verify:', token.substring(0, 20) + '...');
+
+  try {
+    const decoded: any = verify(token, SECRET);
+    console.log('Decoded token:', { driverId: decoded.driverId, type: decoded.type, exp: decoded.exp });
+
+    if (!decoded.driverId || decoded.type !== 'driver') {
+      console.log('Invalid token structure');
+      throw Object.assign(new Error('Invalid token'), { status: 401 });
+    }
+
+    const driver = await prisma.comDriver.findUnique({
+      where: { id: decoded.driverId },
+      include: {
+        company: {
+          select: {
+            comName: true,
+            comStatus: true
+          }
+        }
+      }
+    });
+
+    if (!driver || !driver.isActive || !(driver as any).company?.comStatus) {
+      throw Object.assign(new Error('Forbidden'), { status: 403 });
+    }
+
+    return {
+      ...driver,
+      type: 'driver'
+    };
+  } catch (error) {
+    throw Object.assign(new Error('Invalid or expired token'), { status: 401 });
+  }
 }

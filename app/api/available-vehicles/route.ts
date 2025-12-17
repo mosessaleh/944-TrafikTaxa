@@ -14,6 +14,7 @@ interface VehicleWithStatus {
   status: number;
   isBusy: boolean;
   estimatedExtraTime: number;
+  etaMinutes: number;
   distance?: number;
 }
 
@@ -30,8 +31,22 @@ export async function GET(request: Request) {
     const pickupLon = searchParams.get('pickupLon');
     const vehicleTypeId = searchParams.get('vehicleTypeId');
 
+    console.log('Available-vehicles: Request params:', { pickupLat, pickupLon, vehicleTypeId });
+
+    // For testing - return empty array if no params
+    if (!pickupLat && !pickupLon && !vehicleTypeId) {
+      console.log('Available-vehicles: No params provided, returning empty for testing');
+      return NextResponse.json({
+        ok: true,
+        vehicles: [],
+        strategyUsed: false
+      });
+    }
+
     // If strategy parameters are provided, use the vehicle selection strategy
     if (pickupLat && pickupLon && vehicleTypeId) {
+      console.log('Available-vehicles: Using strategy with params:', { pickupLat, pickupLon, vehicleTypeId });
+      console.log('Available-vehicles: Using strategy with params:', { pickupLat, pickupLon, vehicleTypeId });
       try {
         const strategyResponse = await fetch(
           `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`,
@@ -44,13 +59,15 @@ export async function GET(request: Request) {
               pickupLat: parseFloat(pickupLat),
               pickupLon: parseFloat(pickupLon),
               vehicleTypeId: parseInt(vehicleTypeId),
-              maxVehicles: 10 // Return more vehicles for map display
+              maxVehicles: 3 // Same as booking to ensure consistency
             })
           }
         );
 
+        console.log('Available-vehicles: Strategy response status:', strategyResponse.status);
         if (strategyResponse.ok) {
           const strategyData = await strategyResponse.json();
+          console.log('Available-vehicles: Strategy data:', { ok: strategyData.ok, vehiclesCount: strategyData.vehicles?.length });
           if (strategyData.ok && strategyData.vehicles?.length > 0) {
             // Get full vehicle details for the selected vehicles
             const vehicles = await (prisma as any).comVehicles.findMany({
@@ -74,79 +91,124 @@ export async function GET(request: Request) {
 
             // Add driver information and busy status
             const vehiclesWithStatus = await Promise.all(vehicles.map(async (vehicle: any) => {
-              const driver = await (prisma as any).comDriver.findFirst({
+              const driver = await prisma.comDriver.findFirst({
                 where: { car: vehicle.regNumber },
                 select: { currentRideId: true }
               });
 
+              // Calculate ETA from pickup location
+              let etaMinutes = 0;
+              if (vehicle.lastLat && vehicle.lastLon && pickupLat && pickupLon) {
+                const distance = calculateDistance(
+                  vehicle.lastLat,
+                  vehicle.lastLon,
+                  parseFloat(pickupLat),
+                  parseFloat(pickupLon)
+                );
+                // Assuming average speed of 30 km/h in city traffic
+                const averageSpeedKmh = 30;
+                etaMinutes = Math.ceil((distance / averageSpeedKmh) * 60);
+              }
+
               return {
                 ...vehicle,
                 isBusy: driver ? driver.currentRideId !== null : false,
-                estimatedExtraTime: 0 // Strategy already accounts for this
+                estimatedExtraTime: 0, // Strategy already accounts for this
+                etaMinutes
               };
             }));
 
-            // Sort by distance if pickup location is provided
-            let sortedVehicles = vehiclesWithStatus;
-            if (pickupLat && pickupLon) {
-              const pickupLatNum = parseFloat(pickupLat);
-              const pickupLonNum = parseFloat(pickupLon);
-        
-              sortedVehicles = vehiclesWithStatus
-                .map(vehicle => {
-                  if (vehicle.lastLat && vehicle.lastLon) {
-                    const distance = calculateDistance(
-                      vehicle.lastLat,
-                      vehicle.lastLon,
-                      pickupLatNum,
-                      pickupLonNum
-                    );
-                    return { ...vehicle, distance };
-                  }
-                  return { ...vehicle, distance: Infinity };
-                })
-                .sort((a, b) => a.distance - b.distance);
-            }
-        
-            return NextResponse.json({ ok: true, vehicles: sortedVehicles });
+            // Return vehicles in the order provided by the strategy (don't re-sort by distance)
+            // The vehicle-selection API already provides the optimal order
+            return NextResponse.json({
+              ok: true,
+              vehicles: vehiclesWithStatus,
+              strategyUsed: true
+            });
+          } else {
+            console.log('Available-vehicles: Strategy data not ok or no vehicles');
           }
         }
       } catch (strategyError) {
-        console.warn('Strategy API failed, falling back to all vehicles:', strategyError);
+        console.error('Strategy API failed, cannot provide vehicles without strategy:', strategyError);
+        return NextResponse.json({
+          ok: false,
+          error: 'Vehicle selection strategy unavailable'
+        }, { status: 500 });
       }
+    } else {
+      // No strategy parameters provided - return all online vehicles for map display
+      console.log('Available-vehicles: No strategy params, returning all online vehicles for map display');
+  
+      // Debug: Check online drivers
+      console.log('Available-vehicles: Checking online drivers...');
     }
 
-    // Fallback: Get all online drivers with their car assignments and current ride status
-    let onlineDrivers: OnlineDriver[];
-    try {
-      onlineDrivers = await (prisma as any).comDriver.findMany({
-        where: {
-          isOnline: true,
-          isActive: true,
-          car: { not: null }
-        },
-        select: {
-          id: true,
-          car: true,
-          currentRideId: true
-        }
-      }) as OnlineDriver[];
-    } catch (driverError) {
-      console.error('Error fetching drivers in fallback:', driverError);
-      return NextResponse.json({ ok: true, vehicles: [] });
-    }
+    // Fallback/Map display: Get all online drivers with their car assignments
+    console.log('Available-vehicles: Starting fallback query for online drivers');
+    const onlineDrivers = await prisma.comDriver.findMany({
+      where: {
+        isOnline: true,
+        isActive: true,
+        car: { not: null }
+      },
+      select: {
+        id: true,
+        car: true,
+        currentRideId: true
+      }
+    }) as OnlineDriver[];
+    console.log('Available-vehicles: Found online drivers:', onlineDrivers.length);
+    console.log('Available-vehicles: Sample drivers:', onlineDrivers.slice(0, 3));
 
     if (onlineDrivers.length === 0) {
-      console.log('No online drivers found in fallback');
-      return NextResponse.json({ ok: true, vehicles: [] });
+      console.log('No online drivers found, returning mock vehicles for testing');
+      // Return mock vehicles for testing when no real vehicles exist
+      const mockVehicles = [
+        {
+          id: 1,
+          regNumber: 'TEST-001',
+          lastLat: 55.6761,
+          lastLon: 12.5683,
+          lastLocationUpdate: new Date(),
+          vehicleType: 'SEDAN5',
+          make: 'Test',
+          model: 'Car',
+          status: 1,
+          isBusy: false,
+          estimatedExtraTime: 0,
+          etaMinutes: 5
+        },
+        {
+          id: 2,
+          regNumber: 'TEST-002',
+          lastLat: 55.6861,
+          lastLon: 12.5783,
+          lastLocationUpdate: new Date(),
+          vehicleType: 'VAN',
+          make: 'Test',
+          model: 'Van',
+          status: 1,
+          isBusy: true,
+          estimatedExtraTime: 15,
+          etaMinutes: 20
+        }
+      ];
+      return NextResponse.json({
+        ok: true,
+        vehicles: mockVehicles,
+        strategyUsed: false,
+        mockData: true
+      });
     }
 
     const carPlates = onlineDrivers.map((d: OnlineDriver) => d.car).filter((car): car is string => car !== null);
+    console.log('Available-vehicles: Car plates:', carPlates.slice(0, 5));
 
     // Get vehicles with location data
     let vehicles: any[];
     try {
-      vehicles = await (prisma as any).comVehicles.findMany({
+      vehicles = await prisma.comVehicles.findMany({
         where: {
           regNumber: { in: carPlates },
           lastLat: { not: null },
@@ -164,106 +226,50 @@ export async function GET(request: Request) {
           status: true
         }
       });
+      console.log('Available-vehicles: Found vehicles:', vehicles.length);
+      console.log('Available-vehicles: Sample vehicles:', vehicles.slice(0, 3));
     } catch (vehicleError) {
-      console.error('Error fetching vehicles in fallback:', vehicleError);
+      console.error('Error fetching vehicles:', vehicleError);
       return NextResponse.json({ ok: true, vehicles: [] });
     }
 
-    // Batch query current rides for busy drivers
-    const busyDrivers = onlineDrivers.filter(d => d.currentRideId !== null);
-    const rideIds = busyDrivers.map(d => d.currentRideId!);
-    let ridesMap = new Map<number, { dropoffAddress: string; status: string }>();
-
-    if (rideIds.length > 0) {
-      try {
-        const rides = await prisma.ride.findMany({
-          where: { id: { in: rideIds } },
-          select: {
-            id: true,
-            dropoffAddress: true,
-            status: true
-          }
-        });
-        ridesMap = new Map(rides.map(r => [r.id, { dropoffAddress: r.dropoffAddress, status: r.status }]));
-      } catch (ridesError) {
-        console.warn('Failed to batch query rides:', ridesError);
-      }
-    }
-
-    // Add busy status and calculate accurate remaining time for each vehicle
-    const vehiclesWithStatus: VehicleWithStatus[] = await Promise.all(vehicles.map(async (vehicle: any) => {
+    // Add busy status and basic ETA calculation
+    const vehiclesWithStatus: VehicleWithStatus[] = vehicles.map((vehicle: any) => {
       const driver = onlineDrivers.find((d: OnlineDriver) => d.car === vehicle.regNumber);
       const isBusy = driver ? driver.currentRideId !== null : false;
 
-      let estimatedExtraTime = 0;
-
-      if (isBusy && driver?.currentRideId) {
-        const currentRide = ridesMap.get(driver.currentRideId);
-
-        if (currentRide && currentRide.dropoffAddress && vehicle.lastLat && vehicle.lastLon) {
-          // Geocode the dropoff address with timeout and better error handling
-          try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
-            const geocodeResponse = await fetch(
-              `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(currentRide.dropoffAddress)}&countrycodes=dk&limit=1`,
-              {
-                headers: {
-                  'User-Agent': '944-Taxi-App/1.0'
-                },
-                signal: controller.signal
-              }
-            );
-
-            clearTimeout(timeoutId);
-
-            if (geocodeResponse.ok) {
-              const geocodeData = await geocodeResponse.json();
-              if (geocodeData && geocodeData.length > 0) {
-                const dropoffLat = parseFloat(geocodeData[0].lat);
-                const dropoffLon = parseFloat(geocodeData[0].lon);
-
-                // Calculate remaining distance from current location to dropoff
-                const remainingDistance = calculateDistance(
-                  vehicle.lastLat,
-                  vehicle.lastLon,
-                  dropoffLat,
-                  dropoffLon
-                );
-
-                // Estimate remaining time (30 km/h average speed)
-                estimatedExtraTime = Math.ceil((remainingDistance / 30) * 60);
-              } else {
-                console.warn(`No geocoding results for address: ${currentRide.dropoffAddress}`);
-                estimatedExtraTime = 15;
-              }
-            } else {
-              console.warn(`Geocoding failed with status: ${geocodeResponse.status} for address: ${currentRide.dropoffAddress}`);
-              estimatedExtraTime = 15;
-            }
-          } catch (geocodeError: any) {
-            if (geocodeError.name === 'AbortError') {
-              console.warn('Geocoding timed out for address:', currentRide.dropoffAddress);
-            } else {
-              console.warn('Failed to geocode dropoff address:', geocodeError);
-            }
-            estimatedExtraTime = 15;
-          }
-        } else {
-          console.warn('Missing ride details or vehicle location for driver:', driver.id);
-          estimatedExtraTime = 15;
-        }
+      // Calculate basic ETA if pickup location is provided (even without strategy)
+      let etaMinutes = 0;
+      if (vehicle.lastLat && vehicle.lastLon && pickupLat && pickupLon) {
+        const distance = calculateDistance(
+          vehicle.lastLat,
+          vehicle.lastLon,
+          parseFloat(pickupLat),
+          parseFloat(pickupLon)
+        );
+        // Basic calculation for map display
+        const averageSpeedKmh = 30;
+        etaMinutes = Math.ceil((distance / averageSpeedKmh) * 60);
       }
 
       return {
         ...vehicle,
         isBusy,
-        estimatedExtraTime
+        estimatedExtraTime: 0, // Not calculated without strategy
+        etaMinutes
       };
-    }));
+    });
 
-    return NextResponse.json({ ok: true, vehicles: vehiclesWithStatus });
+    return NextResponse.json({
+      ok: true,
+      vehicles: vehiclesWithStatus,
+      strategyUsed: false, // Indicate this is not using smart selection
+      debug: {
+        onlineDriversCount: onlineDrivers.length,
+        carPlatesCount: carPlates.length,
+        vehiclesCount: vehicles.length
+      }
+    });
   } catch (e: any) {
     console.error('Failed to fetch available vehicles:', e?.stack || e?.message || e);
     return NextResponse.json({ ok: false, error: 'Failed to fetch available vehicles' }, { status: 500 });

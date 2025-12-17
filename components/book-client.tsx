@@ -129,91 +129,70 @@ export default function BookClient(){
     if(me) setRiderName(`${me.firstName} ${me.lastName}`.trim());
   }, [me]);
 
-  // Load available vehicles for map display when pickup location and vehicle type are selected
+  // Load initial vehicles for map display
+  useEffect(() => {
+    const loadInitialVehicles = async () => {
+      try {
+        const response = await fetch('/api/available-vehicles');
+        const data = await response.json();
+        if (response.ok && data.ok && data.vehicles) {
+          setAvailableVehicles(data.vehicles);
+        }
+      } catch (error) {
+        console.error('Failed to load initial vehicles:', error);
+        setAvailableVehicles([]);
+      }
+    };
+
+    loadInitialVehicles();
+  }, []); // Run only once on mount
+
+  // Load available vehicles for map display
   useEffect(() => {
     const loadVehicles = async () => {
-      if (!pickupSel?.lat || !pickupSel?.lon || !vehicleId) {
-        // If no strategy parameters, load all vehicles for basic display
-        try {
-          const response = await fetch('/api/available-vehicles');
-          const data = await response.json();
-          if (response.ok && data.ok && data.vehicles) {
-            setAvailableVehicles(data.vehicles);
-          }
-        } catch (error) {
-          console.error('Failed to load vehicles for map:', error);
-        }
-        return;
-      }
-
-      // Use strategy with pickup location and vehicle type
       try {
-        const params = new URLSearchParams({
-          pickupLat: pickupSel.lat.toString(),
-          pickupLon: pickupSel.lon.toString(),
-          vehicleTypeId: vehicleId.toString()
-        });
+        let apiUrl = '/api/available-vehicles';
+        let params = new URLSearchParams();
 
-        const response = await fetch(`/api/available-vehicles?${params}`);
+        // Add strategy parameters if available
+        if (pickupSel?.lat && pickupSel?.lon && vehicleId) {
+          params.set('pickupLat', pickupSel.lat.toString());
+          params.set('pickupLon', pickupSel.lon.toString());
+          params.set('vehicleTypeId', vehicleId.toString());
+          apiUrl = `/api/available-vehicles?${params}`;
+        }
+
+        const response = await fetch(apiUrl);
         const data = await response.json();
         if (response.ok && data.ok && data.vehicles) {
           setAvailableVehicles(data.vehicles);
 
-          // Check for long wait warning if all vehicles are far (>60km)
-          const hasNearbyVehicles = data.vehicles.some((v: any) => !v.distance || v.distance <= 60);
-
-          if (!hasNearbyVehicles && dropoffSel?.lat && dropoffSel?.lon) {
-            // Try vehicle selection API to check for long wait option
-            try {
-              const selectionResponse = await fetch('/api/vehicle-selection', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  pickupLat: pickupSel.lat,
-                  pickupLon: pickupSel.lon,
-                  dropoffLat: dropoffSel.lat,
-                  dropoffLon: dropoffSel.lon,
-                  vehicleTypeId: vehicleId,
-                  maxVehicles: 3
-                })
-              });
-
-              if (selectionResponse.ok) {
-                const selectionData = await selectionResponse.json();
-                if (selectionData.ok && selectionData.longWait) {
-                  setLongWaitWarning({
-                    show: true,
-                    message: 'لا توجد سيارات قريبة متوفرة. قد يستغرق الانتظار وقتاً طويلاً (أكثر من ساعة). في حالة الإلغاء قبل وصول السائق، سيتم خصم 500 كرون كتعويض لوقت السائق.'
-                  });
-                  setLongWaitAccepted(false);
-                } else {
-                  setLongWaitWarning({
-                    show: false,
-                    message: 'لا توجد سيارات قريبة متوفرة حالياً. يرجى المحاولة لاحقاً.'
-                  });
-                }
-              }
-            } catch (selectionError) {
-              console.warn('Failed to check vehicle selection for long wait:', selectionError);
-            }
-          } else {
-            // Reset long wait warning when vehicles are available
+          // Only check for long wait warning when using strategy (optimized selection)
+          if (data.strategyUsed && !pickupSel?.lat && !pickupSel?.lon && !vehicleId) {
+            // Reset long wait warning for basic map display
             setLongWaitWarning({show: false, message: ''});
             setLongWaitAccepted(false);
+          } else if (data.strategyUsed && pickupSel?.lat && pickupSel?.lon && dropoffSel?.lat && dropoffSel?.lon) {
+            // Check for long wait warning when using strategy
+            const hasNearbyVehicles = data.vehicles.some((v: any) => v.etaMinutes <= 30);
+
+            if (!hasNearbyVehicles) {
+              // Show long wait warning when no vehicles within 30 minutes
+              setLongWaitWarning({
+                show: true,
+                message: 'No nearby cars available. The wait may take a long time (more than 30 minutes). In case of cancellation before the driver arrives, 500 DKK will be deducted as compensation for the driver\'s time.'
+              });
+              setLongWaitAccepted(false);
+            } else {
+              // Reset long wait warning when vehicles are available
+              setLongWaitWarning({show: false, message: ''});
+              setLongWaitAccepted(false);
+            }
           }
         }
       } catch (error) {
-        console.error('Failed to load vehicles with strategy:', error);
-        // Fallback to all vehicles
-        try {
-          const fallbackResponse = await fetch('/api/available-vehicles');
-          const fallbackData = await fallbackResponse.json();
-          if (fallbackResponse.ok && fallbackData.ok && fallbackData.vehicles) {
-            setAvailableVehicles(fallbackData.vehicles);
-          }
-        } catch (fallbackError) {
-          console.error('Fallback vehicle loading also failed:', fallbackError);
-        }
+        console.error('Failed to load vehicles:', error);
+        setAvailableVehicles([]);
       }
     };
 
@@ -680,16 +659,19 @@ export default function BookClient(){
         setArrivalLoading(true);
         setArrivalMessage(null);
 
-        // Use strategy parameters if available
-        let apiUrl = '/api/available-vehicles';
-        if (pickupSel?.lat && pickupSel?.lon && vehicleId) {
-          const params = new URLSearchParams({
-            pickupLat: pickupSel.lat.toString(),
-            pickupLon: pickupSel.lon.toString(),
-            vehicleTypeId: vehicleId.toString()
-          });
-          apiUrl = `/api/available-vehicles?${params}`;
+        // Use strategy parameters for arrival calculation (required for accurate ETA)
+        if (!pickupSel?.lat || !pickupSel?.lon || !vehicleId) {
+          setArrivalMessage(null);
+          setAvailableVehicles([]);
+          return;
         }
+
+        const params = new URLSearchParams({
+          pickupLat: pickupSel.lat.toString(),
+          pickupLon: pickupSel.lon.toString(),
+          vehicleTypeId: vehicleId.toString()
+        });
+        const apiUrl = `/api/available-vehicles?${params}`;
 
         const response = await fetch(apiUrl);
         const data = await response.json();

@@ -394,14 +394,18 @@ export async function POST(request: NextRequest) {
               select: { id: true, regNumber: true }
             });
 
-            // Notify the closest vehicle to be ready (preparation phase)
+            // Notify the closest driver by setting currentRideId
             if (closestVehicle) {
-              const notificationMessage = `Ride ${booking.id}: There is an upcoming ride with cost ${price} DKK, please be ready.`;
-              await prisma.comVehicles.update({
-                where: { id: closestVehicle.id },
-                data: { notes: notificationMessage }
+              const driver = await prisma.comDriver.findFirst({
+                where: { car: closestVehicle.regNumber, isOnline: true, isActive: true }
               });
-              console.log(`Notified vehicle ${closestVehicle.regNumber} for booking ${booking.id}: ${notificationMessage}`);
+              if (driver) {
+                await prisma.comDriver.update({
+                  where: { id: driver.id },
+                  data: { currentRideId: booking.id }
+                });
+                console.log(`Assigned ride ${booking.id} to driver ${driver.id}`);
+              }
             }
           } else {
             console.warn('Vehicle selection API returned no vehicles');

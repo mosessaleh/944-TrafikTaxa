@@ -547,12 +547,12 @@ model comVehicles {
 model driversvagt {
   id        Int      @id @default(autoincrement())
   drId      Int
-  startVagt String?  // Time only (HH:MM:SS)
-  endVagt   String?  // Time only (HH:MM:SS)
+  startVagt DateTime?  // Start time
+  endVagt   DateTime?  // End time
   workTime  Float?
   date      DateTime
-  salary    Float
-  hourSalary Float
+  salary    Decimal  @db.Decimal(10, 2) // Salary with 2 decimal places
+  hourSalary Decimal @db.Decimal(10, 2) // Hourly salary with 2 decimal places
   startKM   Int
   endKM     Int
   deffKM    Int

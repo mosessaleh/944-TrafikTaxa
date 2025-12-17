@@ -6,6 +6,7 @@ import { ConfirmCardPaymentSchema } from "@/lib/validation";
 import { notifyAdmin } from "@/lib/notify";
 import { notifyBookingConfirmedUnified, notifyPaymentReceivedUnified } from "@/lib/notification-service";
 import { validateRequestOrigin } from "@/lib/security-headers";
+import { RealtimeManager } from "@/lib/realtime";
 
 export async function POST(request: Request) {
   try {
@@ -322,15 +323,39 @@ export async function POST(request: Request) {
 
     // === STEP 2: Update booking status ===
     console.log("card/confirm: Updating booking status to CONFIRMED and PAID");
-    await prisma.ride.update({
+    const updatedBooking = await prisma.ride.update({
       where: { id: booking.id },
       data: {
         status: 'CONFIRMED',
         paymentStatus: 'PAID',
         paymentMethod: 'card'
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+          }
+        },
+        vehicleType: {
+          select: {
+            id: true,
+            title: true,
+          }
+        }
       }
     });
     console.log("card/confirm: Booking status updated successfully");
+
+    // === STEP 2.5: Broadcast confirmed booking to drivers ===
+    try {
+      await RealtimeManager.broadcastConfirmedBookingsUpdate('new', updatedBooking);
+      console.log("card/confirm: Confirmed booking broadcasted to drivers");
+    } catch (e) {
+      console.error("card/confirm: Failed to broadcast confirmed booking", e);
+    }
 
     // === STEP 3: Create/Update invoice as receipt ===
     console.log("card/confirm: Checking/creating invoice as receipt");

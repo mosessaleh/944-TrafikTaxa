@@ -21,6 +21,7 @@ interface DriverInfo {
 interface VehicleScore {
   vehicleId: number;
   distance: number;
+  etaMinutes: number;
   score: number;
   rating: number;
   commissionRate: number;
@@ -167,11 +168,11 @@ export async function POST(request: NextRequest) {
       // Priority scoring system (distance, type, income, rating)
       let score = 0;
 
-      // Distance score (closer = higher score)
-      if (distance <= 2) score += 50;      // Within 2km: +50
-      else if (distance <= 5) score += 30; // Within 5km: +30
-      else if (distance <= 10) score += 15; // Within 10km: +15
-      else if (distance <= 15) score += 5;  // Within 15km: +5
+      // Distance score (closer = higher score, but balanced)
+      if (distance <= 2) score += 10;      // Within 2km: +10
+      else if (distance <= 5) score += 7; // Within 5km: +7
+      else if (distance <= 10) score += 4; // Within 10km: +4
+      else if (distance <= 15) score += 2;  // Within 15km: +2
 
       // Income score (prefer lower income to balance daily earnings)
       let incomeScore = 0;
@@ -184,8 +185,8 @@ export async function POST(request: NextRequest) {
       }
       score += incomeScore;
 
-      // Rating score (higher rating = higher score)
-      score += (driver.rating - 3) * 10; // Rating 5.0 = +20, Rating 3.0 = 0
+      // Rating score (higher rating = higher score) - TEMPORARILY DISABLED
+      // score += (driver.rating - 3) * 10; // Rating 5.0 = +20, Rating 3.0 = 0
 
       // Experience score (derived from driver creation date)
       const yearsExperience = (Date.now() - new Date(driver.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 365);
@@ -198,13 +199,19 @@ export async function POST(request: NextRequest) {
       else if (experience === 'medium') score += 10;
       else score += 5;
 
-      // Company commission rate (lower commission = higher score)
-      if (commissionRate < 8) score += 10;
-      else if (commissionRate < 12) score += 5;
+      // Company commission rate (higher commission = higher score - more profit)
+      if (commissionRate >= 12) score += 10;
+      else if (commissionRate >= 8) score += 5;
+
+      // Calculate ETA (Estimated Time of Arrival) in minutes
+      // Assuming average speed of 30 km/h in city traffic
+      const averageSpeedKmh = 30;
+      const etaMinutes = Math.ceil((distance / averageSpeedKmh) * 60);
 
       return {
         vehicleId: vehicle.id,
         distance: Math.round(distance * 10) / 10,
+        etaMinutes,
         score,
         rating: driver.rating,
         commissionRate,
@@ -213,20 +220,47 @@ export async function POST(request: NextRequest) {
       };
     }).filter((item): item is VehicleScore => item !== null);
 
-    // Sort all vehicles by distance ascending (closest first), then select top vehicles
-    const sortedVehicles = vehicleScores.sort((a, b) => a.distance - b.distance);
-    let topVehicles = sortedVehicles.slice(0, Math.min(maxVehicles, sortedVehicles.length));
+    // Check if any vehicles are within 15km (15 minutes)
+    const vehiclesWithin15km = vehicleScores.filter(v => v.distance <= 15);
 
-    // If less than maxVehicles, add additional vehicles within 30km (approx 30 min at 60km/h)
-    if (topVehicles.length < maxVehicles) {
-      const remaining = sortedVehicles.slice(topVehicles.length).filter(v => v.distance <= 30);
-      const additional = remaining.slice(0, maxVehicles - topVehicles.length);
-      topVehicles = topVehicles.concat(additional);
+    let topVehicles: VehicleScore[];
+
+    if (vehiclesWithin15km.length > 0) {
+      // If there are vehicles within 15km, use the scoring algorithm
+      topVehicles = vehiclesWithin15km
+        .sort((a, b) => b.score - a.score) // Sort by score descending
+        .slice(0, Math.min(maxVehicles, vehiclesWithin15km.length));
+
+      // If still need more vehicles, add closest vehicles within 30km
+      if (topVehicles.length < maxVehicles) {
+        const remaining = vehicleScores
+          .filter(v => v.distance > 15 && v.distance <= 30 && !topVehicles.some(tv => tv.vehicleId === v.vehicleId))
+          .sort((a, b) => a.distance - b.distance); // Sort by distance ascending
+        const additional = remaining.slice(0, maxVehicles - topVehicles.length);
+        topVehicles = topVehicles.concat(additional);
+      }
+    } else {
+      // If no vehicles within 15km, just select the closest vehicles (no scoring algorithm)
+      topVehicles = vehicleScores
+        .sort((a, b) => a.distance - b.distance) // Sort by distance ascending only
+        .slice(0, Math.min(maxVehicles, vehicleScores.length));
     }
+
+    // Create map from vehicleId to driverId
+    const vehicleToDriverMap = new Map();
+    onlineDrivers.forEach((driver: any) => {
+      const vehicle = vehicles.find((v: any) => v.regNumber === driver.car);
+      if (vehicle) {
+        vehicleToDriverMap.set(vehicle.id, driver.id);
+      }
+    });
 
     let finalVehicles = topVehicles.map((item: VehicleScore) => item.vehicleId);
     let longWait = false;
     let fallbackVehicles: number[] = [];
+
+    // Store whether we used scoring algorithm for response
+    const usedScoringAlgorithm = vehiclesWithin15km.length > 0;
 
     // Fallback for distant vehicles if all selected vehicles are too far (>30 min) and dropoff provided
     const allVehiclesTooFar = finalVehicles.length > 0 && vehicleScores.every(v => v.distance > 30); // More than 30 min (30km at 60km/h)
@@ -266,17 +300,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Determine which strategy was used
+    const strategyDescription = usedScoringAlgorithm
+      ? 'Advanced scoring: distance + income + experience + commission (vehicles within 15km)'
+      : 'Distance-based selection only (no vehicles within 15km)';
+
     return NextResponse.json({
       ok: true,
       vehicles: finalVehicles,
       totalAvailable: vehicleScores.length,
       selectedCount: finalVehicles.length,
-      strategy: 'Advanced scoring: distance + rating + experience + commission',
+      strategy: strategyDescription,
+      usedScoringAlgorithm,
       longWait,
       scores: topVehicles.map((v: VehicleScore) => ({
         id: v.vehicleId,
-        score: v.score,
+        score: usedScoringAlgorithm ? v.score : 0, // No score if distance-only
         distance: v.distance,
+        etaMinutes: v.etaMinutes,
         rating: v.rating,
         experience: v.experience,
         commissionRate: v.commissionRate,

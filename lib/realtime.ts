@@ -5,7 +5,7 @@ import { getUserFromCookie } from '@/lib/auth';
 
 // Types for real-time communication
 export interface RealtimeMessage {
-  type: 'booking_update' | 'driver_location' | 'chat_message' | 'notification' | 'ping' | 'pong' | 'error' | 'subscribe_booking';
+  type: 'booking_update' | 'driver_location' | 'chat_message' | 'notification' | 'ping' | 'pong' | 'error' | 'subscribe_booking' | 'subscribe_confirmed_bookings' | 'confirmed_bookings_update';
   payload: any;
   timestamp: number;
   userId?: string;
@@ -47,6 +47,7 @@ export class RealtimeManager {
   private static connections = new Map<string, WebSocket>();
   private static bookingSubscriptions = new Map<number, Set<string>>();
   private static userSubscriptions = new Map<string, Set<WebSocket>>();
+  private static confirmedBookingsSubscribers = new Set<string>();
 
   // Handle new WebSocket connection
   static async handleConnection(ws: WebSocket, request: IncomingMessage) {
@@ -92,6 +93,9 @@ export class RealtimeManager {
             this.bookingSubscriptions.delete(bookingId);
           }
         }
+
+        // Remove from confirmed bookings subscribers
+        this.confirmedBookingsSubscribers.delete(userId);
       });
 
       // Handle ping/pong for connection health
@@ -157,6 +161,10 @@ export class RealtimeManager {
         await this.subscribeToBooking(userId, message.payload.bookingId);
         break;
 
+      case 'subscribe_confirmed_bookings':
+        await this.subscribeToConfirmedBookings(userId);
+        break;
+
       case 'chat_message':
         await this.handleChatMessage(userId, message.payload);
         break;
@@ -212,6 +220,80 @@ export class RealtimeManager {
         payload: { message: 'Failed to subscribe to booking' },
         timestamp: Date.now(),
       });
+    }
+  }
+
+  // Subscribe user to confirmed bookings updates
+  private static async subscribeToConfirmedBookings(userId: string) {
+    try {
+      // Add to confirmed bookings subscribers
+      this.confirmedBookingsSubscribers.add(userId);
+
+      console.log(`[Realtime] User ${userId} subscribed to confirmed bookings`);
+
+      // Send current confirmed bookings immediately
+      await this.sendCurrentConfirmedBookings(userId);
+
+      this.sendToUser(userId, {
+        type: 'notification',
+        payload: {
+          id: 'subscribed_confirmed_bookings',
+          type: 'success',
+          title: 'Subscribed to Confirmed Bookings',
+          message: 'Now receiving real-time updates for new confirmed bookings',
+        } as NotificationPayload,
+        timestamp: Date.now(),
+      });
+
+    } catch (error) {
+      console.error('[Realtime] Confirmed bookings subscription error:', error);
+      this.sendToUser(userId, {
+        type: 'error',
+        payload: { message: 'Failed to subscribe to confirmed bookings' },
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  // Send current confirmed bookings to a user
+  private static async sendCurrentConfirmedBookings(userId: string) {
+    try {
+      const confirmedBookings = await prisma.ride.findMany({
+        where: {
+          status: 'CONFIRMED'
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+            }
+          },
+          vehicleType: {
+            select: {
+              id: true,
+              title: true,
+            }
+          }
+        },
+        orderBy: {
+          pickupTime: 'asc'
+        }
+      });
+
+      this.sendToUser(userId, {
+        type: 'confirmed_bookings_update',
+        payload: {
+          bookings: confirmedBookings,
+          action: 'initial_load'
+        },
+        timestamp: Date.now(),
+      });
+
+    } catch (error) {
+      console.error('[Realtime] Error sending current confirmed bookings:', error);
     }
   }
 
@@ -330,6 +412,35 @@ export class RealtimeManager {
     });
   }
 
+  // Broadcast confirmed bookings update
+  static async broadcastConfirmedBookingsUpdate(action: 'new' | 'assigned' | 'cancelled', bookingData: any) {
+    if (this.confirmedBookingsSubscribers.size === 0) return;
+
+    const message: RealtimeMessage = {
+      type: 'confirmed_bookings_update',
+      payload: {
+        action,
+        booking: bookingData,
+        timestamp: Date.now()
+      },
+      timestamp: Date.now(),
+    };
+
+    const messageStr = JSON.stringify(message);
+    for (const userId of this.confirmedBookingsSubscribers) {
+      const connections = this.userSubscriptions.get(userId);
+      if (connections) {
+        for (const ws of connections) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(messageStr);
+          }
+        }
+      }
+    }
+
+    console.log(`[Realtime] Broadcasted confirmed bookings update (${action}) to ${this.confirmedBookingsSubscribers.size} subscribers`);
+  }
+
   // Get connection statistics
   static getStats() {
     return {
@@ -337,6 +448,7 @@ export class RealtimeManager {
       activeSubscriptions: this.bookingSubscriptions.size,
       totalSubscriptions: Array.from(this.bookingSubscriptions.values())
         .reduce((sum, subs) => sum + subs.size, 0),
+      confirmedBookingsSubscribers: this.confirmedBookingsSubscribers.size,
     };
   }
 }

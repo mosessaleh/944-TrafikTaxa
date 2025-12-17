@@ -53,13 +53,13 @@ export async function POST(
       'invoice': 'invoice',
       'complaint': 'complaint',
       'favoriteaddress': 'favoriteaddress',
-      'paymentMethod': 'paymentmethod',
-      'cryptoPayment': 'cryptopayment',
-      'cardPayment': 'cardpayment',
-      'paypalPayment': 'paypalpayment',
-      'revolutPayment': 'revolutpayment',
-      'cryptoWallet': 'cryptowallet',
-      'auditLog': 'auditlog'
+      'paymentMethod': 'paymentMethod',
+      'cryptoPayment': 'cryptoPayment',
+      'cardPayment': 'cardPayment',
+      'paypalPayment': 'payPalPayment',
+      'revolutPayment': 'revolutPayment',
+      'cryptoWallet': 'cryptoWallet',
+      'auditLog': 'auditLog'
     };
 
     const modelName = modelMap[table];
@@ -96,26 +96,26 @@ export async function POST(
       case 'favoriteaddress':
         result = await prisma.favoriteaddress.deleteMany({});
         break;
-      case 'paymentmethod':
-        result = await prisma.paymentmethod.deleteMany({});
+      case 'paymentMethod':
+        result = await prisma.paymentMethod.deleteMany({});
         break;
-      case 'cryptopayment':
-        result = await prisma.cryptopayment.deleteMany({});
+      case 'cryptoPayment':
+        result = await prisma.cryptoPayment.deleteMany({});
         break;
-      case 'cardpayment':
-        result = await prisma.cardpayment.deleteMany({});
+      case 'cardPayment':
+        result = await prisma.cardPayment.deleteMany({});
         break;
-      case 'paypalpayment':
-        result = await prisma.paypalpayment.deleteMany({});
+      case 'payPalPayment':
+        result = await prisma.payPalPayment.deleteMany({});
         break;
-      case 'revolutpayment':
-        result = await prisma.revolutpayment.deleteMany({});
+      case 'revolutPayment':
+        result = await prisma.revolutPayment.deleteMany({});
         break;
-      case 'cryptowallet':
-        result = await prisma.cryptowallet.deleteMany({});
+      case 'cryptoWallet':
+        result = await prisma.cryptoWallet.deleteMany({});
         break;
-      case 'auditlog':
-        result = await prisma.auditlog.deleteMany({});
+      case 'auditLog':
+        result = await prisma.auditLog.deleteMany({});
         break;
       default:
         return NextResponse.json({ error: 'Model not found' }, { status: 400 });
@@ -159,33 +159,32 @@ export async function GET(
     }
 
     // Get record counts for all clearable tables
-    const counts = await Promise.all([
-      prisma.ride.count(),
-      prisma.invoice.count(),
-      prisma.complaint.count(),
-      prisma.favoriteaddress.count(),
-      prisma.paymentmethod.count(),
-      prisma.cryptopayment.count(),
-      prisma.cardpayment.count(),
-      prisma.paypalpayment.count(),
-      prisma.revolutpayment.count(),
-      prisma.cryptowallet.count(),
-      prisma.auditlog.count()
-    ]);
+    const getCount = async (model: any, name: string) => {
+      try {
+        return await model.count();
+      } catch (error) {
+        console.error(`Error counting ${name}:`, error);
+        return 0;
+      }
+    };
 
-    const tableCounts = [
-      { name: 'ride', count: counts[0] },
-      { name: 'invoice', count: counts[1] },
-      { name: 'complaint', count: counts[2] },
-      { name: 'favoriteaddress', count: counts[3] },
-      { name: 'paymentmethod', count: counts[4] },
-      { name: 'cryptopayment', count: counts[5] },
-      { name: 'cardpayment', count: counts[6] },
-      { name: 'paypalpayment', count: counts[7] },
-      { name: 'revolutpayment', count: counts[8] },
-      { name: 'cryptowallet', count: counts[9] },
-      { name: 'auditlog', count: counts[10] }
-    ];
+    const tableCounts = await Promise.all([
+      getCount(prisma.ride, 'ride'),
+      getCount(prisma.invoice, 'invoice'),
+      getCount(prisma.complaint, 'complaint'),
+      getCount(prisma.favoriteaddress, 'favoriteaddress'),
+      getCount(prisma.paymentMethod, 'paymentMethod'),
+      getCount(prisma.cryptoPayment, 'cryptoPayment'),
+      getCount(prisma.cardPayment, 'cardPayment'),
+      getCount(prisma.payPalPayment, 'paypalPayment'),
+      getCount(prisma.revolutPayment, 'revolutPayment'),
+      getCount(prisma.cryptoWallet, 'cryptoWallet'),
+      getCount(prisma.auditLog, 'auditLog')
+    ].map(async (promise, index) => {
+      const count = await promise;
+      const names = ['ride', 'invoice', 'complaint', 'favoriteaddress', 'paymentMethod', 'cryptoPayment', 'cardPayment', 'paypalPayment', 'revolutPayment', 'cryptoWallet', 'auditLog'];
+      return { name: names[index], count };
+    }));
 
     return NextResponse.json({
       success: true,
