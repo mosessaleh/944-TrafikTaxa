@@ -18,74 +18,82 @@ export default function AddressAutocomplete({
   onSelect:(s:Suggestion)=>void;
   name:string;
 }){
-  const [open,setOpen] = useState(false);
-  const [loading,setLoading] = useState(false);
-  const [items,setItems] = useState<Suggestion[]>([]);
-  const [cursor,setCursor] = useState(-1);
-  const boxRef = useRef<HTMLDivElement|null>(null);
-  const timer = useRef<any>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const inputRef = useRef<HTMLInputElement|null>(null);
+  const dropdownRef = useRef<HTMLDivElement|null>(null);
 
-  useEffect(()=>{
-    function onDoc(e:MouseEvent){ if(!boxRef.current) return; if(!boxRef.current.contains(e.target as any)) setOpen(false); }
-    document.addEventListener('mousedown', onDoc);
-    return ()=> document.removeEventListener('mousedown', onDoc);
-  },[]);
+  useEffect(() => {
+    const fetchSuggestions = async (query: string) => {
+      if (query.length < 2) {
+        setSuggestions([]);
+        setShowDropdown(false);
+        return;
+      }
+      try {
+        const response = await fetch(`/api/addresses?q=${encodeURIComponent(query)}&limit=20`);
+        const data = await response.json();
+        if (data.ok) {
+          setSuggestions(data.suggestions);
+          setShowDropdown(true);
+        }
+      } catch (error) {
+        console.warn('Failed to fetch address suggestions:', error);
+        setSuggestions([]);
+        setShowDropdown(false);
+      }
+    };
 
-  // Debounced fetch while typing - wait 1 second after user stops typing
-  useEffect(()=>{
-    if(timer.current) clearTimeout(timer.current);
-    if (!value || value.trim().length < 3){ setItems([]); setOpen(false); return; }
-    timer.current = setTimeout(async()=>{
-      try{
-        setLoading(true);
-        const r = await fetch(`/api/addresses?q=${encodeURIComponent(value)}&limit=8`, {
-          cache:'no-store',
-          signal: AbortSignal.timeout(3000) // Add timeout to prevent hanging
-        });
-        const j = await r.json();
-        setItems(j?.suggestions||[]);
-        setOpen(true);
-        setCursor(-1);
-      }finally{ setLoading(false); }
-    }, 1000); // Wait 1 second after user stops typing
-  },[value]);
+    const debounceTimer = setTimeout(() => {
+      fetchSuggestions(value);
+    }, 300);
 
-  function choose(s:Suggestion){ onSelect(s); setOpen(false); }
+    return () => clearTimeout(debounceTimer);
+  }, [value]);
 
-  function onKey(e:React.KeyboardEvent<HTMLInputElement>){
-    if(!open) return;
-    if(e.key==='ArrowDown'){ e.preventDefault(); setCursor(c=> Math.min((items.length-1), c+1)); }
-    else if(e.key==='ArrowUp'){ e.preventDefault(); setCursor(c=> Math.max(0, c-1)); }
-    else if(e.key==='Enter'){
-      e.preventDefault(); const s = items[cursor]; if(s) choose(s);
-    } else if(e.key==='Escape'){ setOpen(false); }
-  }
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node) &&
+          inputRef.current && !inputRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelect = (suggestion: Suggestion) => {
+    onChange(suggestion.text);
+    onSelect(suggestion);
+    setShowDropdown(false);
+  };
 
   return (
-    <div className="grid gap-1" ref={boxRef}>
+    <div className="grid gap-1 relative">
       <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
       <input
+        ref={inputRef}
         name={name}
         value={value}
         onChange={e=> onChange(e.target.value)}
-        onKeyDown={onKey}
         placeholder={placeholder||label}
         autoComplete="off"
         className="w-full px-3 py-2 rounded-xl border bg-white"
+        onFocus={() => value.length >= 2 && setShowDropdown(true)}
       />
-      {open && items.length>0 && (
-        <div className="mt-1 rounded-xl border bg-white shadow-md overflow-hidden max-h-64 overflow-y-auto">
-          {items.map((s,idx)=> (
-            <button key={(s.id||s.text)+idx} type="button" onClick={()=> choose(s)}
-              className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${idx===cursor? 'bg-gray-100':''}`}>
-              <div className="font-medium">{s.text}</div>
-              <div className="text-xs text-gray-500">{s.postcode||''} {s.city||''}</div>
-            </button>
+      {showDropdown && suggestions.length > 0 && (
+        <div ref={dropdownRef} className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-b-xl shadow-lg z-10 max-h-60 overflow-y-auto">
+          {suggestions.map((suggestion, index) => (
+            <div
+              key={suggestion.id || index}
+              className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
+              onClick={() => handleSelect(suggestion)}
+            >
+              {suggestion.text}
+            </div>
           ))}
         </div>
-      )}
-      {open && !loading && items.length===0 && (
-        <div className="mt-1 text-xs text-gray-500">No matches.</div>
       )}
     </div>
   );

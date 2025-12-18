@@ -2,14 +2,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR, { mutate } from 'swr';
-// Add Leaflet CSS dynamically
+// Load Google Maps API dynamically
 if (typeof window !== 'undefined') {
-  const existingLink = document.querySelector('link[href*="leaflet.css"]');
-  if (!existingLink) {
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = '/leaflet.css';
-    document.head.appendChild(link);
+  const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
+  if (!existingScript) {
+    // Load Google Maps API with callback
+    (window as any).initGoogleMaps = () => {
+      // Google Maps loaded callback
+      console.log('Google Maps API loaded');
+    };
+
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyDlYuoRX68-6aL9CLQqYcc6zWVmGMkGdxw&libraries=places&language=da&callback=initGoogleMaps`;
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
   }
 }
 import AddressAutocomplete, { Suggestion } from '@/components/address-autocomplete';
@@ -226,117 +233,95 @@ export default function BookClient(){
     vehicleTypeId: vehicleId || undefined
   }), [pickupSel, dropoffSel, whenType, when, vehicleId]);
 
-    // Initialize Leaflet and map
+    // Initialize Google Maps
     const initializeMap = async () => {
       if (typeof window === 'undefined') return null;
-  
+ 
       // If we've already created a map instance, reuse it
       if (mapRef.current) {
-        const L = (window as any).L;
-        return { map: mapRef.current, L };
+        const google = (window as any).google;
+        return { map: mapRef.current, google };
       }
-  
-      // Load Leaflet from local file (once)
-      if (!(window as any).L) {
+ 
+      // Wait for Google Maps API to load
+      if (!(window as any).google) {
         await new Promise((resolve, reject) => {
-          // Avoid adding multiple script tags for Leaflet
-          const existingScript = document.querySelector('script[src*="leaflet.js"]') as HTMLScriptElement | null;
-          if (existingScript) {
-            if (existingScript.dataset.loaded === 'true') {
+          const checkGoogle = () => {
+            if ((window as any).google) {
               resolve(null);
-              return;
+            } else {
+              setTimeout(checkGoogle, 100);
             }
-            existingScript.addEventListener('load', () => resolve(null), { once: true });
-            existingScript.addEventListener('error', reject, { once: true });
-            return;
-          }
-
-          const script = document.createElement('script');
-          script.src = '/leaflet.js';
-          script.async = true;
-          script.dataset.loaded = 'false';
-          script.onload = () => {
-            script.dataset.loaded = 'true';
-            resolve(null);
           };
-          script.onerror = reject;
-          document.head.appendChild(script);
+          checkGoogle();
         });
       }
-  
-      const L = (window as any).L;
-  
-      // After Leaflet is loaded, check again if a map was already created
+ 
+      const google = (window as any).google;
+ 
+      // After Google Maps is loaded, check again if a map was already created
       if (mapRef.current) {
-        return { map: mapRef.current, L };
+        return { map: mapRef.current, google };
       }
-  
-      // Fix default icon paths for Leaflet
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
-      });
-  
+ 
       const mapDiv = document.getElementById('trip-map');
       if (!mapDiv) return null;
-  
+ 
       // Create the map only once for this container
-      const map = L.map(mapDiv).setView([55.6761, 12.5683], 12); // Default to Copenhagen
+      const map = new google.maps.Map(mapDiv, {
+        center: { lat: 55.6761, lng: 12.5683 }, // Default to Copenhagen
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false
+      });
       mapRef.current = map;
-
-      // Use OpenStreetMap tiles
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19
-      }).addTo(map);
-
+ 
       // Add click handler for location selection
-      map.on('click', async (e: any) => {
-        const { lat, lng } = e.latlng;
-
-        // Reverse geocode the clicked location using Nominatim
+      map.addListener('click', async (e: any) => {
+        const lat = e.latLng.lat();
+        const lng = e.latLng.lng();
+ 
+        // Reverse geocode the clicked location using Google Geocoding API
         try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
-            {
-              headers: {
-                'User-Agent': '944-Taxi-App/1.0'
-              }
-            }
-          );
-
-          if (response.ok) {
-            const data = await response.json();
-            let address = data.display_name;
-
-            if (address) {
-              // Clean up the address, remove country if it's Denmark
-              address = address.replace(/, Denmark$/, '').trim();
-
-              const suggestion: Suggestion = {
-                id: null,
-                text: address,
-                lat: lat,
-                lon: lng,
-                postcode: data.address?.postcode || null,
-                city: data.address?.city || data.address?.town || data.address?.village || null
-              };
-
-              // Determine if this should be pickup or dropoff based on current state
-              if (!pickupSel) {
-                setPickupSel(suggestion);
-                setPickup(address);
-              } else if (!dropoffSel) {
-                setDropoffSel(suggestion);
-                setDropoff(address);
+          const geocoder = new (google as any).maps.Geocoder();
+          const response = await new Promise<any[]>((resolve, reject) => {
+            geocoder.geocode({ location: { lat, lng }, language: 'da' }, (results: any, status: any) => {
+              if (status === (google as any).maps.GeocoderStatus.OK && results && results[0]) {
+                resolve(results);
               } else {
-                // Both are set, ask user or default to pickup
-                setPickupSel(suggestion);
-                setPickup(address);
+                reject(new Error('Geocoding failed'));
               }
+            });
+          });
+ 
+          const result = response[0];
+          let address = result.formatted_address;
+ 
+          if (address) {
+            // Clean up the address, remove country if it's Denmark
+            address = address.replace(/, Denmark$/, '').trim();
+ 
+            const suggestion: Suggestion = {
+              id: null,
+              text: address,
+              lat: lat,
+              lon: lng,
+              postcode: null, // Google doesn't provide structured postcode easily
+              city: null // Google doesn't provide structured city easily
+            };
+ 
+            // Determine if this should be pickup or dropoff based on current state
+            if (!pickupSel) {
+              setPickupSel(suggestion);
+              setPickup(address);
+            } else if (!dropoffSel) {
+              setDropoffSel(suggestion);
+              setDropoff(address);
             } else {
-              alert('Unable to determine address for this location. Please enter address manually.');
+              // Both are set, ask user or default to pickup
+              setPickupSel(suggestion);
+              setPickup(address);
             }
           } else {
             alert('Unable to determine address for this location. Please enter address manually.');
@@ -346,8 +331,8 @@ export default function BookClient(){
           alert('Unable to determine address for this location. Please enter address manually.');
         }
       });
-  
-      return { map, L };
+ 
+      return { map, google };
     };
  
   // Initialize base map once so the map container is always populated
@@ -380,127 +365,166 @@ export default function BookClient(){
         instance = initialized;
         setMapInstance(initialized);
       }
- 
-      const { map, L } = instance;
- 
+
+      const { map, google } = instance;
+
       const hasPickup = !!(pickupSel && pickupSel.lat && pickupSel.lon);
       const hasDropoff = !!(dropoffSel && dropoffSel.lat && dropoffSel.lon);
- 
-      // Clear existing markers and polylines (keep base tile layer)
-      map.eachLayer((layer: any) => {
-        if (layer instanceof L.Marker || layer instanceof L.Polyline) {
-          map.removeLayer(layer);
-        }
-      });
- 
+
+      // Clear existing markers and polylines
+      // Note: Google Maps handles this automatically when we recreate them
+
+      const bounds = new (google as any).maps.LatLngBounds();
       const markers: any[] = [];
 
       // Add current location marker (blue) if available
       if (currentLocation) {
-        const currentLocationMarker = L.marker([currentLocation.lat, currentLocation.lng], {
-          icon: L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="background-color: #3b82f6; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); position: relative;"><div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; background-color: white; border-radius: 50%;"></div></div>`,
-            iconSize: [24, 24],
-            iconAnchor: [12, 12]
-          })
-        }).addTo(map);
-        currentLocationMarker.bindPopup(`<strong>Your Location</strong><br><em>Click map to select pickup/dropoff</em>`);
+        const currentLocationMarker = new (google as any).maps.Marker({
+          position: { lat: currentLocation.lat, lng: currentLocation.lng },
+          map,
+          icon: {
+            path: (google as any).maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#3b82f6',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2
+          }
+        });
+        const infoWindow = new (google as any).maps.InfoWindow({
+          content: '<strong>Your Location</strong><br><em>Click map to select pickup/dropoff</em>'
+        });
+        currentLocationMarker.addListener('click', () => infoWindow.open(map, currentLocationMarker));
         markers.push(currentLocationMarker);
+        bounds.extend(currentLocationMarker.getPosition());
       }
 
       // Add pickup marker (green) if available
       if (hasPickup && pickupSel) {
-        const pickupMarker = L.marker([pickupSel.lat, pickupSel.lon], {
-          icon: L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="background-color: #22c55e; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-          })
-        }).addTo(map);
-        pickupMarker.bindPopup(`<strong>Pickup:</strong><br>${pickupSel.text}`);
+        const pickupMarker = new (google as any).maps.Marker({
+          position: { lat: pickupSel.lat, lng: pickupSel.lon },
+          map,
+          icon: {
+            path: (google as any).maps.SymbolPath.CIRCLE,
+            scale: 6,
+            fillColor: '#22c55e',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2
+          }
+        });
+        const infoWindow = new (google as any).maps.InfoWindow({
+          content: `<strong>Pickup:</strong><br>${pickupSel.text}`
+        });
+        pickupMarker.addListener('click', () => infoWindow.open(map, pickupMarker));
         markers.push(pickupMarker);
-      }
- 
-      // Add dropoff marker (red) if available
-      if (hasDropoff && dropoffSel) {
-        const dropoffMarker = L.marker([dropoffSel.lat, dropoffSel.lon], {
-          icon: L.divIcon({
-            className: 'custom-marker',
-            html: `<div style="background-color: #ef4444; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-          })
-        }).addTo(map);
-        dropoffMarker.bindPopup(`<strong>Destination:</strong><br>${dropoffSel.text}`);
-        markers.push(dropoffMarker);
+        bounds.extend(pickupMarker.getPosition());
       }
 
-      // Add available vehicle markers (black cars)
+      // Add dropoff marker (red) if available
+      if (hasDropoff && dropoffSel) {
+        const dropoffMarker = new (google as any).maps.Marker({
+          position: { lat: dropoffSel.lat, lng: dropoffSel.lon },
+          map,
+          icon: {
+            path: (google as any).maps.SymbolPath.CIRCLE,
+            scale: 6,
+            fillColor: '#ef4444',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2
+          }
+        });
+        const infoWindow = new (google as any).maps.InfoWindow({
+          content: `<strong>Destination:</strong><br>${dropoffSel.text}`
+        });
+        dropoffMarker.addListener('click', () => infoWindow.open(map, dropoffMarker));
+        markers.push(dropoffMarker);
+        bounds.extend(dropoffMarker.getPosition());
+      }
+
+      // Add available vehicle markers (cars)
       if (availableVehicles.length > 0) {
         availableVehicles.forEach(vehicle => {
           if (vehicle.lastLat && vehicle.lastLon) {
-            const vehicleColor = vehicle.isBusy ? '#eab308' : '#22c55e'; // Yellow for busy, green for available
-            const vehicleMarker = L.marker([vehicle.lastLat, vehicle.lastLon], {
-              icon: L.divIcon({
-                className: 'vehicle-marker',
-                html: `<div style="background-color: white; border: 2px solid black; border-radius: 6px; padding: 2px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="${vehicleColor}" xmlns="http://www.w3.org/2000/svg"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg></div>`,
-                iconSize: [24, 24],
-                iconAnchor: [12, 12]
-              })
-            }).addTo(map);
+            const vehicleMarker = new (google as any).maps.Marker({
+              position: { lat: vehicle.lastLat, lng: vehicle.lastLon },
+              map,
+              icon: {
+                url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" fill="black" stroke="white" stroke-width="0.5"/></svg>`)}`,
+                scaledSize: new (google as any).maps.Size(24, 24),
+                anchor: new (google as any).maps.Point(12, 12)
+              }
+            });
             const statusText = vehicle.isBusy ? 'Busy' : 'Available';
-            vehicleMarker.bindPopup(`<strong>${vehicle.make} ${vehicle.model}</strong><br>License: ${vehicle.regNumber}<br>Status: ${statusText}`);
+            const infoWindow = new (google as any).maps.InfoWindow({
+              content: `<strong>${vehicle.make} ${vehicle.model}</strong><br>License: ${vehicle.regNumber}<br>Status: ${statusText}`
+            });
+            vehicleMarker.addListener('click', () => infoWindow.open(map, vehicleMarker));
           }
         });
       }
- 
+
       // Adjust map view based on available markers
       if (markers.length === 1) {
-        map.setView(markers[0].getLatLng(), 14);
-      } else if (markers.length === 2) {
-        const group = new L.FeatureGroup(markers);
-        map.fitBounds(group.getBounds().pad(0.1));
+        map.setCenter(markers[0].getPosition());
+        map.setZoom(14);
+      } else if (markers.length >= 2) {
+        map.fitBounds(bounds);
+        // Don't zoom in too much
+        const listener = (google as any).maps.event.addListener(map, 'idle', () => {
+          if (map.getZoom() > 15) map.setZoom(15);
+          (google as any).maps.event.removeListener(listener);
+        });
       } else if (!hasPickup && !hasDropoff) {
-        // No locations selected, reset to default view
-        map.setView([55.6761, 12.5683], 12);
+        // No locations selected, center on current location if available, otherwise default
+        if (currentLocation) {
+          map.setCenter({ lat: currentLocation.lat, lng: currentLocation.lng });
+          map.setZoom(14);
+        } else {
+          map.setCenter({ lat: 55.6761, lng: 12.5683 });
+          map.setZoom(12);
+        }
       }
- 
+
       // If both pickup and dropoff are available, draw route between them
       if (hasPickup && hasDropoff && pickupSel && dropoffSel) {
-        // Default route = straight line (fallback)
-        let routeLatLngs: [number, number][] = [
-          [pickupSel.lat as number, pickupSel.lon as number],
-          [dropoffSel.lat as number, dropoffSel.lon as number]
-        ];
- 
-        // Try to fetch detailed route geometry from our routing API
-        try {
-          const resp = await fetch(
-            `/api/route?startLat=${pickupSel.lat}&startLon=${pickupSel.lon}&endLat=${dropoffSel.lat}&endLon=${dropoffSel.lon}`,
-            { cache: 'no-store' }
-          );
-          if (resp.ok) {
-            const data = await resp.json();
-            if (data.ok && data.route?.geometry?.coordinates?.length) {
-              // OpenRouteService returns [lon, lat], Leaflet expects [lat, lon]
-              routeLatLngs = data.route.geometry.coordinates.map(
-                (c: [number, number]) => [c[1], c[0]] as [number, number]
-              );
-            }
+        // Use Google Directions API
+        const directionsService = new (google as any).maps.DirectionsService();
+        const directionsRenderer = new (google as any).maps.DirectionsRenderer({
+          map,
+          suppressMarkers: true, // We already have our own markers
+          polylineOptions: {
+            strokeColor: '#3b82f6',
+            strokeWeight: 4,
+            strokeOpacity: 0.8
           }
-        } catch (routeErr) {
-          console.warn('Route API failed, falling back to straight line:', routeErr);
-        }
- 
-        // Draw route polyline (detailed if API succeeded, straight if not)
-        L.polyline(routeLatLngs, {
-          color: '#3b82f6',
-          weight: 4,
-          opacity: 0.8,
-          dashArray: '10, 5'
-        }).addTo(map);
+        });
+
+        const request = {
+          origin: { lat: pickupSel.lat, lng: pickupSel.lon },
+          destination: { lat: dropoffSel.lat, lng: dropoffSel.lon },
+          travelMode: (google as any).maps.TravelMode.DRIVING
+        };
+
+        directionsService.route(request, (result: any, status: any) => {
+          if (status === (google as any).maps.DirectionsStatus.OK) {
+            directionsRenderer.setDirections(result);
+          } else {
+            console.warn('Directions request failed:', status);
+            // Fallback to straight line
+            const polyline = new (google as any).maps.Polyline({
+              path: [
+                { lat: pickupSel.lat, lng: pickupSel.lon },
+                { lat: dropoffSel.lat, lng: dropoffSel.lon }
+              ],
+              strokeColor: '#3b82f6',
+              strokeWeight: 4,
+              strokeOpacity: 0.8,
+              map
+            });
+          }
+        });
       }
     } catch (error) {
       console.error('Error updating map:', error);
@@ -510,7 +534,7 @@ export default function BookClient(){
   // Update map when locations are selected or vehicles are loaded
   useEffect(() => {
     updateMapWithLocations();
-  }, [pickupSel, dropoffSel, availableVehicles]);
+  }, [pickupSel, dropoffSel, availableVehicles, currentLocation]);
 
   // Check location permission on mount
   useEffect(() => {
@@ -526,6 +550,13 @@ export default function BookClient(){
       });
     }
   }, []);
+
+  // Automatically get current location if permission is granted
+  useEffect(() => {
+    if (locationPermission === 'granted' && !currentLocation) {
+      getCurrentLocation();
+    }
+  }, [locationPermission]);
 
   // Get current location
   const getCurrentLocation = async () => {
@@ -552,33 +583,51 @@ export default function BookClient(){
       setCurrentLocation(location);
       setLocationPermission('granted');
 
-      // Reverse geocode to get address using Nominatim
+      // Reverse geocode to get address using Google Geocoding API
       try {
-        const response = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`,
-          {
-            headers: {
-              'User-Agent': '944-Taxi-App/1.0'
-            }
-          }
-        );
+        if ((window as any).google) {
+          const google = (window as any).google;
+          const geocoder = new google.maps.Geocoder();
 
-        if (response.ok) {
-          const data = await response.json();
-          let address = data.display_name;
+          const response = await new Promise<any[]>((resolve, reject) => {
+            geocoder.geocode({ location: { lat: latitude, lng: longitude }, language: 'da' }, (results: any, status: any) => {
+              if (status === google.maps.GeocoderStatus.OK && results && results[0]) {
+                resolve(results);
+              } else {
+                reject(new Error('Geocoding failed'));
+              }
+            });
+          });
+
+          const result = response[0];
+          let address = result.formatted_address;
 
           if (address) {
             // Clean up the address, remove country if it's Denmark
             address = address.replace(/, Denmark$/, '').trim();
 
+            // Extract postcode and city
+            let postcode = null;
+            let city = null;
+            if (result.address_components) {
+              for (const component of result.address_components) {
+                if (component.types.includes('postal_code')) {
+                  postcode = component.long_name;
+                }
+                if (component.types.includes('locality') || component.types.includes('administrative_area_level_2')) {
+                  city = component.long_name;
+                }
+              }
+            }
+
             // Set as pickup location
             const suggestion: Suggestion = {
-              id: null,
+              id: result.place_id || null,
               text: address,
               lat: latitude,
               lon: longitude,
-              postcode: data.address?.postcode || null,
-              city: data.address?.city || data.address?.town || data.address?.village || null
+              postcode,
+              city
             };
 
             setPickupSel(suggestion);
@@ -587,7 +636,7 @@ export default function BookClient(){
             alert('Unable to determine address for your location. Please enter address manually.');
           }
         } else {
-          alert('Unable to determine address for your location. Please enter address manually.');
+          alert('Google Maps not loaded. Please enter address manually.');
         }
       } catch (geocodeError) {
         console.warn('Reverse geocoding failed:', geocodeError);

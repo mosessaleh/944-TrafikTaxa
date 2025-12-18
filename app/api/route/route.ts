@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-// Route planning API using OSRM (Open Source Routing Machine)
+// Route planning API using Google Directions API
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -16,75 +16,49 @@ export async function GET(req: Request) {
       }, { status: 400 });
     }
 
-    // Use public OSRM server (driving-car profile)
-    // Docs: http://project-osrm.org/docs/v5.5.1/api/#route-service
-    const osrmUrl =
-      `https://router.project-osrm.org/route/v1/driving/` +
-      `${encodeURIComponent(startLon)},${encodeURIComponent(startLat)};` +
-      `${encodeURIComponent(endLon)},${encodeURIComponent(endLat)}` +
-      `?overview=full&geometries=geojson`;
-
-    let useFallback = false;
-    let geometry: any = null;
-    let distance = 0;
-    let duration = 0;
+    const apiKey = 'AIzaSyDlYuoRX68-6aL9CLQqYcc6zWVmGMkGdxw';
+    const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${startLat},${startLon}&destination=${endLat},${endLon}&mode=driving&key=${apiKey}`;
 
     try {
-      const response = await fetch(osrmUrl, {
-        headers: {
-          'Accept': 'application/json'
-        },
-        signal: AbortSignal.timeout(5000)
+      const response = await fetch(directionsUrl, {
+        signal: AbortSignal.timeout(10000)
       });
 
       if (!response.ok) {
-        console.error('OSRM error status:', response.status);
-        useFallback = true;
-      } else {
-        const data = await response.json();
-        if (data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          geometry = route.geometry; // GeoJSON LineString { type, coordinates }
-          distance = route.distance || 0;
-          duration = route.duration || 0;
-        } else {
-          console.warn('OSRM: no routes returned, falling back to straight line.');
-          useFallback = true;
-        }
+        console.error('Google Directions API error status:', response.status);
+        return fallbackResponse(startLat, startLon, endLat, endLon);
       }
-    } catch (osrmError) {
-      console.error('OSRM request failed, falling back to straight line:', osrmError);
-      useFallback = true;
-    }
 
-    // If OSRM failed or returned no geometry, fall back to simple straight line
-    if (useFallback || !geometry) {
+      const data = await response.json();
+
+      if (data.status !== 'OK' || !data.routes || data.routes.length === 0) {
+        console.warn('Google Directions: no routes returned, status:', data.status);
+        return fallbackResponse(startLat, startLon, endLat, endLon);
+      }
+
+      const route = data.routes[0];
+      const leg = route.legs[0];
+
+      // Convert Google polyline to GeoJSON format
+      const geometry = {
+        type: 'LineString',
+        coordinates: decodePolyline(route.overview_polyline.points).map((point: [number, number]) => [point[1], point[0]]) // [lng, lat]
+      };
+
       return NextResponse.json({
         ok: true,
         route: {
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: [
-              [parseFloat(startLon), parseFloat(startLat)],
-              [parseFloat(endLon), parseFloat(endLat)]
-            ]
-          },
-          distance: 0,
-          duration: 0
+          geometry,
+          distance: leg.distance.value, // meters
+          duration: leg.duration.value // seconds
         }
       });
+
+    } catch (directionsError) {
+      console.error('Google Directions request failed, falling back to straight line:', directionsError);
+      return fallbackResponse(startLat, startLon, endLat, endLon);
     }
 
-    // Successful OSRM route with real geometry
-    return NextResponse.json({
-      ok: true,
-      route: {
-        geometry,
-        distance,
-        duration
-      }
-    });
   } catch (error: any) {
     console.error('Route API error:', error);
 
@@ -100,4 +74,61 @@ export async function GET(req: Request) {
       error: 'Route service error'
     }, { status: 500 });
   }
+}
+
+function fallbackResponse(startLat: string, startLon: string, endLat: string, endLon: string) {
+  return NextResponse.json({
+    ok: true,
+    route: {
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [parseFloat(startLon), parseFloat(startLat)],
+          [parseFloat(endLon), parseFloat(endLat)]
+        ]
+      },
+      distance: 0,
+      duration: 0
+    }
+  });
+}
+
+// Decode Google Maps encoded polyline
+function decodePolyline(encoded: string): [number, number][] {
+  const points: [number, number][] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    let shift = 0;
+    let result = 0;
+    let byte;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+
+    const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lng += dlng;
+
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+
+  return points;
 }

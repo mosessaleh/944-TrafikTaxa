@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
 
-// DAWA (Danmarks Adressers Web API) integration
-// Official Danish address API: https://api.dataforsyningen.dk/adresser
-
 function validateQuery(q: string): boolean {
   if (!q || q.trim().length < 2) return false;
   if (q.length > 100) return false;
@@ -22,115 +19,91 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: true, suggestions: [] });
     }
 
-    // Try Photon API first (faster OpenStreetMap-based geocoding)
-    try {
-      const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${limit}&lang=en`;
+    // Use Google Places API for address autocomplete
+    const apiKey = 'AIzaSyDlYuoRX68-6aL9CLQqYcc6zWVmGMkGdxw';
+    const placesUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&components=country:dk&key=${apiKey}&language=da`;
 
-      const response = await fetch(photonUrl, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': '944-Trafik-App/1.0'
-        },
-        signal: AbortSignal.timeout(1000) // 1 second timeout
+    try {
+      const response = await fetch(placesUrl, {
+        signal: AbortSignal.timeout(3000)
       });
 
-      if (response.ok) {
-        const data = await response.json();
-
-        // Transform Photon response to our format
-        const suggestions = (data.features || []).map((item: any) => {
-          const properties = item.properties || {};
-          const name = properties.name || '';
-          const street = properties.street || '';
-          const housenumber = properties.housenumber || '';
-          const city = properties.city || properties.town || properties.village || properties.municipality || '';
-          const postcode = properties.postcode || '';
-          const country = properties.country || '';
-
-          // Build clean address text
-          let text = '';
-          if (street) {
-            text += street;
-            if (housenumber) text += ' ' + housenumber;
-          } else if (name) {
-            text += name;
-          }
-
-          if (city && country === 'Denmark') {
-            text += ', ';
-            if (postcode) text += postcode + ' ';
-            text += city;
-          }
-
-          return {
-            id: item.properties?.osm_id?.toString() || null,
-            text: text || properties.name || '',
-            postcode: postcode,
-            city: city,
-            lon: item.geometry?.coordinates?.[0] || null,
-            lat: item.geometry?.coordinates?.[1] || null
-          };
-        }).filter((s: any) => s.text && s.city && s.city); // Only show addresses with city in Denmark
-
-        if (suggestions.length > 0) {
-          return NextResponse.json({ ok: true, suggestions });
-        }
+      if (!response.ok) {
+        console.warn('Google Places API error:', response.status);
+        return NextResponse.json({ ok: true, suggestions: [] });
       }
-    } catch (photonError) {
-      console.warn('Photon API failed:', photonError);
-    }
 
-    // Fallback to Nominatim if Photon fails
-    try {
-      const nominatimUrl = `https://nominatim.openstreetmap.org/search?countrycodes=DK&q=${encodeURIComponent(q)}&format=json&limit=${limit}&addressdetails=1`;
+      const data = await response.json();
 
-      const response = await fetch(nominatimUrl, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': '944-Trafik-App/1.0'
-        },
-        signal: AbortSignal.timeout(1000) // 1 second timeout
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-
-        // Transform Nominatim response to our format
-        const suggestions = (data || []).map((item: any) => {
-          const address = item.address || {};
-          const houseNumber = address.house_number || '';
-          const road = address.road || address.pedestrian || address.path || '';
-          const postcode = address.postcode || '';
-          const city = address.city || address.town || address.village || address.municipality || '';
-
-          // Build clean address text: "Street Name HouseNumber, Postcode City"
-          let text = '';
-          if (road) {
-            text += road;
-            if (houseNumber) text += ' ' + houseNumber;
-          }
-          if (postcode || city) {
-            text += ', ' + [postcode, city].filter(Boolean).join(' ');
-          }
-
-          return {
-            id: item.place_id?.toString() || null,
-            text: text || item.display_name || '',
-            postcode: postcode,
-            city: city,
-            lon: item.lon ? parseFloat(item.lon) : null,
-            lat: item.lat ? parseFloat(item.lat) : null
-          };
-        }).filter((s: any) => s.text);
-
-        return NextResponse.json({ ok: true, suggestions });
+      if (data.status !== 'OK' || !data.predictions) {
+        console.warn('Google Places API returned status:', data.status);
+        return NextResponse.json({ ok: true, suggestions: [] });
       }
-    } catch (nominatimError) {
-      console.warn('Nominatim API also failed:', nominatimError);
-    }
 
-    // If both APIs fail, return empty suggestions (don't block booking)
-    return NextResponse.json({ ok: true, suggestions: [] });
+      // Get place details for the top predictions to get coordinates
+      const suggestions = await Promise.all(
+        data.predictions.slice(0, limit).map(async (prediction: any) => {
+          try {
+            const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${prediction.place_id}&fields=formatted_address,geometry,address_components&key=${apiKey}&language=da`;
+
+            const detailsResponse = await fetch(detailsUrl, {
+              signal: AbortSignal.timeout(2000)
+            });
+
+            if (detailsResponse.ok) {
+              const detailsData = await detailsResponse.json();
+
+              if (detailsData.status === 'OK' && detailsData.result) {
+                const result = detailsData.result;
+                const location = result.geometry?.location;
+
+                // Extract postcode and city
+                let postcode = null;
+                let city = null;
+                if (result.address_components) {
+                  for (const component of result.address_components) {
+                    if (component.types.includes('postal_code')) {
+                      postcode = component.long_name;
+                    }
+                    if (component.types.includes('locality') || component.types.includes('administrative_area_level_2')) {
+                      city = component.long_name;
+                    }
+                  }
+                }
+
+                return {
+                  id: prediction.place_id,
+                  text: result.formatted_address,
+                  postcode,
+                  city,
+                  lat: location?.lat || null,
+                  lon: location?.lng || null
+                };
+              }
+            }
+          } catch (detailsError) {
+            console.warn('Failed to get place details for', prediction.place_id, detailsError);
+          }
+
+          // Fallback without coordinates
+          return {
+            id: prediction.place_id,
+            text: prediction.description,
+            postcode: null,
+            city: null,
+            lat: null,
+            lon: null
+          };
+        })
+      );
+
+      const filteredSuggestions = suggestions.filter(s => s.text && /^[\w\s,.\-()&éÉüÜöÖäÄßæøåÆØÅ]+$/.test(s.text));
+      return NextResponse.json({ ok: true, suggestions: filteredSuggestions });
+
+    } catch (placesError) {
+      console.warn('Google Places API failed:', placesError);
+      return NextResponse.json({ ok: true, suggestions: [] });
+    }
 
   } catch (error: any) {
     console.error("Addresses API error:", error);

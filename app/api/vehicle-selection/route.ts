@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { computePrice } from '@/lib/price';
-import { calculateDistance } from '@/lib/distance';
+import { calculateDistance, getDistanceAndDuration } from '@/lib/distance';
 
 interface VehicleSelectionRequest {
   pickupLat: number;
@@ -148,22 +148,29 @@ export async function POST(request: NextRequest) {
     const incomeMap = new Map(incomes.map((i: any) => [i.car, i._sum.price || 0]));
 
     // Calculate scores for each vehicle using the agreed strategy
-    const vehicleScores: VehicleScore[] = vehicles.map((vehicle: any) => {
+    const vehicleScores: VehicleScore[] = await Promise.all(vehicles.map(async (vehicle: any) => {
       const driver = driverMap.get(vehicle.regNumber) as DriverInfo | undefined;
       if (!driver) return null;
 
       const commissionRate = companyMap.get(vehicle.comId) || 0;
       const income = incomeMap.get(vehicle.regNumber) || 0;
 
-      // Calculate distance using Haversine formula for accuracy
-      const R = 6371; // Earth's radius in km
-      const dLat = (vehicle.lastLat - pickupLat) * Math.PI / 180;
-      const dLon = (vehicle.lastLon - pickupLon) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(pickupLat * Math.PI / 180) * Math.cos(vehicle.lastLat * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      const distance = R * c;
+      // Try Google Distance Matrix first, fallback to Haversine
+      let distance = calculateDistance(pickupLat, pickupLon, vehicle.lastLat, vehicle.lastLon);
+      let etaMinutes = Math.ceil((distance / 30) * 60); // Default calculation
+
+      try {
+        const googleResult = await getDistanceAndDuration(
+          [{ lat: pickupLat, lng: pickupLon }],
+          [{ lat: vehicle.lastLat, lng: vehicle.lastLon }]
+        );
+        if (googleResult) {
+          distance = googleResult.distance;
+          etaMinutes = Math.ceil(googleResult.duration);
+        }
+      } catch (error) {
+        console.warn('Failed to get Google distance for vehicle', vehicle.id, error);
+      }
 
       // Priority scoring system (distance, type, income, rating)
       let score = 0;
@@ -203,11 +210,6 @@ export async function POST(request: NextRequest) {
       if (commissionRate >= 12) score += 10;
       else if (commissionRate >= 8) score += 5;
 
-      // Calculate ETA (Estimated Time of Arrival) in minutes
-      // Assuming average speed of 30 km/h in city traffic
-      const averageSpeedKmh = 30;
-      const etaMinutes = Math.ceil((distance / averageSpeedKmh) * 60);
-
       return {
         vehicleId: vehicle.id,
         distance: Math.round(distance * 10) / 10,
@@ -218,7 +220,7 @@ export async function POST(request: NextRequest) {
         experience,
         income
       };
-    }).filter((item): item is VehicleScore => item !== null);
+    })).then(scores => scores.filter((item): item is VehicleScore => item !== null));
 
     // Check if any vehicles are within 15km (15 minutes)
     const vehiclesWithin15km = vehicleScores.filter(v => v.distance <= 15);

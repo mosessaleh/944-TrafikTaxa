@@ -158,13 +158,13 @@ export async function middleware(req: NextRequest) {
   const isDev = process.env.NODE_ENV === 'development';
   const csp = [
     "default-src 'self'",
-    "img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://*.stripe.com https://*.paypal.com",
+    "img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://*.stripe.com https://*.paypal.com https://maps.gstatic.com https://maps.googleapis.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-    // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe + Google Analytics
+    // Allow inline/eval for Next dev tooling; includes ws: for HMR + Stripe + Google Analytics + Google Maps
     ...(isDev
-      ? [`script-src 'self' 'unsafe-inline' 'unsafe-eval' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com`]
-      : [`script-src 'self' 'unsafe-inline' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com`]),
-    "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org https://api.stripe.com https://api.paypal.com" +
+      ? [`script-src 'self' 'unsafe-inline' 'unsafe-eval' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com https://maps.googleapis.com`]
+      : [`script-src 'self' 'unsafe-inline' 'nonce-${nonce}' https://js.stripe.com https://www.paypal.com https://www.paypalobjects.com https://www.googletagmanager.com https://maps.googleapis.com`]),
+    "connect-src 'self' https://nominatim.openstreetmap.org https://router.project-osrm.org https://api.stripe.com https://api.paypal.com https://maps.googleapis.com" +
       (isDev ? " ws:" : ""),
     "frame-src 'self' https://js.stripe.com https://hooks.stripe.com https://www.paypal.com",
     "font-src 'self' data: https://fonts.gstatic.com",

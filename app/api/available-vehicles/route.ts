@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { calculateDistance } from '@/lib/distance';
+import { calculateDistance, getDistanceAndDuration } from '@/lib/distance';
+import { computePrice } from '@/lib/price';
 
 interface VehicleWithStatus {
   id: number;
@@ -14,7 +15,7 @@ interface VehicleWithStatus {
   status: number;
   isBusy: boolean;
   estimatedExtraTime: number;
-  etaMinutes: number;
+  etaMinutes: number | null;
   distance?: number;
 }
 
@@ -30,8 +31,10 @@ export async function GET(request: Request) {
     const pickupLat = searchParams.get('pickupLat');
     const pickupLon = searchParams.get('pickupLon');
     const vehicleTypeId = searchParams.get('vehicleTypeId');
+    const dropoffLat = searchParams.get('dropoffLat');
+    const dropoffLon = searchParams.get('dropoffLon');
 
-    console.log('Available-vehicles: Request params:', { pickupLat, pickupLon, vehicleTypeId });
+    console.log('Available-vehicles: Request params:', { pickupLat, pickupLon, vehicleTypeId, dropoffLat, dropoffLon });
 
     // For testing - return empty array if no params
     if (!pickupLat && !pickupLon && !vehicleTypeId) {
@@ -96,18 +99,26 @@ export async function GET(request: Request) {
                 select: { currentRideId: true }
               });
 
-              // Calculate ETA from pickup location
+              // Calculate ETA from pickup location using Google Maps API
               let etaMinutes = 0;
               if (vehicle.lastLat && vehicle.lastLon && pickupLat && pickupLon) {
-                const distance = calculateDistance(
-                  vehicle.lastLat,
-                  vehicle.lastLon,
-                  parseFloat(pickupLat),
-                  parseFloat(pickupLon)
+                const distanceData = await getDistanceAndDuration(
+                  [{ lat: vehicle.lastLat, lng: vehicle.lastLon }],
+                  [{ lat: parseFloat(pickupLat), lng: parseFloat(pickupLon) }]
                 );
-                // Assuming average speed of 30 km/h in city traffic
-                const averageSpeedKmh = 30;
-                etaMinutes = Math.ceil((distance / averageSpeedKmh) * 60);
+                if (distanceData) {
+                  etaMinutes = Math.ceil(distanceData.duration);
+                } else {
+                  // Fallback to simple calculation
+                  const distance = calculateDistance(
+                    vehicle.lastLat,
+                    vehicle.lastLon,
+                    parseFloat(pickupLat),
+                    parseFloat(pickupLon)
+                  );
+                  const averageSpeedKmh = 30;
+                  etaMinutes = Math.ceil((distance / averageSpeedKmh) * 60);
+                }
               }
 
               return {
