@@ -21,7 +21,7 @@ export async function getDistanceAndDuration(
   destinations: { lat: number; lng: number }[]
 ): Promise<{ distance: number; duration: number } | null> {
   try {
-    const apiKey = 'AIzaSyDlYuoRX68-6aL9CLQqYcc6zWVmGMkGdxw';
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     const originsStr = origins.map(o => `${o.lat},${o.lng}`).join('|');
     const destinationsStr = destinations.map(d => `${d.lat},${d.lng}`).join('|');
 

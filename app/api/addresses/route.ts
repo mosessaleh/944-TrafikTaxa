@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     }
 
     // Use Google Places API for address autocomplete
-    const apiKey = 'AIzaSyDlYuoRX68-6aL9CLQqYcc6zWVmGMkGdxw';
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     const placesUrl = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(q)}&components=country:dk&key=${apiKey}&language=da`;
 
     try {

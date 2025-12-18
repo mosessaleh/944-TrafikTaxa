@@ -16,7 +16,7 @@ export async function GET(req: Request) {
       }, { status: 400 });
     }
 
-    const apiKey = 'AIzaSyDlYuoRX68-6aL9CLQqYcc6zWVmGMkGdxw';
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     const directionsUrl = `https://maps.googleapis.com/maps/api/directions/json?origin=${startLat},${startLon}&destination=${endLat},${endLon}&mode=driving&key=${apiKey}`;
 
     try {
