@@ -110,7 +110,31 @@ export default async function AdminHome(){
 
     // Vehicles
     prisma.vehicleType.count(),
-    prisma.vehicleType.count({ where: { active: true } })
+    prisma.vehicleType.count({ where: { active: true } }),
+
+    // Vehicles data for status display
+    (prisma as any).comVehicles.findMany({
+      select: {
+        id: true,
+        regNumber: true,
+        make: true,
+        model: true,
+        status: true,
+        lastLat: true,
+        lastLon: true
+      }
+    }),
+    (prisma as any).comDriver.findMany({
+      where: {
+        isOnline: true,
+        isActive: true,
+        car: { not: null }
+      },
+      select: {
+        car: true,
+        currentRideId: true
+      }
+    })
   ]);
 
   const stats = {

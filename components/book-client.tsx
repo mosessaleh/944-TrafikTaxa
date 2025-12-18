@@ -13,7 +13,7 @@ if (typeof window !== 'undefined') {
     };
 
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyDlYuoRX68-6aL9CLQqYcc6zWVmGMkGdxw&libraries=places&language=da&callback=initGoogleMaps`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places&language=da&callback=initGoogleMaps`;
     script.async = true;
     script.defer = true;
     document.head.appendChild(script);
@@ -451,7 +451,7 @@ export default function BookClient(){
               position: { lat: vehicle.lastLat, lng: vehicle.lastLon },
               map,
               icon: {
-                url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" fill="black" stroke="white" stroke-width="0.5"/></svg>`)}`,
+                url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="24" height="24" fill="white" stroke="black" stroke-width="2" rx="6"/><g transform="translate(4,4) scale(0.6667)"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" fill="black"/></g></svg>`)}`,
                 scaledSize: new (google as any).maps.Size(24, 24),
                 anchor: new (google as any).maps.Point(12, 12)
               }

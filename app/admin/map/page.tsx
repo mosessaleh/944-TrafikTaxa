@@ -25,54 +25,53 @@ export default function AdminMapPage() {
   const vehicleMarkersRef = useRef<Map<number, any>>(new Map());
   const previousLocationsRef = useRef<Map<string, {lat: number, lon: number}>>(new Map());
 
-  // Initialize Leaflet map
+  // Initialize Google Maps
   useEffect(() => {
     const initializeMap = async () => {
       if (typeof window === 'undefined' || mapInstance) return;
 
-      // Load Leaflet CSS if not already loaded
-      if (!document.querySelector('link[href*="leaflet.css"]')) {
-        const link = document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = '/leaflet.css';
-        document.head.appendChild(link);
-      }
+      // Load Google Maps API if not already loaded
+      if (!(window as any).google) {
+        // Load Google Maps API with callback
+        (window as any).initGoogleMapsAdmin = () => {
+          // Google Maps loaded callback
+          console.log('Google Maps API loaded for admin');
+        };
 
-      // Load Leaflet JS if not already loaded
-      if (!(window as any).L) {
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places&language=da&callback=initGoogleMapsAdmin`;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+
+        // Wait for Google Maps API to load
         await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = '/leaflet.js';
-          script.async = true;
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
+          const checkGoogle = () => {
+            if ((window as any).google) {
+              resolve(null);
+            } else {
+              setTimeout(checkGoogle, 100);
+            }
+          };
+          checkGoogle();
         });
       }
 
-      const L = (window as any).L;
-
-      // Fix default icon paths
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
-      });
+      const google = (window as any).google;
 
       // Check if map container already has a map
       const mapContainer = document.getElementById('admin-map');
-      if (!mapContainer || (mapContainer as any)._leaflet_id) return;
+      if (!mapContainer) return;
 
       // Create map centered on Denmark
-      const map = L.map('admin-map').setView([56.2639, 9.5018], 7); // Denmark center
+      const map = new google.maps.Map(mapContainer, {
+        center: { lat: 56.2639, lng: 9.5018 }, // Denmark center
+        zoom: 7,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false
+      });
       mapRef.current = map;
-
-      // Add tile layer
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© OpenStreetMap contributors © CARTO',
-        crossOrigin: true,
-        maxZoom: 19
-      }).addTo(map);
 
       setMapInstance(map);
     };
@@ -109,11 +108,11 @@ export default function AdminMapPage() {
 
     console.log('🗺️ Updating map markers for', vehicles.length, 'vehicles');
 
-    const L = (window as any).L;
+    const google = (window as any).google;
 
     // Clear existing markers
     vehicleMarkersRef.current.forEach(marker => {
-      mapInstance.removeLayer(marker);
+      marker.setMap(null);
     });
     vehicleMarkersRef.current.clear();
 
@@ -135,50 +134,56 @@ export default function AdminMapPage() {
     // Add new markers
     vehicles.forEach(vehicle => {
       if (vehicle.lastLat && vehicle.lastLon) {
-        let marker;
-
         let markerColor: string;
-        let markerSize: number;
+        let iconSize: number;
+        let containerSize: number;
 
         if (vehicle.isOnline) {
           if (vehicle.isBusy) {
             // Online but busy - yellow
             markerColor = '#eab308';
-            markerSize = 16;
+            iconSize = 16;
+            containerSize = 24;
           } else {
             // Online and available - green
             markerColor = '#22c55e';
-            markerSize = 16;
+            iconSize = 16;
+            containerSize = 24;
           }
         } else {
           // Offline - red
           markerColor = '#ef4444';
-          markerSize = 12;
+          iconSize = 12;
+          containerSize = 18;
         }
 
-        const iconSize = vehicle.isOnline ? 16 : 12;
-        const containerSize = vehicle.isOnline ? 24 : 18;
-        marker = L.marker([vehicle.lastLat, vehicle.lastLon], {
-          icon: L.divIcon({
-            className: vehicle.isOnline ? (vehicle.isBusy ? 'busy-marker' : 'available-marker') : 'offline-marker',
-            html: `<div style="background-color: white; border: 2px solid black; border-radius: 6px; padding: 2px;"><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="${markerColor}" xmlns="http://www.w3.org/2000/svg"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"/></svg></div>`,
-            iconSize: [containerSize, containerSize],
-            iconAnchor: [containerSize / 2, containerSize / 2]
-          })
+        const marker = new google.maps.Marker({
+          position: { lat: vehicle.lastLat, lng: vehicle.lastLon },
+          map: mapInstance,
+          icon: {
+            url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg width="${containerSize}" height="${containerSize}" viewBox="0 0 ${containerSize} ${containerSize}" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="${containerSize}" height="${containerSize}" fill="white" stroke="black" stroke-width="2" rx="6"/><g transform="translate(${containerSize/2 - iconSize/2}, ${containerSize/2 - iconSize/2})"><svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24"><path d="M5 11l1.5-4.5h11L19 11v8a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-8zM6.5 9l-.5 2h11l-.5-2h-10zM7 13a1 1 0 1 0 0 2 1 1 0 0 0 0-2zm10 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z" fill="${markerColor}"/></svg></g></svg>`)}`,
+            scaledSize: new google.maps.Size(containerSize, containerSize),
+            anchor: new google.maps.Point(containerSize / 2, containerSize / 2)
+          }
         });
 
-        // Add popup
+        // Add info window
         const statusText = vehicle.isBusy ? 'Busy' : 'Available';
         const onlineText = vehicle.isOnline ? 'Online' : 'Offline';
-        marker.bindPopup(`
-          <strong>${vehicle.make} ${vehicle.model}</strong><br>
-          License: ${vehicle.regNumber}<br>
-          Status: ${statusText}<br>
-          Connection: ${onlineText}<br>
-          Type: ${vehicle.vehicleType}
-        `);
+        const infoWindow = new google.maps.InfoWindow({
+          content: `
+            <strong>${vehicle.make} ${vehicle.model}</strong><br>
+            License: ${vehicle.regNumber}<br>
+            Status: ${statusText}<br>
+            Connection: ${onlineText}<br>
+            Type: ${vehicle.vehicleType}
+          `
+        });
 
-        marker.addTo(mapInstance);
+        marker.addListener('click', () => {
+          infoWindow.open(mapInstance, marker);
+        });
+
         vehicleMarkersRef.current.set(vehicle.id, marker);
       }
     });
@@ -223,9 +228,20 @@ export default function AdminMapPage() {
     if (vehicle && vehicle.lastLat && vehicle.lastLon) {
       const marker = vehicleMarkersRef.current.get(vehicle.id);
       if (marker) {
-        // Open popup and zoom to vehicle
-        marker.openPopup();
-        mapInstance.setView([vehicle.lastLat, vehicle.lastLon], 15);
+        // Open info window and zoom to vehicle
+        const google = (window as any).google;
+        const infoWindow = new google.maps.InfoWindow({
+          content: `
+            <strong>${vehicle.make} ${vehicle.model}</strong><br>
+            License: ${vehicle.regNumber}<br>
+            Status: ${vehicle.isBusy ? 'Busy' : 'Available'}<br>
+            Connection: ${vehicle.isOnline ? 'Online' : 'Offline'}<br>
+            Type: ${vehicle.vehicleType}
+          `
+        });
+        infoWindow.open(mapInstance, marker);
+        mapInstance.setCenter({ lat: vehicle.lastLat, lng: vehicle.lastLon });
+        mapInstance.setZoom(15);
       }
     } else {
       alert('Vehicle not found or no location data');
