@@ -76,6 +76,14 @@ export async function POST(request: NextRequest) {
       data: updateData,
     });
 
+    // Also update driver's lastLocation
+    await (prisma as any).comDriver.update({
+      where: { id: driver.id },
+      data: {
+        lastLocation: [latitude, longitude],
+      },
+    });
+
     return NextResponse.json({
       success: true,
       message: 'Location updated successfully',

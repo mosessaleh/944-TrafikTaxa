@@ -16,6 +16,7 @@ interface Vehicle {
 interface OnlineDriver {
   car: string | null;
   currentRideId: number | null;
+  isBusy: boolean;
 }
 
 export async function GET(request: Request) {
@@ -37,7 +38,6 @@ export async function GET(request: Request) {
         }
       });
     } catch (error) {
-      console.log('No vehicles table or data, using mock vehicles for admin map');
       vehicles = [];
     }
 
@@ -52,17 +52,16 @@ export async function GET(request: Request) {
         },
         select: {
           car: true,
-          currentRideId: true
+          currentRideId: true,
+          isBusy: true
         }
       });
     } catch (error) {
-      console.log('No drivers table or data, using empty online drivers list');
       onlineDrivers = [];
     }
 
     // If no vehicles in database, add mock vehicles for testing
     if (vehicles.length === 0) {
-      console.log('Adding mock vehicles for admin map testing');
       vehicles = [
         {
           id: 1,
@@ -104,7 +103,7 @@ export async function GET(request: Request) {
     const vehiclesWithStatus = vehicles.map(vehicle => {
       const driver = onlineDrivers.find(d => d.car === vehicle.regNumber);
       const isOnline = !!driver;
-      const isBusy = driver ? driver.currentRideId !== null : false;
+      const isBusy = driver ? driver.isBusy : false;
 
       // For mock vehicles, make some appear online
       const isMockVehicle = vehicle.regNumber.startsWith('ADMIN-');
@@ -125,7 +124,6 @@ export async function GET(request: Request) {
       serverTime: Date.now()
     });
   } catch (e: any) {
-    console.error('Failed to fetch vehicles for map:', e?.stack || e?.message || e);
     return NextResponse.json({
       ok: false,
       error: 'Failed to fetch vehicles'

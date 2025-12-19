@@ -33,7 +33,6 @@ export async function middleware(req: NextRequest) {
   if (isSensitivePath && req.method !== 'GET' && req.method !== 'HEAD') {
     // Validate origin for POST/PUT/DELETE requests
     if (origin && !allowedOrigins.includes(origin)) {
-      console.warn(`Blocked request from unauthorized origin: ${origin} to ${pathname}`);
       return NextResponse.json(
         { error: 'Unauthorized origin' },
         { status: 403 }
@@ -54,7 +53,6 @@ export async function middleware(req: NextRequest) {
         });
 
         if (!isAllowedReferer) {
-          console.warn(`Blocked request from unauthorized referer: ${referer} to ${pathname}`);
           return NextResponse.json(
             { error: 'Unauthorized referer' },
             { status: 403 }
@@ -62,7 +60,6 @@ export async function middleware(req: NextRequest) {
         }
       } catch (error) {
         // Invalid referer URL, block the request
-        console.warn(`Invalid referer header: ${referer}`);
         return NextResponse.json(
           { error: 'Invalid request' },
           { status: 400 }

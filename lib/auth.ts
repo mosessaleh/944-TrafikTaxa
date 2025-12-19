@@ -78,31 +78,25 @@ export function clearSessionCookie(){
 }
 
 export async function getUserFromCookie(){
-  console.log('getUserFromCookie called');
   const jar = cookies();
   const isProd = process.env.NODE_ENV === 'production';
   const primaryName = isProd ? '__Host-session' : 'session';
   const fallbackName = primaryName === '__Host-session' ? 'session' : '__Host-session';
 
   const token = jar.get(primaryName)?.value || jar.get(fallbackName)?.value;
-  console.log('Token found:', !!token);
   if (!token) return null;
 
   try{
-    console.log('Verifying token...');
     const dec: any = verify(token, SECRET);
-    console.log('Token decoded:', { id: dec.id, type: dec.type, exp: dec.exp });
 
     // Validate token payload structure
     if (!dec.id || typeof dec.id !== 'number') {
-      console.log('Invalid token structure');
       return null;
     }
 
     // Check token expiration (JWT library handles this, but double-check)
     const now = Math.floor(Date.now() / 1000);
     if (dec.exp && dec.exp < now) {
-      console.log('Token expired');
       return null;
     }
 
@@ -206,9 +200,7 @@ export async function getUserFromCookie(){
 }
 
 export async function requireAdmin(){
-  console.log('requireAdmin called');
   const u = await getUserFromCookie();
-  console.log('User from cookie:', u);
   if (!u) throw Object.assign(new Error('Unauthorized'), { status: 401 });
   if (u.type !== 'user' || (u as any).role !== 'ADMIN') throw Object.assign(new Error('Forbidden'), { status: 403 });
   return u;
@@ -257,15 +249,10 @@ export async function requireDriverByJWT(req: Request){
   }
   const token = authHeader.substring(7);
 
-  console.log('JWT_SECRET available:', !!process.env.JWT_SECRET);
-  console.log('Token to verify:', token.substring(0, 20) + '...');
-
   try {
     const decoded: any = verify(token, SECRET);
-    console.log('Decoded token:', { driverId: decoded.driverId, type: decoded.type, exp: decoded.exp });
 
     if (!decoded.driverId || decoded.type !== 'driver') {
-      console.log('Invalid token structure');
       throw Object.assign(new Error('Invalid token'), { status: 401 });
     }
 

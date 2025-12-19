@@ -79,6 +79,35 @@ async function assignDriverToRide(rideId: number) {
     });
 
     console.log(`Assigned ride ${rideId} to driver ${driver.drFname} ${driver.drLname} (vehicle: ${regNumber})`);
+
+    // Send notification to driver immediately
+    try {
+      if ((global as any).io) {
+        const ride = await prisma.ride.findUnique({
+          where: { id: rideId },
+          include: { vehicleType: true }
+        });
+        if (ride) {
+          (global as any).io.to(`driver_${driver.id}`).emit('newRide', {
+            rideId: ride.id,
+            price: ride.price,
+            pickupAddress: ride.pickupAddress,
+            dropoffAddress: ride.dropoffAddress,
+            etaMinutes: 5,
+            riderName: ride.riderName,
+            distanceKm: ride.distanceKm,
+            durationMin: ride.durationMin,
+            vehicleType: ride.vehicleType.key,
+            passengers: ride.passengers,
+            paymentMethod: ride.paymentMethod,
+            scheduled: ride.scheduled,
+          });
+          console.log(`Sent notification to driver ${driver.id} for ride ${rideId}`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to send notification to driver:', error);
+    }
   } catch (error) {
     console.error('Failed to assign driver to ride:', error);
   }

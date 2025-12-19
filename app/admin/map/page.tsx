@@ -35,7 +35,6 @@ export default function AdminMapPage() {
         // Load Google Maps API with callback
         (window as any).initGoogleMapsAdmin = () => {
           // Google Maps loaded callback
-          console.log('Google Maps API loaded for admin');
         };
 
         const script = document.createElement('script');
@@ -82,18 +81,13 @@ export default function AdminMapPage() {
   // Load vehicles
   useEffect(() => {
     const loadVehicles = async () => {
-      console.log('🏁 Loading initial vehicle data...');
       try {
         const response = await fetch('/api/admin/vehicles/map');
         const data = await response.json();
         if (data.ok) {
-          console.log(`📦 Initial load: ${data.vehicles.length} vehicles from database`);
           setVehicles(data.vehicles);
-        } else {
-          console.error('❌ Initial load failed:', data.error);
         }
       } catch (error) {
-        console.error('❌ Initial load error:', error);
       } finally {
         setLoading(false);
       }
@@ -105,8 +99,6 @@ export default function AdminMapPage() {
   // Update map markers when vehicles change
   useEffect(() => {
     if (!mapInstance) return;
-
-    console.log('🗺️ Updating map markers for', vehicles.length, 'vehicles');
 
     const google = (window as any).google;
 
@@ -121,9 +113,7 @@ export default function AdminMapPage() {
     if (firstVehicle) {
       const prevLocation = previousLocationsRef.current.get(firstVehicle.regNumber);
       if (prevLocation) {
-        const latDiff = firstVehicle.lastLat! - prevLocation.lat;
-        const lonDiff = firstVehicle.lastLon! - prevLocation.lon;
-        console.log(`${firstVehicle.regNumber}: prev(${prevLocation.lat}, ${prevLocation.lon}) -> new(${firstVehicle.lastLat}, ${firstVehicle.lastLon}) diff(${latDiff.toFixed(6)}, ${lonDiff.toFixed(6)})`);
+        // Movement tracking logic can be kept for future use
       }
       previousLocationsRef.current.set(firstVehicle.regNumber, {
         lat: firstVehicle.lastLat!,
@@ -193,29 +183,20 @@ export default function AdminMapPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    console.log(`🚀 Starting vehicle data polling at ${new Date().toISOString()}...`);
-
     const interval = setInterval(async () => {
       try {
-        console.log('🔄 Fetching vehicle data...');
         const response = await fetch(`/api/admin/vehicles/map?t=${Date.now()}`);
         const data = await response.json();
         if (data.ok) {
-          console.log(`📊 Received ${data.vehicles.length} vehicles at ${data.timestamp}`);
           // Force update by creating new array
           const newVehicles = [...data.vehicles];
-          console.log('🔄 Setting new vehicles array:', newVehicles.length, 'items');
           setVehicles(newVehicles);
-        } else {
-          console.error('❌ API returned error:', data.error);
         }
       } catch (error) {
-        console.error('❌ Failed to fetch vehicles:', error);
       }
     }, 10000); // Update every 10 seconds
 
     return () => {
-      console.log('🛑 Stopping vehicle data polling...');
       clearInterval(interval);
     };
   }, []);

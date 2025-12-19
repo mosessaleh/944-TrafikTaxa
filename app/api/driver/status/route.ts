@@ -16,17 +16,37 @@ export async function GET(request: NextRequest) {
 
     const driver = await prisma.comDriver.findUnique({
       where: { id: decoded.driverId },
-      select: { isOnline: true, isBusy: true, currentRideId: true },
+      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true },
     });
 
     if (!driver) {
       return NextResponse.json({ error: 'Driver not found' }, { status: 404 });
     }
 
+    // Check if there is an active shift for today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const activeShift = await prisma.driversvagt.findFirst({
+      where: {
+        drId: decoded.driverId,
+        date: {
+          gte: today,
+          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+        },
+        endVagt: null // Shift hasn't ended yet
+      }
+    });
+
+    // Driver is considered online if they have an active shift and isOnline flag is true
+    const isOnline = driver.isOnline && !!activeShift;
+
     return NextResponse.json({
-      isOnline: driver.isOnline,
+      isOnline: isOnline,
       isBusy: driver.isBusy,
       currentRideId: driver.currentRideId,
+      rideAccepted: driver.rideAccepted,
+      hasActiveShift: !!activeShift,
     });
   } catch (error) {
     console.error('Get driver status error:', error);
@@ -44,15 +64,24 @@ export async function POST(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { driverId: number };
 
-    const { online } = await request.json();
+    const body = await request.json();
+    const { online, busy } = body;
 
-    if (typeof online !== 'boolean') {
+    if (online !== undefined && typeof online !== 'boolean') {
       return NextResponse.json({ error: 'Invalid online status' }, { status: 400 });
     }
 
+    if (busy !== undefined && typeof busy !== 'boolean') {
+      return NextResponse.json({ error: 'Invalid busy status' }, { status: 400 });
+    }
+
+    const updateData: any = {};
+    if (online !== undefined) updateData.isOnline = online;
+    if (busy !== undefined) updateData.isBusy = busy;
+
     await prisma.comDriver.update({
       where: { id: decoded.driverId },
-      data: { isOnline: online },
+      data: updateData,
     });
 
     return NextResponse.json({ success: true });
