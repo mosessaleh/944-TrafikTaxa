@@ -19,6 +19,7 @@ export async function OPTIONS() {
 export async function POST(request: NextRequest) {
   try {
     const { username, password, startKM } = await request.json();
+    console.log('Driver login attempt:', { username, startKM }); // Log username and startKM, not password
 
     if (!username || !password || startKM === undefined) {
       return NextResponse.json(
@@ -38,6 +39,7 @@ export async function POST(request: NextRequest) {
     const driver = await prisma.comDriver.findUnique({
       where: { drUsername: username },
     });
+    console.log('Driver found:', !!driver);
 
     if (!driver) {
       return NextResponse.json(
@@ -55,6 +57,7 @@ export async function POST(request: NextRequest) {
 
     // Check password
     const isValidPassword = await bcrypt.compare(password, driver.drPass);
+    console.log('Password valid:', isValidPassword);
     if (!isValidPassword) {
       return NextResponse.json(
         { error: 'Invalid credentials' },
@@ -70,6 +73,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if driver is active
+    console.log('Driver active:', driver.isActive);
     if (!driver.isActive) {
       return NextResponse.json(
         { error: 'Driver account is not active' },

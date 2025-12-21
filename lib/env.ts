@@ -26,7 +26,7 @@ const envSchema = z.object({
   RESEND_FROM: z.string().optional(),
   
   // Optional: Stripe (Payment)
-  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   

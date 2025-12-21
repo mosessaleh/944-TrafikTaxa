@@ -90,6 +90,16 @@ const runRobot = async () => {
 
       for (const driver of drivers) {
         console.log(`Sending to driver ${driver.id}`);
+        // Set currentRideId and rideAccepted on driver
+        await prisma.comDriver.update({
+          where: { id: driver.id },
+          data: {
+            currentRideId: ride.id,
+            rideAccepted: 0 // 0 = pending, 1 = accepted
+          }
+        });
+        console.log(`Set currentRideId ${ride.id} on driver ${driver.id}`);
+
         // Send notification
         if (global.io) {
           global.io.to(`driver_${driver.id}`).emit('newRide', {
@@ -120,6 +130,16 @@ const runRobot = async () => {
           console.log(`Ride ${ride.id} accepted by ${updatedRide.driverId}`);
           break; // Stop sending to others
         } else {
+          // Clear the offer from driver
+          await prisma.comDriver.update({
+            where: { id: driver.id },
+            data: {
+              currentRideId: null,
+              rideAccepted: null
+            }
+          });
+          console.log(`Cleared offer from driver ${driver.id}`);
+
           // Exclude driver temporarily
           excludedDrivers.set(driver.id, Date.now() + 2 * 60 * 1000);
           console.log(`Driver ${driver.id} excluded for 2 minutes`);

@@ -320,7 +320,7 @@ export async function POST(request: NextRequest) {
     // Initialize driver queue (will be populated during vehicle assignment)
     let driverQueue: string[] = [];
 
-    // Create booking with CONFIRMED status (no immediate payment)
+    // Create booking with PENDING status (awaiting payment confirmation)
     const booking = await prisma.ride.create({
       data: {
         userId: user.id,
@@ -335,7 +335,7 @@ export async function POST(request: NextRequest) {
         distanceKm: Number(distanceKm.toFixed(2)),
         durationMin,
         price,
-        status: 'CONFIRMED', // Changed from PENDING
+        status: 'PENDING', // Awaiting payment confirmation
         paymentStatus: 'PENDING_PAYMENT', // New status for post-trip payment
         paymentMethod: paymentMethod,
         vehicleTypeId: validatedData.vehicleTypeId,
@@ -464,7 +464,7 @@ export async function POST(request: NextRequest) {
             <li><strong>Duration:</strong> ${booking.durationMin} minutes</li>
             <li><strong>Price:</strong> ${booking.price} DKK</li>
             <li><strong>Payment Method:</strong> ${paymentMethod}</li>
-            <li><strong>Status:</strong> CONFIRMED (payment pending after trip)</li>
+            <li><strong>Status:</strong> PENDING (awaiting payment confirmation)</li>
           </ul>
           <h3>Cancellation Policy</h3>
           <p>Please inform the customer about our current cancellation policy:</p>

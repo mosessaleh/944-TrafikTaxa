@@ -89,8 +89,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         updateData.droppedAt = new Date();
         break;
       case 'cancelled':
-        dbStatus = 'CANCELED';
-        explanation = 'Ride cancelled by driver';
+        dbStatus = 'CONFIRMED';
+        explanation = 'Ride cancelled by driver - available for reassignment';
+        updateData.driverId = null; // Clear driver assignment for reassignment
         break;
     }
 
@@ -106,12 +107,23 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     // If ride is completed or cancelled, free up the driver
     if (status === 'completed' || status === 'cancelled') {
+      const updateData: any = {
+        currentRideId: null,
+        rideAccepted: null,
+        isBusy: false
+      };
+
+      // Deduct rating for cancelling after accepting
+      if (status === 'cancelled') {
+        updateData.rating = {
+          decrement: 0.05 // Deduct 0.05 for cancelling after accepting
+        };
+        console.log(`⚠️ Deducted 0.05 from driver ${driver.id} rating for cancelling`);
+      }
+
       await prisma.comDriver.update({
         where: { id: driver.id },
-        data: {
-          currentRideId: null,
-          isBusy: false
-        }
+        data: updateData
       });
       console.log(`✅ Driver ${driver.id} freed up`);
     }
@@ -124,7 +136,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       ride: {
         id: updatedRide.id,
         status: status,
-        updatedAt: updatedRide.updatedAt
+        updatedAt: new Date().toISOString()
       }
     };
 

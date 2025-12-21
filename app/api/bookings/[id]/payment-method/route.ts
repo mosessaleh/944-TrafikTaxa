@@ -274,6 +274,7 @@ export async function POST(
           where: { id: bookingId },
           data: {
             paymentMethod: 'card',
+            status: 'CONFIRMED',
             paymentStatus: 'UNPAID',
             savedPaymentMethodId: defaultCard.id,
             explanation: `Payment authorized - Transaction: ${authResult.transactionId}`
