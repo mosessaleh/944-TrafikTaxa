@@ -103,20 +103,7 @@ export function validateDriverApiOrigin(req: Request): OriginValidationResult {
   // If using API key authentication, apply environment-specific rules
   if (authHeader?.startsWith('Bearer ')) {
     if (process.env.NODE_ENV === 'development') {
-      // In development, allow requests from localhost:4000 (driver server)
-      const origin = req.headers.get('origin');
-      if (origin) {
-        try {
-          const originUrl = new URL(origin);
-          if (originUrl.hostname === 'localhost' && originUrl.port === '4000') {
-            return { ok: true };
-          }
-        } catch {
-          // Invalid origin, continue with other checks
-        }
-      }
-
-      // Allow requests without origin (server-to-server)
+      // In development, allow all requests
       return { ok: true };
 
     } else {

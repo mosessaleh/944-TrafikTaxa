@@ -14,14 +14,25 @@ export async function GET(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { driverId: number };
 
+    console.log(`getDriverStatus: Fetching status for driverId ${decoded.driverId}`);
+
     const driver = await prisma.comDriver.findUnique({
       where: { id: decoded.driverId },
       select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true },
     });
 
     if (!driver) {
+      console.log(`getDriverStatus: Driver ${decoded.driverId} not found`);
       return NextResponse.json({ error: 'Driver not found' }, { status: 404 });
     }
+
+    console.log(`getDriverStatus: Driver data:`, {
+      id: decoded.driverId,
+      isOnline: driver.isOnline,
+      isBusy: driver.isBusy,
+      currentRideId: driver.currentRideId,
+      rideAccepted: driver.rideAccepted
+    });
 
     // Check if there is an active shift for today
     const today = new Date();
@@ -41,13 +52,17 @@ export async function GET(request: NextRequest) {
     // Driver is considered online if they have an active shift and isOnline flag is true
     const isOnline = driver.isOnline && !!activeShift;
 
-    return NextResponse.json({
+    const response = {
       isOnline: isOnline,
       isBusy: driver.isBusy,
       currentRideId: driver.currentRideId,
       rideAccepted: driver.rideAccepted,
       hasActiveShift: !!activeShift,
-    });
+    };
+
+    console.log(`getDriverStatus: Response:`, response);
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Get driver status error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

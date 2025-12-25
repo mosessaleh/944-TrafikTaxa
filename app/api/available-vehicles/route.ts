@@ -271,14 +271,18 @@ export async function GET(request: Request) {
       };
     });
 
+    // Filter out busy vehicles for display
+    const availableVehicles = vehiclesWithStatus.filter(v => !v.isBusy);
+
     return NextResponse.json({
       ok: true,
-      vehicles: vehiclesWithStatus,
+      vehicles: availableVehicles,
       strategyUsed: false, // Indicate this is not using smart selection
       debug: {
         onlineDriversCount: onlineDrivers.length,
         carPlatesCount: carPlates.length,
-        vehiclesCount: vehicles.length
+        vehiclesCount: vehicles.length,
+        availableVehiclesCount: availableVehicles.length
       }
     });
   } catch (e: any) {

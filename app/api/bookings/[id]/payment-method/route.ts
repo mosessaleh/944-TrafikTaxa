@@ -74,7 +74,8 @@ async function assignDriverToRide(rideId: number) {
     await prisma.comDriver.update({
       where: { id: driver.id },
       data: {
-        currentRideId: rideId
+        currentRideId: rideId,
+        rideAccepted: 0
       }
     });
 
@@ -192,6 +193,7 @@ export async function POST(
           status: 1
         }
       });
+      console.log(`[DEBUG] Invoice ${invoiceNumber} created for booking ${bookingId}`);
 
       // Update booking
       updatedBooking = await prisma.ride.update({

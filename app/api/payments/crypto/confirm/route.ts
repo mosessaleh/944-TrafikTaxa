@@ -84,6 +84,7 @@ export async function POST(request: Request) {
 
     // Update booking status to PENDING / CRYPTO_PENDING
     console.log(`Updating booking ${bookingId} status to PENDING with pending crypto payment`);
+    console.log(`[DEBUG] Updating booking ${bookingId} status to PENDING for crypto payment confirmation`);
     await prisma.ride.update({
       where: { id: bookingId },
       data: {
@@ -93,6 +94,7 @@ export async function POST(request: Request) {
         explanation: "Waiting for crypto payment confirmation",
       },
     });
+    console.log(`[DEBUG] Booking ${bookingId} status updated to PENDING for crypto`);
 
     // Notify user (payment confirmed)
     if ((me as any).email) {

@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ ok: false, error: 'Invalid ride ID' }, { status: 400 });
     }
 
-    console.log(`🔍 Fetching ride ${rideId} for driver ${driver.id}`);
+    console.log(`🔍 Fetching ride ${rideId} for driver ${driver.id} (${driver.drUsername})`);
     const ride = await prisma.ride.findUnique({
       where: { id: rideId },
       include: { vehicleType: true }
@@ -40,9 +40,20 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ ok: false, error: 'Ride not found' }, { status: 404 });
     }
 
-    // Check if driver has access (either assigned or in queue)
+    console.log(`✅ Ride found: id=${ride.id}, driverId=${ride.driverId}, driverQueue=${JSON.stringify(ride.driverQueue)}`);
+
+    // Check if driver has access (either assigned, in queue, or has currentRideId set)
     const driverQueue = Array.isArray(ride.driverQueue) ? ride.driverQueue : [];
-    if (ride.driverId !== driver.id && !driverQueue.includes(driver.id)) {
+    const driverRecord = await prisma.comDriver.findUnique({
+      where: { id: driver.id },
+      select: { currentRideId: true }
+    });
+    console.log(`🔍 Driver record:`, driverRecord);
+    console.log(`🔍 Checking access: ride.driverId=${ride.driverId}, driver.id=${driver.id}, driverQueue=${JSON.stringify(driverQueue)}, driver.currentRideId=${driverRecord?.currentRideId}, rideId=${rideId}`);
+    console.log(`🔍 Access check: ride.driverId === driver.id: ${ride.driverId === driver.id}`);
+    console.log(`🔍 Access check: driverQueue.includes(driver.id): ${driverQueue.includes(driver.id)}`);
+    console.log(`🔍 Access check: driverRecord?.currentRideId === rideId: ${driverRecord?.currentRideId === rideId}`);
+    if (ride.driverId !== driver.id && !driverQueue.includes(driver.id) && driverRecord?.currentRideId !== rideId) {
       console.log(`❌ Access denied: driver ${driver.id} not assigned to ride ${rideId}`);
       return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
     }

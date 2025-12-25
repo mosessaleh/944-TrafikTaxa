@@ -321,6 +321,7 @@ export async function POST(request: NextRequest) {
     let driverQueue: string[] = [];
 
     // Create booking with PENDING status (awaiting payment confirmation)
+    console.log(`[DEBUG] Creating booking with status PENDING for user ${user.id}`);
     const booking = await prisma.ride.create({
       data: {
         userId: user.id,
@@ -351,73 +352,10 @@ export async function POST(request: NextRequest) {
         }
       }
     });
+    console.log(`[DEBUG] Booking ${booking.id} created with status PENDING`);
 
-    // Assign vehicles using the improved selection strategy
-    try {
-      if (validatedData.pickupLat && validatedData.pickupLon) {
-        // Call the new vehicle selection API
-        const selectionResponse = await fetch(
-          `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              pickupLat: validatedData.pickupLat,
-              pickupLon: validatedData.pickupLon,
-              dropoffLat: validatedData.dropoffLat,
-              dropoffLon: validatedData.dropoffLon,
-              vehicleTypeId: validatedData.vehicleTypeId,
-              maxVehicles: 3
-            })
-          }
-        );
-
-        if (selectionResponse.ok) {
-          const selectionData = await selectionResponse.json();
-          if (selectionData.ok && selectionData.vehicles?.length > 0) {
-            // Use the selected vehicles for driver queue
-            driverQueue = selectionData.vehicles;
-
-            // Update the booking with the driver queue
-            await prisma.ride.update({
-              where: { id: booking.id },
-              data: { driverQueue }
-            });
-            console.log(`Updated booking ${booking.id} with driver queue:`, driverQueue);
-
-            // Get the closest vehicle for notification
-            const closestVehicleId = selectionData.vehicles[0];
-            const closestVehicle = await prisma.comVehicles.findUnique({
-              where: { id: closestVehicleId },
-              select: { id: true, regNumber: true }
-            });
-
-            // Notify the closest driver by setting currentRideId
-            if (closestVehicle) {
-              const driver = await prisma.comDriver.findFirst({
-                where: { car: closestVehicle.regNumber, isOnline: true, isActive: true }
-              });
-              if (driver) {
-                await prisma.comDriver.update({
-                  where: { id: driver.id },
-                  data: { currentRideId: booking.id }
-                });
-                console.log(`Assigned ride ${booking.id} to driver ${driver.id}`);
-              }
-            }
-          } else {
-            console.warn('Vehicle selection API returned no vehicles');
-          }
-        } else {
-          console.warn('Vehicle selection API call failed:', selectionResponse.status);
-        }
-      }
-    } catch (assignError) {
-      console.warn('Failed to assign vehicle to booking:', assignError);
-      // Don't fail the booking if assignment fails
-    }
+    // Vehicle assignment will be done after payment confirmation
+    // No vehicle selection or driver assignment at booking creation
 
     // Perform risk assessment
     try {

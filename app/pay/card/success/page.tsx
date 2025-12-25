@@ -285,10 +285,10 @@ function PaymentSuccessContent() {
 
           <div className="space-y-3">
             <button
-              onClick={() => router.push("/bookings")}
+              onClick={() => router.push(`/waiting-for-driver?bookingId=${bookingId}`)}
               className="block w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 px-6 rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
             >
-              📋 View My Bookings
+              🚗 Waiting for Driver
             </button>
             <button
               onClick={() => router.push("/")}

@@ -185,12 +185,14 @@ export async function getUserFromCookie(){
         return null;
       }
 
+      console.log('🔐 getUserFromCookie: Returning user object:', { id: user.id, type: 'user', email: user.email });
       return {
         ...user,
         type: 'user'
       };
     }
-  }catch(error){
+  }catch(error: any){
+    console.log('🔐 getUserFromCookie: Token verification failed:', error?.message || error);
     // Log suspicious activity in production
     if (process.env.NODE_ENV === 'production') {
       console.warn('Invalid session token detected:', error);
@@ -232,7 +234,7 @@ export async function requireDriverByApiKey(req: Request){
     }
   });
 
-  if (!driver || !driver.isActive || !(driver as any).company?.comStatus) {
+  if (!driver || !driver.isActive) {
     throw Object.assign(new Error('Forbidden'), { status: 403 });
   }
 

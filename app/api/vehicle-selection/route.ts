@@ -10,6 +10,7 @@ interface VehicleSelectionRequest {
   maxVehicles?: number;
   dropoffLat?: number;
   dropoffLon?: number;
+  excludedDriverIds?: number[];
 }
 
 interface DriverInfo {
@@ -32,7 +33,7 @@ interface VehicleScore {
 export async function POST(request: NextRequest) {
   try {
     const body: VehicleSelectionRequest = await request.json();
-    const { pickupLat, pickupLon, vehicleTypeId, maxVehicles = 3, dropoffLat, dropoffLon } = body;
+    const { pickupLat, pickupLon, vehicleTypeId, maxVehicles = 3, dropoffLat, dropoffLon, excludedDriverIds = [] } = body;
 
     // console.log('=== VEHICLE SELECTION API START ===');
     // console.log('Input:', { pickupLat, pickupLon, vehicleTypeId, maxVehicles, dropoffLat, dropoffLon });
@@ -50,7 +51,8 @@ export async function POST(request: NextRequest) {
       where: {
         isOnline: true,
         isActive: true,
-        car: { not: null }
+        car: { not: null },
+        id: { notIn: excludedDriverIds }
       },
       select: {
         id: true,

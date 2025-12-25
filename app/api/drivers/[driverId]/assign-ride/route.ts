@@ -33,11 +33,18 @@ export async function POST(req: NextRequest, { params }: { params: { driverId: s
       return NextResponse.json({ ok: false, error: 'Driver not found' }, { status: 404 });
     }
 
+    // Update the ride with the driver
+    await prisma.ride.update({
+      where: { id: rideId },
+      data: { driverId: driverId },
+    });
+
     // Update the driver with the current ride
     const updatedDriver = await prisma.comDriver.update({
       where: { id: driverId },
-      data: { currentRideId: rideId },
+      data: { currentRideId: rideId, rideAccepted: 0 },
     });
+    console.log(`assign-ride: Assigned ride ${rideId} to driver ${driverId} with rideAccepted: 0`);
 
     return NextResponse.json({
       ok: true,

@@ -178,8 +178,8 @@ function PayIndexContent(){
           if (response.ok) {
             const result = await response.json();
             console.log('✅ Invoice payment method updated successfully:', result);
-            alert('🎉 Invoice created successfully! You will be redirected to the booking page.');
-            router.push(`/bookings/${bookingId}?payment=invoice`);
+            alert('🎉 Invoice created successfully! You will be redirected to waiting for a driver.');
+            router.push(`/waiting-for-driver?bookingId=${bookingId}`);
           } else {
             const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
             console.error('❌ Error updating payment method:', errorData);
@@ -209,8 +209,8 @@ function PayIndexContent(){
         if (response.ok) {
           const result = await response.json();
           console.log('✅ Card payment authorized successfully:', result);
-          alert('🎉 Payment authorized! You will be redirected to confirm your booking.');
-          router.push(`/bookings/${bookingId}?payment=card`);
+          alert('🎉 Payment authorized! You will be redirected to waiting for a driver.');
+          router.push(`/waiting-for-driver?bookingId=${bookingId}`);
         } else {
           const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
           console.error('❌ Error authorizing card payment:', errorData);

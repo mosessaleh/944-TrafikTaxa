@@ -260,7 +260,10 @@ export class RealtimeManager {
     try {
       const confirmedBookings = await prisma.ride.findMany({
         where: {
-          status: 'CONFIRMED'
+          status: 'CONFIRMED',
+          paymentMethod: { not: null },
+          driverId: null,
+          car: null
         },
         include: {
           user: {
@@ -282,6 +285,8 @@ export class RealtimeManager {
           pickupTime: 'asc'
         }
       });
+
+      console.log(`[Realtime] Sending ${confirmedBookings.length} confirmed bookings to user ${userId} (filtered by new criteria)`);
 
       this.sendToUser(userId, {
         type: 'confirmed_bookings_update',
@@ -415,6 +420,19 @@ export class RealtimeManager {
   // Broadcast confirmed bookings update
   static async broadcastConfirmedBookingsUpdate(action: 'new' | 'assigned' | 'cancelled', bookingData: any) {
     if (this.confirmedBookingsSubscribers.size === 0) return;
+
+    // Check if booking meets the criteria for sending to drivers
+    const meetsCriteria = bookingData.status === 'CONFIRMED' &&
+                         bookingData.paymentMethod != null &&
+                         bookingData.driverId == null &&
+                         bookingData.car == null;
+
+    console.log(`[Realtime] Checking booking ${bookingData.id} for dispatch criteria: status=${bookingData.status}, paymentMethod=${bookingData.paymentMethod}, driverId=${bookingData.driverId}, car=${bookingData.car}, meetsCriteria=${meetsCriteria}`);
+
+    if (!meetsCriteria) {
+      console.log(`[Realtime] Booking ${bookingData.id} does not meet criteria for driver dispatch, skipping broadcast`);
+      return;
+    }
 
     const message: RealtimeMessage = {
       type: 'confirmed_bookings_update',
