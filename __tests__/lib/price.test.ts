@@ -78,6 +78,38 @@ describe('computeBase', () => {
     expect(result).toBe(Math.round(60 + 16 * 10 + 7 * 20)); // Night rates for holiday
   });
 
+  it('should calculate base price for weekend (Saturday)', async () => {
+    mockPrisma.settings.findUnique.mockResolvedValue({
+      dayBase: 40,
+      dayPerKm: 12.75,
+      dayPerMin: 5.75,
+      nightBase: 60,
+      nightPerKm: 16,
+      nightPerMin: 7,
+    });
+
+    const date = new Date('2024-01-13T12:00:00'); // Saturday noon
+    const result = await computeBase(10, 20, date);
+
+    expect(result).toBe(Math.round(60 + 16 * 10 + 7 * 20)); // Night rates for weekend
+  });
+
+  it('should calculate base price for weekend (Sunday)', async () => {
+    mockPrisma.settings.findUnique.mockResolvedValue({
+      dayBase: 40,
+      dayPerKm: 12.75,
+      dayPerMin: 5.75,
+      nightBase: 60,
+      nightPerKm: 16,
+      nightPerMin: 7,
+    });
+
+    const date = new Date('2024-01-14T12:00:00'); // Sunday noon
+    const result = await computeBase(10, 20, date);
+
+    expect(result).toBe(Math.round(60 + 16 * 10 + 7 * 20)); // Night rates for weekend
+  });
+
   it('should use default values when settings not found', async () => {
     mockPrisma.settings.findUnique.mockResolvedValue(null);
 

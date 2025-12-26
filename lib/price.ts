@@ -1,9 +1,24 @@
 import { prisma } from '@/lib/db';
 import { CacheManager } from '@/lib/cache';
+import Holidays from 'date-holidays';
 
 function isHoliday(at: Date){
-  const list = (process.env.HOLIDAYS||'').split(',').map(s=> s.trim()).filter(Boolean);
+  // Check weekend (Saturday = 6, Sunday = 0)
+  const dayOfWeek = at.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return true;
+  }
+
+  // Check Danish public holidays
+  const hd = new Holidays('DK');
+  const holidays = hd.getHolidays(at.getFullYear());
   const ymd = at.toISOString().slice(0,10);
+  if (holidays.some((h: any) => h.date.slice(0,10) === ymd)) {
+    return true;
+  }
+
+  // Fallback to environment variable for custom holidays
+  const list = (process.env.HOLIDAYS||'').split(',').map(s=> s.trim()).filter(Boolean);
   return list.includes(ymd);
 }
 
