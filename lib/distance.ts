@@ -1,5 +1,4 @@
-// @ts-ignore
-const CacheManager = require('./cache').CacheManager;
+import { CacheManager } from './cache';
 
 // Haversine distance calculation (fallback)
 function calculateDistance(lat1: any, lon1: any, lat2: any, lon2: any) {
@@ -131,7 +130,7 @@ function formatArrivalTime(minutes: any) {
   return `${minutes} minutes`;
 }
 
-module.exports = {
+export {
   calculateDistance,
   getDistanceAndDuration,
   getDistanceAndDurationSingle,

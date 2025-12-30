@@ -1,76 +1,132 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import io from 'socket.io-client';
+import io, { Socket } from 'socket.io-client';
+
+// Types
+interface User {
+  id: string;
+  role?: string;
+  type?: string;
+}
+
+interface DriverLocation {
+  lat: number;
+  lon: number;
+}
+
+interface Driver {
+  id: string;
+  drFname: string;
+  drLname: string;
+  lastLocation?: DriverLocation;
+}
+
+interface Booking {
+  id: string;
+  userId: string;
+  driverId?: string;
+  status: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  pickupTime: string;
+  price: number;
+  startLatLon?: [number, number];
+  driver?: Driver;
+}
+
+interface ChatMessage {
+  message: string;
+  sender: 'passenger' | 'driver';
+  timestamp: string;
+}
+
+interface BookingUpdateData {
+  bookingId: string;
+  status: string;
+}
 
 export default function WaitingForDriverPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const bookingId = searchParams.get("bookingId");
-  const forceAccess = searchParams.get("force") === "true"; // Development override
+  const forceAccess = searchParams.get("force") === "true";
 
-  const [bookingDetails, setBookingDetails] = useState<any>(null);
-  const [countdown, setCountdown] = useState(180); // 3 minutes in seconds
-   const [canCancel, setCanCancel] = useState(false);
-   const [searchingStatus, setSearchingStatus] = useState<string>("Searching for a driver...");
-   const [driverFound, setDriverFound] = useState(false);
-   const mapRef = useRef<any>(null);
-   const [mapInstance, setMapInstance] = useState<any>(null);
-   const driverMarkerRef = useRef<any>(null);
-   const passengerMarkerRef = useRef<any>(null);
-   const routePolylineRef = useRef<any>(null);
-   const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-   const socketRef = useRef<any>(null);
-   const [chatMessages, setChatMessages] = useState<any[]>([]);
-   const [chatInput, setChatInput] = useState('');
-   const [showChat, setShowChat] = useState(false);
+  const [bookingDetails, setBookingDetails] = useState<Booking | null>(null);
+  const [countdown, setCountdown] = useState(180);
+  const [canCancel, setCanCancel] = useState(false);
+  const [searchingStatus, setSearchingStatus] = useState<string>("Searching for a driver...");
+  const [driverFound, setDriverFound] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [mapError, setMapError] = useState(false);
+
+  const mapRef = useRef<any>(null);
+  const driverMarkerRef = useRef<any>(null);
+  const passengerMarkerRef = useRef<any>(null);
+  const routeRendererRef = useRef<any>(null);
+  const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [showChat, setShowChat] = useState(false);
 
   // Initialize Google Maps
-  useEffect(() => {
-    const initializeMap = async () => {
-      if (typeof window === 'undefined' || mapInstance) return;
+  const initializeMap = useCallback(async () => {
+    if (typeof window === 'undefined' || mapRef.current) return;
 
-      // Load Google Maps API if not already loaded
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      console.error('Google Maps API key not found');
+      return;
+    }
+
+    try {
+      // Check if Google Maps is already loaded
       if (!(window as any).google) {
-        (window as any).initGoogleMapsWaiting = () => {};
+        // Load Google Maps API
         const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places,directions&language=da&callback=initGoogleMapsWaiting`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,directions&language=da`;
         script.async = true;
         script.defer = true;
         document.head.appendChild(script);
 
-        await new Promise((resolve) => {
-          const checkGoogle = () => {
-            if ((window as any).google) resolve(null);
-            else setTimeout(checkGoogle, 100);
-          };
-          checkGoogle();
+        // Wait for Google Maps to load
+        await new Promise<void>((resolve, reject) => {
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Failed to load Google Maps'));
+          // Timeout after 10 seconds
+          setTimeout(() => reject(new Error('Google Maps load timeout')), 10000);
         });
       }
 
       const google = (window as any).google;
+      if (!google || !google.maps) {
+        throw new Error('Google Maps not available');
+      }
+
       const mapContainer = document.getElementById('waiting-map');
       if (!mapContainer) return;
 
       const map = new google.maps.Map(mapContainer, {
-        center: { lat: 56.2639, lng: 9.5018 }, // Denmark center
+        center: { lat: 56.2639, lng: 9.5018 },
         zoom: 7,
         mapTypeControl: false,
         streetViewControl: false,
         fullscreenControl: false
       });
       mapRef.current = map;
-      setMapInstance(map);
-    };
-
-    initializeMap();
-  }, [mapInstance]);
+    } catch (err) {
+      console.error('Error initializing map:', err);
+      setMapError(true);
+      // Don't throw error, just log it - map is optional
+    }
+  }, []);
 
   // Play sound when driver is found
   useEffect(() => {
     if (driverFound) {
       try {
-        // Create a simple beep sound using Web Audio API
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
@@ -78,16 +134,16 @@ export default function WaitingForDriverPage() {
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
 
-        oscillator.frequency.setValueAtTime(800, audioContext.currentTime); // Frequency in Hz
-        oscillator.type = 'sine'; // Waveform type
+        oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+        oscillator.type = 'sine';
 
-        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime); // Volume
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5); // Fade out
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
 
         oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.5); // Duration
-      } catch (error) {
-        console.warn('Could not play notification sound:', error);
+        oscillator.stop(audioContext.currentTime + 0.5);
+      } catch (err) {
+        console.warn('Could not play notification sound:', err);
       }
     }
   }, [driverFound]);
@@ -97,132 +153,75 @@ export default function WaitingForDriverPage() {
     if (driverFound && bookingId && socketRef.current) {
       socketRef.current.emit('joinChat', { bookingId });
 
-      socketRef.current.on('newMessage', (data: any) => {
+      socketRef.current.on('newMessage', (data: ChatMessage) => {
         setChatMessages(prev => [...prev, data]);
       });
     }
   }, [driverFound, bookingId]);
 
-  // Cleanup interval on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (locationIntervalRef.current) {
         clearInterval(locationIntervalRef.current);
       }
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
   }, []);
 
+  // Main effect for initialization and socket setup
   useEffect(() => {
     if (!bookingId) {
       router.replace("/");
       return;
     }
 
-    // Initialize WebSocket connection for booking updates
-    const socket = io();
-    socketRef.current = socket;
-
-    socket.emit('joinBooking', { bookingId });
-    console.log(`Joined booking updates for ${bookingId}`);
-
-    // Listen for booking updates
-    socket.on('bookingUpdate', (data: any) => {
-      console.log('Received booking update:', data);
-      if (data.bookingId == bookingId) {
-        if (data.status === 'DISPATCHED' || data.status === 'ONGOING') {
-          setDriverFound(true);
-          setSearchingStatus("Driver found! Driver is on the way...");
-          // Fetch updated booking details
-          fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
-            .then(res => res.json())
-            .then(updatedData => {
-              const updatedBooking = updatedData.ride || updatedData;
-              setBookingDetails(updatedBooking);
-              updateMap(updatedBooking);
-            })
-            .catch(error => console.error('Error fetching updated booking:', error));
-        } else if (data.status === 'COMPLETED') {
-          setSearchingStatus("Ride completed! Redirecting...");
-          setTimeout(() => router.push("/bookings"), 3000);
-        }
-      }
-    });
-
-    // Validate access conditions
-    const validateAccess = async () => {
+    const initializePage = async () => {
       try {
-        // Check if user is logged in
-        const authResponse = await fetch("/api/auth/me", {
-          credentials: "include",
+        setIsLoading(true);
+        setError(null);
+
+        // Validate access
+        await validateAccess();
+
+        // Initialize socket
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+        const socket = io(socketUrl);
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+          console.log('Connected to socket server');
+          socket.emit('joinBooking', { bookingId });
         });
 
-        if (!authResponse.ok) {
-          router.push('/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search));
-          return;
-        }
-
-        const authData = await authResponse.json();
-        const user = authData.user;
-
-        // Fetch booking details
-        const bookingResponse = await fetch(`/api/bookings/${bookingId}`, {
-          credentials: "include",
-        });
-
-        if (!bookingResponse.ok) {
-          if (bookingResponse.status === 401) {
-            router.push('/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search));
-          } else {
-            router.push('/404');
+        socket.on('bookingUpdate', (data: BookingUpdateData) => {
+          console.log('Received booking update:', data);
+          if (data.bookingId == bookingId) {
+            handleBookingUpdate(data);
           }
-          return;
-        }
+        });
 
-        const data = await bookingResponse.json();
-        const booking = data.ride || data;
+        socket.on('connect_error', (err) => {
+          console.error('Socket connection error:', err);
+          setError('Connection error. Please refresh the page.');
+        });
 
-        if (!booking) {
-          setSearchingStatus("Error: Booking data is missing");
-          return;
-        }
+        socket.on('disconnect', () => {
+          console.log('Disconnected from socket server');
+        });
 
-        // Check ownership with proper type conversion
-        const bookingUserId = String(booking.userId);
-        const currentUserId = String(user.id);
-        const isAdmin = (user as any).role === 'ADMIN' || (user as any).type === 'admin';
-
-        // Allow admin access to any booking, owner access, or force access for development
-        if (!isAdmin && !forceAccess && bookingUserId !== currentUserId) {
-          router.push('/404');
-          return;
-        }
-
-        setBookingDetails(booking);
-
-        // Check if driver is already assigned
-         if (booking.driverId && (booking.status === 'DISPATCHED' || booking.status === 'ONGOING')) {
-           setDriverFound(true);
-           setSearchingStatus("Driver found! Driver is on the way...");
-           updateMap(booking);
-           // Do not redirect, stay on this page until ride completes
-           return;
-         }
-
-        // Check if booking is confirmed (driver assigned but not accepted yet)
-        if (booking.status === 'CONFIRMED') {
-          setSearchingStatus("Driver assigned! Waiting for driver to accept...");
-          // Continue to check status
-        }
-
-      } catch (error) {
-        console.error("❌ Failed to validate access:", error);
-        router.push('/404');
+      } catch (err) {
+        console.error('Error initializing page:', err);
+        setError('Failed to load booking details. Please try again.');
+        setIsLoading(false);
       }
     };
 
-    validateAccess();
+    initializePage();
 
-    // Countdown timer for cancel button
+    // Countdown timer
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -239,33 +238,151 @@ export default function WaitingForDriverPage() {
     };
   }, [bookingId, router]);
 
+  const validateAccess = async () => {
+    try {
+      // Check authentication
+      const authResponse = await fetch("/api/auth/me", { credentials: "include" });
+      if (!authResponse.ok) {
+        router.push('/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search));
+        return;
+      }
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+      const authData = await authResponse.json();
+      const user: User = authData.user;
+
+      // Fetch booking
+      const bookingResponse = await fetch(`/api/bookings/${bookingId}`, { credentials: "include" });
+      if (!bookingResponse.ok) {
+        if (bookingResponse.status === 401) {
+          router.push('/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search));
+        } else {
+          router.push('/404');
+        }
+        return;
+      }
+
+      const data = await bookingResponse.json();
+      const booking: Booking = data.ride || data;
+
+      if (!booking) {
+        throw new Error('Booking data is missing');
+      }
+
+      const isAdmin = user.role === 'ADMIN' || user.type === 'admin';
+      if (!isAdmin && !forceAccess && String(booking.userId) !== String(user.id)) {
+        router.push('/404');
+        return;
+      }
+
+      setBookingDetails(booking);
+
+      // Check current status
+      if (booking.driverId && (booking.status === 'DISPATCHED' || booking.status === 'ONGOING')) {
+        setDriverFound(true);
+        setCanCancel(false); // Hide cancel button when driver is already assigned
+        setSearchingStatus("Driver found! Driver is on the way...");
+        updateMap(booking);
+      } else if (booking.status === 'CONFIRMED' && booking.driverId) {
+        setCanCancel(false); // Hide cancel button when driver is assigned
+        setSearchingStatus("Driver assigned! Waiting for driver to accept...");
+        // Show map if driver location is available
+        if (booking.driver?.lastLocation) {
+          setDriverFound(true);
+          updateMap(booking);
+        }
+      }
+
+      setIsLoading(false);
+    } catch (err) {
+      console.error('Error validating access:', err);
+      setError('Failed to load booking details');
+      setIsLoading(false);
+      throw err;
+    }
   };
 
-  // Update map with driver and passenger locations
-  const updateMap = async (booking: any) => {
-    if (!mapInstance || !booking.driver) return;
+  const handleBookingUpdate = (data: BookingUpdateData) => {
+    console.log('Handling booking update:', data);
+    if (data.status === 'CONFIRMED') {
+      console.log('Driver assigned, updating UI');
+      setSearchingStatus("Driver assigned! Waiting for driver to accept...");
+      setCanCancel(false); // Hide cancel button when driver is assigned
+      // Fetch updated booking to show driver info
+      fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
+        .then(res => res.json())
+        .then(updatedData => {
+          console.log('Fetched updated booking:', updatedData);
+          const updatedBooking: Booking = updatedData.ride || updatedData;
+          setBookingDetails(updatedBooking);
+          // Show map if driver location is available
+          if (updatedBooking.driver?.lastLocation) {
+            setDriverFound(true);
+            updateMap(updatedBooking);
+          }
+        })
+        .catch(err => console.error('Error fetching updated booking:', err));
+    } else if (data.status === 'DISPATCHED' || data.status === 'ONGOING') {
+      console.log('Driver accepted, updating UI');
+      setDriverFound(true);
+      setSearchingStatus("Driver found! Driver is on the way...");
+      setCanCancel(false); // Hide cancel button when driver accepts
+      // Fetch updated booking
+      fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
+        .then(res => res.json())
+        .then(updatedData => {
+          console.log('Fetched updated booking:', updatedData);
+          const updatedBooking: Booking = updatedData.ride || updatedData;
+          setBookingDetails(updatedBooking);
+          updateMap(updatedBooking);
+        })
+        .catch(err => console.error('Error fetching updated booking:', err));
+    } else if (data.status === 'COMPLETED') {
+      console.log('Ride completed');
+      setSearchingStatus("Ride completed! Redirecting...");
+      setTimeout(() => router.push("/bookings"), 3000);
+    }
+  };
+
+  const updateMap = async (booking: Booking) => {
+    console.log('Updating map for booking:', booking);
+    if (!booking.driver?.lastLocation) {
+      console.warn('No driver location available');
+      return;
+    }
+
+    if (mapError) {
+      console.log('Map previously failed to load, skipping update');
+      return;
+    }
+
+    await initializeMap();
+
+    if (!mapRef.current) {
+      console.warn('Map not initialized');
+      return;
+    }
 
     const google = (window as any).google;
     const driverLocation = booking.driver.lastLocation;
-    if (!driverLocation || !driverLocation.lat || !driverLocation.lon) return;
-
     const passengerLatLng = booking.startLatLon ? { lat: booking.startLatLon[0], lng: booking.startLatLon[1] } : null;
-    if (!passengerLatLng) return;
 
-    // Clear existing markers and polyline
+    if (!passengerLatLng) {
+      console.warn('Passenger location not available');
+      return;
+    }
+
+    console.log('Driver location:', driverLocation);
+    console.log('Passenger location:', passengerLatLng);
+
+    // Clear existing markers and route
     if (driverMarkerRef.current) driverMarkerRef.current.setMap(null);
     if (passengerMarkerRef.current) passengerMarkerRef.current.setMap(null);
-    if (routePolylineRef.current) routePolylineRef.current.setMap(null);
+    if (routeRendererRef.current) routeRendererRef.current.setMap(null);
 
     // Add driver marker
     driverMarkerRef.current = new google.maps.Marker({
       position: { lat: driverLocation.lat, lng: driverLocation.lon },
-      map: mapInstance,
+      map: mapRef.current,
       icon: {
         url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
           <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
@@ -284,7 +401,7 @@ export default function WaitingForDriverPage() {
     // Add passenger marker
     passengerMarkerRef.current = new google.maps.Marker({
       position: passengerLatLng,
-      map: mapInstance,
+      map: mapRef.current,
       icon: {
         url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
           <svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
@@ -301,8 +418,8 @@ export default function WaitingForDriverPage() {
 
     // Draw route
     const directionsService = new google.maps.DirectionsService();
-    const directionsRenderer = new google.maps.DirectionsRenderer({
-      map: mapInstance,
+    routeRendererRef.current = new google.maps.DirectionsRenderer({
+      map: mapRef.current,
       suppressMarkers: true,
       polylineOptions: { strokeColor: '#3b82f6', strokeWeight: 4 }
     });
@@ -312,9 +429,8 @@ export default function WaitingForDriverPage() {
       destination: passengerLatLng,
       travelMode: google.maps.TravelMode.DRIVING
     }, (result: any, status: any) => {
-      if (status === google.maps.DirectionsStatus.OK) {
-        directionsRenderer.setDirections(result);
-        routePolylineRef.current = directionsRenderer;
+      if (status === google.maps.DirectionsStatus.OK && routeRendererRef.current) {
+        routeRendererRef.current.setDirections(result);
       }
     });
 
@@ -322,24 +438,22 @@ export default function WaitingForDriverPage() {
     const bounds = new google.maps.LatLngBounds();
     bounds.extend({ lat: driverLocation.lat, lng: driverLocation.lon });
     bounds.extend(passengerLatLng);
-    mapInstance.fitBounds(bounds);
+    mapRef.current.fitBounds(bounds);
 
-    // Start updating driver location every 10 seconds
+    // Start updating driver location
     const updateDriverLocation = async () => {
       try {
         const response = await fetch(`/api/bookings/${booking.id}`, { credentials: 'include' });
         if (response.ok) {
           const data = await response.json();
-          const updatedBooking = data.ride || data;
-          if (updatedBooking.driver && updatedBooking.driver.lastLocation) {
+          const updatedBooking: Booking = data.ride || data;
+          if (updatedBooking.driver?.lastLocation && driverMarkerRef.current) {
             const newLocation = updatedBooking.driver.lastLocation;
-            if (driverMarkerRef.current) {
-              driverMarkerRef.current.setPosition({ lat: newLocation.lat, lng: newLocation.lon });
-            }
+            driverMarkerRef.current.setPosition({ lat: newLocation.lat, lng: newLocation.lon });
           }
         }
-      } catch (error) {
-        console.error('Error updating driver location:', error);
+      } catch (err) {
+        console.error('Error updating driver location:', err);
       }
     };
 
@@ -347,19 +461,21 @@ export default function WaitingForDriverPage() {
   };
 
   const sendMessage = () => {
-    if (chatInput.trim() && socketRef.current && bookingId) {
-      socketRef.current.emit('sendMessage', {
-        bookingId,
-        message: chatInput.trim(),
-        sender: 'passenger'
-      });
-      setChatMessages(prev => [...prev, {
-        message: chatInput.trim(),
-        sender: 'passenger',
-        timestamp: new Date().toISOString()
-      }]);
-      setChatInput('');
-    }
+    if (!chatInput.trim() || !socketRef.current || !bookingId) return;
+
+    const message: ChatMessage = {
+      message: chatInput.trim(),
+      sender: 'passenger',
+      timestamp: new Date().toISOString()
+    };
+
+    socketRef.current.emit('sendMessage', {
+      bookingId,
+      ...message
+    });
+
+    setChatMessages(prev => [...prev, message]);
+    setChatInput('');
   };
 
   const handleCancelBooking = async () => {
@@ -375,18 +491,41 @@ export default function WaitingForDriverPage() {
       if (response.ok) {
         router.push("/bookings");
       } else {
-        alert("Failed to cancel booking");
+        setError("Failed to cancel booking");
       }
-    } catch (error) {
-      console.error("Error canceling booking:", error);
-      alert("Error canceling booking");
+    } catch (err) {
+      console.error("Error canceling booking:", err);
+      setError("Error canceling booking");
     }
   };
 
-  if (!bookingDetails) {
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  if (error || !bookingDetails) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-6 text-center">
+          <div className="text-red-500 text-lg font-semibold mb-4">Error</div>
+          <p className="text-gray-600">{error || "Booking not found"}</p>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          >
+            Go Home
+          </button>
+        </div>
       </div>
     );
   }
@@ -420,81 +559,96 @@ export default function WaitingForDriverPage() {
         </div>
 
         {/* Map section - Show when driver is found */}
-         {driverFound && (
-           <div className="border-t border-gray-200">
-             <div id="waiting-map" className="h-64 w-full"></div>
-           </div>
-         )}
+        {driverFound && (
+          <div className="border-t border-gray-200">
+            {mapError ? (
+              <div className="h-64 w-full bg-gray-100 flex items-center justify-center">
+                <div className="text-center text-gray-500">
+                  <div className="text-4xl mb-2">🗺️</div>
+                  <p>Map unavailable</p>
+                  <p className="text-sm">Driver location tracking still active</p>
+                </div>
+              </div>
+            ) : (
+              <div id="waiting-map" className="h-64 w-full bg-gray-100 flex items-center justify-center">
+                <div className="text-center text-gray-500">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                  <p>Loading map...</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-         {/* Lower section - Searching for car */}
-         <div className="p-6 text-center">
-           <div className="mb-4">
-             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-             <p className="text-lg font-medium text-gray-900">{searchingStatus}</p>
-           </div>
+        {/* Lower section - Searching for car */}
+        <div className="p-6 text-center">
+          <div className="mb-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-lg font-medium text-gray-900">{searchingStatus}</p>
+          </div>
 
-           {driverFound && (
-             <div className="mb-4">
-               <button
-                 onClick={() => setShowChat(!showChat)}
-                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-               >
-                 {showChat ? 'Hide Chat' : 'Chat with Driver'}
-               </button>
-             </div>
-           )}
+          {driverFound && (
+            <div className="mb-4">
+              <button
+                onClick={() => setShowChat(!showChat)}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                {showChat ? 'Hide Chat' : 'Chat with Driver'}
+              </button>
+            </div>
+          )}
 
-           <div className="mt-8">
-             <button
-               onClick={handleCancelBooking}
-               disabled={!canCancel}
-               className={`w-full py-3 px-6 rounded-xl font-semibold transition-colors ${
-                 canCancel
-                   ? "bg-red-600 text-white hover:bg-red-700"
-                   : "bg-gray-300 text-gray-500 cursor-not-allowed"
-               }`}
-             >
-               Cancel booking
-             </button>
-             {!canCancel && (
-               <p className="text-sm text-gray-500 mt-2">
-                 ({formatTime(countdown)})
-               </p>
-             )}
-           </div>
-         </div>
+          <div className="mt-8">
+            <button
+              onClick={handleCancelBooking}
+              disabled={!canCancel}
+              className={`w-full py-3 px-6 rounded-xl font-semibold transition-colors ${
+                canCancel
+                  ? "bg-red-600 text-white hover:bg-red-700"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              Cancel booking
+            </button>
+            {!canCancel && (
+              <p className="text-sm text-gray-500 mt-2">
+                ({formatTime(countdown)})
+              </p>
+            )}
+          </div>
+        </div>
 
-         {/* Chat Modal */}
-         {showChat && (
-           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-             <div className="bg-white rounded-lg w-80 h-96 flex flex-col">
-               <div className="p-4 border-b flex justify-between items-center">
-                 <h3 className="font-semibold">Chat with Driver</h3>
-                 <button onClick={() => setShowChat(false)} className="text-gray-500">✕</button>
-               </div>
-               <div className="flex-1 p-4 overflow-y-auto">
-                 {chatMessages.map((msg, idx) => (
-                   <div key={idx} className={`mb-2 ${msg.sender === 'passenger' ? 'text-right' : 'text-left'}`}>
-                     <div className={`inline-block p-2 rounded-lg ${msg.sender === 'passenger' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}>
-                       {msg.message}
-                     </div>
-                   </div>
-                 ))}
-               </div>
-               <div className="p-4 border-t flex">
-                 <input
-                   type="text"
-                   value={chatInput}
-                   onChange={(e) => setChatInput(e.target.value)}
-                   onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                   className="flex-1 border rounded-l px-2 py-1"
-                   placeholder="Type message..."
-                 />
-                 <button onClick={sendMessage} className="bg-blue-500 text-white px-4 py-1 rounded-r">Send</button>
-               </div>
-             </div>
-           </div>
-         )}
+        {/* Chat Modal */}
+        {showChat && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg w-80 h-96 flex flex-col">
+              <div className="p-4 border-b flex justify-between items-center">
+                <h3 className="font-semibold">Chat with Driver</h3>
+                <button onClick={() => setShowChat(false)} className="text-gray-500">✕</button>
+              </div>
+              <div className="flex-1 p-4 overflow-y-auto">
+                {chatMessages.map((msg, idx) => (
+                  <div key={idx} className={`mb-2 ${msg.sender === 'passenger' ? 'text-right' : 'text-left'}`}>
+                    <div className={`inline-block p-2 rounded-lg ${msg.sender === 'passenger' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}>
+                      {msg.message}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="p-4 border-t flex">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                  className="flex-1 border rounded-l px-2 py-1"
+                  placeholder="Type message..."
+                />
+                <button onClick={sendMessage} className="bg-blue-500 text-white px-4 py-1 rounded-r">Send</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

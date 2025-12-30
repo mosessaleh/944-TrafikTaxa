@@ -1,4 +1,25 @@
-const { LRUCache } = require('lru-cache');
+import { LRUCache } from 'lru-cache';
+
+interface ApiCacheEntry {
+  data: any;
+  timestamp: number;
+}
+
+interface GeoCacheEntry {
+  result: any;
+  timestamp: number;
+}
+
+interface PriceCacheEntry {
+  price: number;
+  timestamp: number;
+}
+
+interface DistanceCacheEntry {
+  distance: number;
+  duration: number;
+  timestamp: number;
+}
 
 // In-memory cache for API responses
 const apiCache = new LRUCache({
@@ -32,7 +53,7 @@ class CacheManagerClass {
   }
 
   static getApiCache(key: string): any | null {
-    const cached = apiCache.get(key);
+    const cached = apiCache.get(key) as ApiCacheEntry | undefined;
     if (cached) {
       // Check if cache is still fresh (within 80% of TTL)
       const age = Date.now() - cached.timestamp;
@@ -52,7 +73,7 @@ class CacheManagerClass {
 
   static getGeoCache(address: string): any | null {
     const key = `geo:${address.toLowerCase().trim()}`;
-    const cached = geoCache.get(key);
+    const cached = geoCache.get(key) as GeoCacheEntry | undefined;
     return cached ? cached.result : null;
   }
 
@@ -64,7 +85,7 @@ class CacheManagerClass {
 
   static getPriceCache(distance: number, duration: number, vehicleTypeId: number): number | null {
     const key = `price:${distance.toFixed(2)}:${duration}:${vehicleTypeId}`;
-    const cached = priceCache.get(key);
+    const cached = priceCache.get(key) as PriceCacheEntry | undefined;
     return cached ? cached.price : null;
   }
 
@@ -76,7 +97,7 @@ class CacheManagerClass {
 
   static getDistanceCache(originLat: number, originLng: number, destLat: number, destLng: number): { distance: number; duration: number } | null {
     const key = `dist:${originLat.toFixed(4)}:${originLng.toFixed(4)}:${destLat.toFixed(4)}:${destLng.toFixed(4)}`;
-    const cached = distanceCache.get(key);
+    const cached = distanceCache.get(key) as DistanceCacheEntry | undefined;
     return cached ? { distance: cached.distance, duration: cached.duration } : null;
   }
 
@@ -169,4 +190,5 @@ const cacheHeaders = {
   }),
 };
 
-module.exports = { CacheManager: CacheManagerClass, cacheKeys, cacheHeaders };
+export const CacheManager = CacheManagerClass;
+export { cacheKeys, cacheHeaders };

@@ -183,7 +183,7 @@ app.prepare().then(() => {
         // Notify passenger of booking update
         io.to(`booking_${data.rideId}`).emit('bookingUpdate', {
           bookingId: data.rideId,
-          status: 'DISPATCHED',
+          status: 'ONGOING',
           driverId: data.driverId,
           driver: driver,
           timestamp: new Date().toISOString()
