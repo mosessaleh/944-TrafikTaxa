@@ -26,6 +26,27 @@ app.prepare().then(() => {
     console.log('Client connected:', socket.id);
 
     socket.on('join', async (data) => {
+      // Verify token if provided
+      if (socket.handshake.auth && socket.handshake.auth.token) {
+        try {
+          const jwt = require('jsonwebtoken');
+          const decoded = jwt.verify(socket.handshake.auth.token, process.env.AUTH_SECRET || 'change_me_dev_secret');
+          if (!decoded.driverId || decoded.driverId !== data.driverId) {
+            console.log('Invalid token for driver join');
+            socket.disconnect();
+            return;
+          }
+        } catch (error) {
+          console.log('Token verification failed for driver join:', error.message);
+          socket.disconnect();
+          return;
+        }
+      } else {
+        console.log('No token provided for driver join');
+        socket.disconnect();
+        return;
+      }
+
       if (data.driverId && data.vehicleTypeId) {
         socket.join(`driver_${data.driverId}`);
         console.log(`Driver ${data.driverId} joined room`);
@@ -51,11 +72,48 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on('updateLocation', (data) => {
+    socket.on('updateLocation', async (data) => {
       if (data.driverId && connectedDrivers.has(data.driverId)) {
         connectedDrivers.get(data.driverId).location = data.location;
         connectedDrivers.get(data.driverId).lastUpdate = Date.now();
         console.log(`Driver ${data.driverId} location updated:`, data.location);
+
+        // Update database
+        try {
+          // Find the vehicle assigned to this driver
+          const driver = await prisma.comDriver.findUnique({
+            where: { id: data.driverId },
+            select: { car: true }
+          });
+
+          if (driver && driver.car) {
+            const vehicle = await prisma.comVehicles.findFirst({
+              where: { regNumber: driver.car.regNumber }
+            });
+
+            if (vehicle) {
+              // Update vehicle location
+              await prisma.comVehicles.update({
+                where: { id: vehicle.id },
+                data: {
+                  lastLat: data.location.lat,
+                  lastLon: data.location.lng,
+                  lastLocationUpdate: new Date()
+                }
+              });
+
+              // Also update driver's lastLocation
+              await prisma.comDriver.update({
+                where: { id: data.driverId },
+                data: {
+                  lastLocation: [data.location.lat, data.location.lng]
+                }
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Error updating location in database:', error);
+        }
       }
     });
 
@@ -122,6 +180,15 @@ app.prepare().then(() => {
           timestamp: new Date().toISOString()
         });
 
+        // Notify passenger of booking update
+        io.to(`booking_${data.rideId}`).emit('bookingUpdate', {
+          bookingId: data.rideId,
+          status: 'DISPATCHED',
+          driverId: data.driverId,
+          driver: driver,
+          timestamp: new Date().toISOString()
+        });
+
         console.log(`Ride ${data.rideId} assigned to driver ${data.driverId}`);
 
       } catch (error) {
@@ -140,6 +207,14 @@ app.prepare().then(() => {
       if (data.bookingId) {
         socket.join(`chat_${data.bookingId}`);
         console.log(`User joined chat for booking ${data.bookingId}`);
+      }
+    });
+
+    // Booking updates functionality
+    socket.on('joinBooking', (data) => {
+      if (data.bookingId) {
+        socket.join(`booking_${data.bookingId}`);
+        console.log(`User joined booking updates for booking ${data.bookingId}`);
       }
     });
 
@@ -178,7 +253,7 @@ app.prepare().then(() => {
 
   // Function to select best drivers using advanced scoring algorithm
   const selectBestDrivers = async (ride, availableDrivers) => {
-    const rideLocation = { lat: ride.pickupLat, lng: ride.pickupLng };
+    const rideLocation = { lat: ride.startLatLon.lat, lng: ride.startLatLon.lon };
 
     // Get driver details from database
     const driverIds = availableDrivers.map(d => d.driverId);
@@ -238,14 +313,18 @@ app.prepare().then(() => {
     // Calculate rough distances
     const roughDistances = availableDrivers.map(driver => ({
       driver,
-      distance: calculateDistance(rideLocation.lat, rideLocation.lng, driver.location.lat, driver.location.lng)
+      distance: calculateDistance(rideLocation, driver.location)
     }));
+
+    console.log('Rough distances:', roughDistances.map(d => ({ driverId: d.driver.driverId, distance: d.distance })));
 
     // Select candidates within 20km
     const candidates = roughDistances
       .filter(item => item.distance <= 20)
       .sort((a, b) => a.distance - b.distance)
       .slice(0, 10);
+
+    console.log('Candidates within 20km:', candidates.length);
 
     // Get precise distances using Google
     const candidateDestinations = candidates.map(item => ({
@@ -279,6 +358,9 @@ app.prepare().then(() => {
       if (googleResults[index]) {
         distance = googleResults[index].distance;
         etaMinutes = Math.ceil(googleResults[index].duration);
+        console.log(`Driver ${candidate.driver.driverId}: Google distance ${distance}km, ETA ${etaMinutes}min`);
+      } else {
+        console.log(`Driver ${candidate.driver.driverId}: Rough distance ${distance}km, ETA ${etaMinutes}min`);
       }
 
       // Scoring system
@@ -369,17 +451,69 @@ app.prepare().then(() => {
       });
 
       for (const ride of newRides) {
+        console.log(`Checking ride ${ride.id} with vehicleTypeId ${ride.vehicleTypeId}, pickup: ${ride.pickupLat}, ${ride.pickupLng}`);
+        console.log(`Connected drivers count: ${connectedDrivers.size}`);
+
         // Find available drivers for this vehicle type
-        const availableDrivers = Array.from(connectedDrivers.entries())
-          .filter(([driverId, driverData]) =>
-            driverData.vehicleTypeId === ride.vehicleTypeId &&
-            driverData.location // Must have location
-          )
+        let availableDrivers = Array.from(connectedDrivers.entries())
+          .filter(([driverId, driverData]) => {
+            const matchesType = driverData.vehicleTypeId === ride.vehicleTypeId;
+            const hasLocation = !!driverData.location;
+            console.log(`Driver ${driverId}: type ${driverData.vehicleTypeId} (${matchesType ? 'match' : 'no match'}), location: ${hasLocation ? 'yes' : 'no'}`);
+            return matchesType && hasLocation;
+          })
           .map(([driverId, driverData]) => ({
             driverId: parseInt(driverId),
             location: driverData.location,
             socketId: driverData.socketId
           }));
+
+        // If no drivers with socket location, try to get from database
+        if (availableDrivers.length === 0) {
+          const connectedDriverIds = Array.from(connectedDrivers.keys()).map(id => parseInt(id));
+          const driversWithDbLocation = await prisma.comDriver.findMany({
+            where: {
+              id: { in: connectedDriverIds },
+              isOnline: true,
+              isActive: true,
+              car: { not: null }
+            },
+            select: {
+              id: true,
+              car: true
+            }
+          });
+
+          const carPlates = driversWithDbLocation.map(d => d.car).filter(car => car !== null);
+          const vehiclesWithLocation = await prisma.comVehicles.findMany({
+            where: {
+              regNumber: { in: carPlates },
+              lastLat: { not: null },
+              lastLon: { not: null }
+            },
+            select: {
+              id: true,
+              regNumber: true,
+              lastLat: true,
+              lastLon: true
+            }
+          });
+
+          availableDrivers = vehiclesWithLocation.map(vehicle => {
+            const driver = driversWithDbLocation.find(d => d.car === vehicle.regNumber);
+            if (driver && connectedDrivers.has(driver.id.toString())) {
+              const driverData = connectedDrivers.get(driver.id.toString());
+              if (driverData.vehicleTypeId === ride.vehicleTypeId) {
+                return {
+                  driverId: driver.id,
+                  location: { lat: vehicle.lastLat, lng: vehicle.lastLon },
+                  socketId: driverData.socketId
+                };
+              }
+            }
+            return null;
+          }).filter(d => d !== null);
+        }
 
         if (availableDrivers.length === 0) {
           console.log(`No available drivers for ride ${ride.id}`);
@@ -398,6 +532,16 @@ app.prepare().then(() => {
         let assigned = false;
         for (const driverScore of selectedDrivers) {
           if (assigned) break;
+
+          // Update driver status - set currentRideId and rideAccepted to 0
+          await prisma.comDriver.update({
+            where: { id: driverScore.driver.driverId },
+            data: {
+              currentRideId: ride.id,
+              rideAccepted: 0, // 0 means offered, not accepted yet
+              // Keep isBusy as false until ride is accepted
+            }
+          });
 
           global.io.to(driverScore.driver.socketId).emit('rideOffer', {
             rideId: ride.id,

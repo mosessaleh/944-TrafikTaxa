@@ -1,31 +1,31 @@
-import { LRUCache } from 'lru-cache';
+const { LRUCache } = require('lru-cache');
 
 // In-memory cache for API responses
-const apiCache = new LRUCache<string, { data: any; timestamp: number }>({
+const apiCache = new LRUCache({
   max: 500, // Maximum 500 entries
   ttl: 1000 * 60 * 5, // 5 minutes TTL
   allowStale: false,
 });
 
 // Cache for expensive operations like geocoding
-const geoCache = new LRUCache<string, { result: any; timestamp: number }>({
+const geoCache = new LRUCache({
   max: 1000, // Maximum 1000 entries
   ttl: 1000 * 60 * 60 * 24, // 24 hours TTL
 });
 
 // Cache for price calculations
-const priceCache = new LRUCache<string, { price: number; timestamp: number }>({
+const priceCache = new LRUCache({
   max: 2000, // Maximum 2000 entries
   ttl: 1000 * 60 * 30, // 30 minutes TTL
 });
 
 // Cache for distance/duration calculations
-const distanceCache = new LRUCache<string, { distance: number; duration: number; timestamp: number }>({
+const distanceCache = new LRUCache({
   max: 5000, // Maximum 5000 entries
   ttl: 1000 * 60 * 15, // 15 minutes TTL
 });
 
-export class CacheManager {
+class CacheManagerClass {
   // API Response Caching
   static setApiCache(key: string, data: any): void {
     apiCache.set(key, { data, timestamp: Date.now() });
@@ -103,7 +103,7 @@ export class CacheManager {
   }
 
   // Clear all caches (useful for testing or manual cache invalidation)
-  static clearAll(): void {
+  static clearAll() {
     apiCache.clear();
     geoCache.clear();
     priceCache.clear();
@@ -111,41 +111,41 @@ export class CacheManager {
   }
 
   // Clear specific cache types
-  static clearApiCache(): void {
+  static clearApiCache() {
     apiCache.clear();
   }
 
-  static clearGeoCache(): void {
+  static clearGeoCache() {
     geoCache.clear();
   }
 
-  static clearPriceCache(): void {
+  static clearPriceCache() {
     priceCache.clear();
   }
 
-  static clearDistanceCache(): void {
+  static clearDistanceCache() {
     distanceCache.clear();
   }
 }
 
 // Cache keys generators
-export const cacheKeys = {
-  quote: (pickup: string, dropoff: string, passengers: number, when: string) =>
+const cacheKeys = {
+  quote: (pickup: any, dropoff: any, passengers: any, when: any) =>
     `quote:${pickup}:${dropoff}:${passengers}:${when}`,
 
   vehicleTypes: () => 'vehicle_types',
 
-  userProfile: (userId: string) => `user_profile:${userId}`,
+  userProfile: (userId: any) => `user_profile:${userId}`,
 
-  bookings: (userId: string, page: number = 1) => `bookings:${userId}:${page}`,
+  bookings: (userId: any, page = 1) => `bookings:${userId}:${page}`,
 
-  cryptoPrices: (symbol: string) => `crypto_price:${symbol}`,
+  cryptoPrices: (symbol: any) => `crypto_price:${symbol}`,
 
   exchangeRates: () => 'exchange_rates',
 };
 
 // HTTP Cache Headers
-export const cacheHeaders = {
+const cacheHeaders = {
   // Short cache for dynamic content
   short: {
     'Cache-Control': 'public, max-age=300, s-maxage=600, stale-while-revalidate=86400',
@@ -164,7 +164,9 @@ export const cacheHeaders = {
   },
 
   // Revalidation for API responses
-  revalidate: (seconds: number) => ({
+  revalidate: (seconds: any) => ({
     'Cache-Control': `public, max-age=${seconds}, s-maxage=${seconds * 2}, stale-while-revalidate=${seconds * 4}`,
   }),
 };
+
+module.exports = { CacheManager: CacheManagerClass, cacheKeys, cacheHeaders };

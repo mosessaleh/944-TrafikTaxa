@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { verify } from 'jsonwebtoken';
 import { chargeSavedPaymentMethod, PaymentResult } from '@/lib/payment-processor';
 import { notifyUserInvoiceReady } from '@/lib/notify';
+import { getSocketServer } from '@/lib/socket-server';
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -78,6 +79,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         isBusy: false,
       },
     });
+
+    // Notify passenger of ride completion
+    const io = getSocketServer();
+    if (io) {
+      io.to(`booking_${rideId}`).emit('bookingUpdate', {
+        bookingId: rideId,
+        status: 'COMPLETED',
+        timestamp: new Date().toISOString()
+      });
+    }
 
     // Handle payment based on method
     if (ride.savedPaymentMethodId) {

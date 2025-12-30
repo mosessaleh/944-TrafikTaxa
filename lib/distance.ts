@@ -1,7 +1,8 @@
-import { CacheManager } from '@/lib/cache';
+// @ts-ignore
+const CacheManager = require('./cache').CacheManager;
 
 // Haversine distance calculation (fallback)
-export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+function calculateDistance(lat1: any, lon1: any, lat2: any, lon2: any) {
   const R = 6371; // Earth's radius in kilometers
   const dLat = toRadians(lat2 - lat1);
   const dLon = toRadians(lon2 - lon1);
@@ -13,15 +14,12 @@ export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2
   return R * c;
 }
 
-function toRadians(degrees: number): number {
+function toRadians(degrees: any) {
   return degrees * (Math.PI / 180);
 }
 
 // Get distance and duration using Google Distance Matrix API (batch)
-export async function getDistanceAndDuration(
-  origins: { lat: number; lng: number }[],
-  destinations: { lat: number; lng: number }[]
-): Promise<({ distance: number; duration: number } | null)[]> {
+async function getDistanceAndDuration(origins: any, destinations: any) {
   // Assume single origin for simplicity (as used in vehicle selection)
   const origin = origins[0];
   if (!origin) return destinations.map(() => null);
@@ -112,17 +110,14 @@ export async function getDistanceAndDuration(
 }
 
 // Legacy function for single destination (backwards compatibility)
-export async function getDistanceAndDurationSingle(
-  origins: { lat: number; lng: number }[],
-  destination: { lat: number; lng: number }
-): Promise<{ distance: number; duration: number } | null> {
+async function getDistanceAndDurationSingle(origins: any, destination: any) {
   const results = await getDistanceAndDuration(origins, [destination]);
   return results[0];
 }
 
 // Estimate arrival time in minutes based on distance
 // Assuming average speed of 30 km/h in city traffic
-export function estimateArrivalTime(distanceKm: number): number {
+function estimateArrivalTime(distanceKm: any) {
   const averageSpeedKmh = 30; // km/h
   const timeHours = distanceKm / averageSpeedKmh;
   const timeMinutes = timeHours * 60;
@@ -130,8 +125,16 @@ export function estimateArrivalTime(distanceKm: number): number {
 }
 
 // Format time for display
-export function formatArrivalTime(minutes: number): string {
+function formatArrivalTime(minutes: any) {
   if (minutes < 1) return "less than 1 minute";
   if (minutes === 1) return "1 minute";
   return `${minutes} minutes`;
 }
+
+module.exports = {
+  calculateDistance,
+  getDistanceAndDuration,
+  getDistanceAndDurationSingle,
+  estimateArrivalTime,
+  formatArrivalTime
+};

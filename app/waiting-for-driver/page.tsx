@@ -92,21 +92,14 @@ export default function WaitingForDriverPage() {
     }
   }, [driverFound]);
 
-  // Initialize chat socket when driver is found
+  // Initialize chat when driver is found
   useEffect(() => {
-    if (driverFound && bookingId) {
-      const socket = io();
-      socketRef.current = socket;
+    if (driverFound && bookingId && socketRef.current) {
+      socketRef.current.emit('joinChat', { bookingId });
 
-      socket.emit('joinChat', { bookingId });
-
-      socket.on('newMessage', (data: any) => {
+      socketRef.current.on('newMessage', (data: any) => {
         setChatMessages(prev => [...prev, data]);
       });
-
-      return () => {
-        socket.disconnect();
-      };
     }
   }, [driverFound, bookingId]);
 
@@ -124,6 +117,36 @@ export default function WaitingForDriverPage() {
       router.replace("/");
       return;
     }
+
+    // Initialize WebSocket connection for booking updates
+    const socket = io();
+    socketRef.current = socket;
+
+    socket.emit('joinBooking', { bookingId });
+    console.log(`Joined booking updates for ${bookingId}`);
+
+    // Listen for booking updates
+    socket.on('bookingUpdate', (data: any) => {
+      console.log('Received booking update:', data);
+      if (data.bookingId == bookingId) {
+        if (data.status === 'DISPATCHED' || data.status === 'ONGOING') {
+          setDriverFound(true);
+          setSearchingStatus("Driver found! Driver is on the way...");
+          // Fetch updated booking details
+          fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
+            .then(res => res.json())
+            .then(updatedData => {
+              const updatedBooking = updatedData.ride || updatedData;
+              setBookingDetails(updatedBooking);
+              updateMap(updatedBooking);
+            })
+            .catch(error => console.error('Error fetching updated booking:', error));
+        } else if (data.status === 'COMPLETED') {
+          setSearchingStatus("Ride completed! Redirecting...");
+          setTimeout(() => router.push("/bookings"), 3000);
+        }
+      }
+    });
 
     // Validate access conditions
     const validateAccess = async () => {
@@ -190,58 +213,6 @@ export default function WaitingForDriverPage() {
           setSearchingStatus("Driver assigned! Waiting for driver to accept...");
           // Continue to check status
         }
-
-        // Note: Pending rides are processed by the background service in server.js
-        // No need to process them here to avoid duplicate processing
-
-        // Start checking booking status
-        const checkInterval = setInterval(async () => {
-          try {
-            console.log(`[WAITING] Checking booking ${bookingId} status...`);
-            const rideResponse = await fetch(`/api/bookings/${bookingId}`, {
-              credentials: "include",
-            });
-            if (rideResponse.ok) {
-              const rideData = await rideResponse.json();
-              const ride = rideData.ride || rideData;
-              console.log(`[WAITING] Booking ${bookingId} status: ${ride.status}, driverId: ${ride.driverId}, car: ${ride.car}`);
-              if (ride.status === 'DISPATCHED' || ride.status === 'ONGOING') {
-                console.log(`[WAITING] Driver found for booking ${bookingId}`);
-                clearInterval(checkInterval);
-                clearInterval(processInterval);
-                setDriverFound(true);
-                setSearchingStatus("Driver found! Driver is on the way...");
-                updateMap(ride);
-                // Continue checking for ride completion
-                const completionInterval = setInterval(async () => {
-                  try {
-                    const rideResponse = await fetch(`/api/bookings/${bookingId}`, { credentials: "include" });
-                    if (rideResponse.ok) {
-                      const rideData = await rideResponse.json();
-                      const ride = rideData.ride || rideData;
-                      if (ride.status === 'COMPLETED') {
-                        clearInterval(completionInterval);
-                        setSearchingStatus("Ride completed! Redirecting...");
-                        setTimeout(() => router.push("/bookings"), 3000);
-                      }
-                    }
-                  } catch (error) {
-                    console.error("Failed to check ride completion:", error);
-                  }
-                }, 5000); // Check every 5 seconds for completion
-              }
-            } else {
-              console.log(`[WAITING] Failed to fetch booking ${bookingId}, status: ${rideResponse.status}`);
-            }
-          } catch (error) {
-            console.error("Failed to check ride status:", error);
-          }
-        }, 1000);
-
-        // Clean up intervals after 5 minutes (maximum wait time)
-        setTimeout(() => {
-          clearInterval(checkInterval);
-        }, 300000); // 5 minutes
 
       } catch (error) {
         console.error("❌ Failed to validate access:", error);
