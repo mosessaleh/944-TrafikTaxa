@@ -800,6 +800,24 @@ export default function AccountClient() {
           {tab === 'history' && (
             <div className="p-6">
               <h2 className="text-xl font-semibold text-slate-800 mb-6">{t('account.history.title')}</h2>
+
+              {/* Check for active ride */}
+              {ridesData && ridesData.some((ride: Ride) => ride.status === 'ONGOING' || ride.status === 'DISPATCHED') && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-blue-800">Active Ride</h3>
+                      <p className="text-blue-700">You have an active ride in progress.</p>
+                    </div>
+                    <Link
+                      href={`/waiting-for-driver?bookingId=${ridesData.find((ride: Ride) => ride.status === 'ONGOING' || ride.status === 'DISPATCHED')?.id}`}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      View Ride Status
+                    </Link>
+                  </div>
+                </div>
+              )}
               {ridesLoading ? (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>

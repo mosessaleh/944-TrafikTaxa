@@ -14,25 +14,14 @@ export async function GET(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { driverId: number };
 
-    console.log(`getDriverStatus: Fetching status for driverId ${decoded.driverId}`);
-
     const driver = await prisma.comDriver.findUnique({
       where: { id: decoded.driverId },
       select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true },
     });
 
     if (!driver) {
-      console.log(`getDriverStatus: Driver ${decoded.driverId} not found`);
       return NextResponse.json({ error: 'Driver not found' }, { status: 404 });
     }
-
-    console.log(`getDriverStatus: Driver data:`, {
-      id: decoded.driverId,
-      isOnline: driver.isOnline,
-      isBusy: driver.isBusy,
-      currentRideId: driver.currentRideId,
-      rideAccepted: driver.rideAccepted
-    });
 
     // Check if there is an active shift for today
     const today = new Date();
@@ -59,8 +48,6 @@ export async function GET(request: NextRequest) {
       rideAccepted: driver.rideAccepted,
       hasActiveShift: !!activeShift,
     };
-
-    console.log(`getDriverStatus: Response:`, response);
 
     return NextResponse.json(response);
   } catch (error) {
@@ -94,10 +81,23 @@ export async function POST(request: NextRequest) {
     if (online !== undefined) updateData.isOnline = online;
     if (busy !== undefined) updateData.isBusy = busy;
 
-    await prisma.comDriver.update({
+    const updatedDriver = await prisma.comDriver.update({
       where: { id: decoded.driverId },
       data: updateData,
+      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true },
     });
+
+    // Send real-time update via Socket.IO
+    if ((global as any).io) {
+      (global as any).io.to(`driver_${decoded.driverId}`).emit('driverStatusUpdate', {
+        currentRideId: updatedDriver.currentRideId,
+        isBusy: updatedDriver.isBusy,
+        rideAccepted: updatedDriver.rideAccepted,
+        isOnline: updatedDriver.isOnline,
+        timestamp: Date.now()
+      });
+      console.log(`Sent driverStatusUpdate for driver ${decoded.driverId}`);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

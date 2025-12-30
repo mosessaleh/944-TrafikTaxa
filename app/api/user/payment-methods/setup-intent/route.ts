@@ -44,7 +44,6 @@ export async function POST(request: NextRequest) {
 
     // Create a Setup Intent for collecting payment method
     const setupIntent = await stripeClient.setupIntents.create({
-      customer: customerId,
       payment_method_types: ['card'],
       usage: 'off_session', // Allow future off-session payments
       metadata: {

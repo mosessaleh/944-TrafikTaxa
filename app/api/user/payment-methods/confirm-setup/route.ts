@@ -24,6 +24,17 @@ export async function POST(request: NextRequest) {
 
     const stripeClient = stripe();
 
+    // Get user's Stripe customer ID
+    const userWithCustomer = await prisma.$queryRaw`
+      SELECT stripeCustomerId FROM User WHERE id = ${user.id}
+    ` as any[];
+
+    const customerId = userWithCustomer[0]?.stripeCustomerId;
+
+    if (!customerId) {
+      return NextResponse.json({ error: 'User does not have a Stripe customer' }, { status: 400 });
+    }
+
     // Retrieve the setup intent
     const setupIntent = await stripeClient.setupIntents.retrieve(setupIntentId);
 
@@ -38,6 +49,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         error: 'No payment method attached to setup intent'
       }, { status: 400 });
+    }
+
+    // Ensure the payment method is attached to the customer
+    try {
+      await stripeClient.paymentMethods.attach(setupIntent.payment_method as string, { customer: customerId });
+    } catch (attachError: any) {
+      // If already attached, ignore the error
+      if (!attachError.message?.includes('already attached')) {
+        throw attachError;
+      }
     }
 
     // Get payment method details from Stripe

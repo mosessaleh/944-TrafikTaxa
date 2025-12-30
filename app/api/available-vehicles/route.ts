@@ -102,10 +102,11 @@ export async function GET(request: Request) {
               // Calculate ETA from pickup location using Google Maps API
               let etaMinutes = 0;
               if (vehicle.lastLat && vehicle.lastLon && pickupLat && pickupLon) {
-                const distanceData = await getDistanceAndDuration(
+                const distanceResults = await getDistanceAndDuration(
                   [{ lat: vehicle.lastLat, lng: vehicle.lastLon }],
                   [{ lat: parseFloat(pickupLat), lng: parseFloat(pickupLon) }]
                 );
+                const distanceData = distanceResults[0];
                 if (distanceData) {
                   etaMinutes = Math.ceil(distanceData.duration);
                 } else {

@@ -201,7 +201,7 @@ export async function POST(
         data: {
           paymentMethod: 'invoice',
           status: 'CONFIRMED',
-          paymentStatus: 'PENDING',
+          paymentStatus: 'PENDING_PAYMENT',
           explanation: 'Waiting to send a car'
         },
         include: {
@@ -277,7 +277,7 @@ export async function POST(
           data: {
             paymentMethod: 'card',
             status: 'CONFIRMED',
-            paymentStatus: 'UNPAID',
+            paymentStatus: 'PENDING_PAYMENT',
             savedPaymentMethodId: defaultCard.id,
             explanation: `Payment authorized - Transaction: ${authResult.transactionId}`
           },
@@ -324,7 +324,7 @@ export async function POST(
               </ul>
             </div>
 
-            <p><strong>Important:</strong> Your card has been authorized for the payment amount. The actual charge will occur after trip completion.</p>
+            <p><strong>Important:</strong> Your card has been charged for the payment amount.</p>
 
             <p>If you have any questions, please contact our support team.</p>
 

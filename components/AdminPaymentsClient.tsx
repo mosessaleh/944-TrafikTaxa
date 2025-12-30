@@ -65,6 +65,9 @@ function formatMethodLabel(methodKey: string, type: AdminPaymentType): string {
 }
 
 function formatStatus(status: string): string {
+  const normalized = status.toLowerCase();
+  if (normalized === 'pending_payment') return 'PENDING';
+  if (normalized === 'unpaid') return 'UNPAID';
   return status.toUpperCase();
 }
 
@@ -85,6 +88,8 @@ export default function AdminPaymentsClient({ paymentMethods }: AdminPaymentsCli
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [invoiceSearch, setInvoiceSearch] = useState<string>('');
   const [selectedPayment, setSelectedPayment] = useState<AdminPaymentItem | null>(null);
+  const [processingPayments, setProcessingPayments] = useState(false);
+  const [paymentStats, setPaymentStats] = useState<{ pendingPayments: number; failedPayments: number; totalUnpaid: number } | null>(null);
 
   useEffect(() => {
     if (activeTab !== 'payments') return;
@@ -133,6 +138,32 @@ export default function AdminPaymentsClient({ paymentMethods }: AdminPaymentsCli
     };
   }, [activeTab, methodFilter, statusFilter]);
 
+  useEffect(() => {
+    const fetchPaymentStats = async () => {
+      try {
+        const res = await fetch('/api/admin/process-payments', {
+          credentials: 'include',
+        });
+
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+
+        if (!res.ok) {
+          throw new Error('Failed to load payment stats');
+        }
+
+        const data = await res.json();
+        setPaymentStats(data.stats);
+      } catch (err: any) {
+        console.error('Failed to load payment stats', err);
+      }
+    };
+
+    fetchPaymentStats();
+  }, []);
+
   const uniqueMethods: { key: string; label: string }[] = [
     { key: 'card', label: 'Card' },
     { key: 'crypto', label: 'Crypto' },
@@ -156,6 +187,95 @@ export default function AdminPaymentsClient({ paymentMethods }: AdminPaymentsCli
   });
  
   const closeModal = () => setSelectedPayment(null);
+
+  const handleCompleteSinglePayment = async (payment: AdminPaymentItem) => {
+    if (!payment.extra?.rideId) return;
+
+    try {
+      const res = await fetch('/api/admin/process-payments', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'process_single',
+          rideId: payment.extra.rideId
+        }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to process payment');
+      }
+
+      const data = await res.json();
+      alert(`Payment completed!\nTransaction: ${data.transactionId || 'N/A'}`);
+
+      // Refresh payments list
+      if (activeTab === 'payments') {
+        setMethodFilter('all');
+      }
+
+      // Close modal
+      setSelectedPayment(null);
+    } catch (err: any) {
+      console.error('Failed to complete payment', err);
+      alert('Failed to complete payment: ' + err.message);
+    }
+  };
+
+  const handleProcessPayments = async () => {
+    try {
+      setProcessingPayments(true);
+      const res = await fetch('/api/admin/process-payments', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'process' }),
+      });
+
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to process payments');
+      }
+
+      const data = await res.json();
+      alert(`Payment processing completed!\nProcessed: ${data.results.processed}\nSuccessful: ${data.results.successful}\nFailed: ${data.results.failed}`);
+
+      // Refresh stats
+      const statsRes = await fetch('/api/admin/process-payments', {
+        credentials: 'include',
+      });
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setPaymentStats(statsData.stats);
+      }
+
+      // Refresh payments list if on payments tab
+      if (activeTab === 'payments') {
+        // Trigger refetch by changing a filter temporarily
+        setMethodFilter('all');
+      }
+    } catch (err: any) {
+      console.error('Failed to process payments', err);
+      alert('Failed to process payments: ' + err.message);
+    } finally {
+      setProcessingPayments(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -293,6 +413,45 @@ export default function AdminPaymentsClient({ paymentMethods }: AdminPaymentsCli
         </div>
       ) : (
         <div className="space-y-6">
+          {/* Payment Stats and Process Button */}
+          {paymentStats && (
+            <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                <div className="flex gap-6">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-yellow-600">{paymentStats.pendingPayments}</div>
+                    <div className="text-sm text-gray-500">Pending Payments</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-red-600">{paymentStats.failedPayments}</div>
+                    <div className="text-sm text-gray-500">Failed Payments</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600">{paymentStats.totalUnpaid}</div>
+                    <div className="text-sm text-gray-500">Total Unpaid</div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleProcessPayments}
+                  disabled={processingPayments}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-medium"
+                >
+                  {processingPayments ? (
+                    <>
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={16} />
+                      Process Payments
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Filters */}
           <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
             <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
@@ -321,6 +480,8 @@ export default function AdminPaymentsClient({ paymentMethods }: AdminPaymentsCli
                         <option value="all">All Statuses</option>
                         <option value="paid">Paid</option>
                         <option value="pending">Pending</option>
+                        <option value="pending_payment">Pending Payment</option>
+                        <option value="unpaid">Unpaid</option>
                         <option value="confirmed">Confirmed</option>
                         <option value="failed">Failed</option>
                     </select>
@@ -554,7 +715,18 @@ export default function AdminPaymentsClient({ paymentMethods }: AdminPaymentsCli
               )}
             </div>
 
-            <div className="px-6 py-4 border-t border-gray-100 flex justify-end bg-gray-50/50">
+            <div className="px-6 py-4 border-t border-gray-100 flex justify-between bg-gray-50/50">
+              <div>
+                {selectedPayment.id.startsWith('ride:') && (selectedPayment.status.toLowerCase() === 'pending_payment' || selectedPayment.status.toLowerCase() === 'unpaid') && (
+                  <button
+                    type="button"
+                    onClick={() => handleCompleteSinglePayment(selectedPayment)}
+                    className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 text-sm font-medium transition-all shadow-sm"
+                  >
+                    Complete Payment
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={closeModal}

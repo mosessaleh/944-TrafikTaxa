@@ -97,7 +97,11 @@ export async function GET(req: Request) {
         })
       );
 
-      const filteredSuggestions = suggestions.filter(s => s.text && /^[\w\s,.\-()&éÉüÜöÖäÄßæøåÆØÅ]+$/.test(s.text));
+      // Remove duplicates based on place_id
+      const uniqueSuggestions = suggestions.filter((s, index, arr) =>
+        arr.findIndex(other => other.id === s.id) === index
+      );
+      const filteredSuggestions = uniqueSuggestions.filter(s => s.text && /^[\w\s,.\-()&éÉüÜöÖäÄßæøåÆØÅ]+$/.test(s.text));
       return NextResponse.json({ ok: true, suggestions: filteredSuggestions });
 
     } catch (placesError) {

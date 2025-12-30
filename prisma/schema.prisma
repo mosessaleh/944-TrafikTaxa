@@ -172,6 +172,7 @@ model Ride {
   dropoffAddress String
   startLatLon    Json?      // [lat, lon] for pickup coordinates
   endLatLon      Json?      // [lat, lon] for dropoff coordinates
+  droppedOnLocation Json?   // [lat, lon] for actual dropoff location
   scheduled      Boolean    @default(false)
   pickupTime     DateTime
   distanceKm     Float?

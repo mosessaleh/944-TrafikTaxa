@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import io from 'socket.io-client';
 
 export default function WaitingForDriverPage() {
   const router = useRouter();
@@ -10,50 +11,119 @@ export default function WaitingForDriverPage() {
 
   const [bookingDetails, setBookingDetails] = useState<any>(null);
   const [countdown, setCountdown] = useState(180); // 3 minutes in seconds
-  const [canCancel, setCanCancel] = useState(false);
-  const [searchingStatus, setSearchingStatus] = useState<string>("");
-  const [offerCountdown, setOfferCountdown] = useState<number | null>(null);
-  const [currentDriverId, setCurrentDriverId] = useState<string | null>(null);
-  const [driverAccepted, setDriverAccepted] = useState(false);
-  const [isValid, setIsValid] = useState(false);
-  const [availableVehicles, setAvailableVehicles] = useState<any[]>([]);
-  const [currentVehicleIndex, setCurrentVehicleIndex] = useState(0);
-  const bookingRef = useRef<any>(null);
-  const excludedDrivers = useRef<{ [driverId: string]: number }>({});
+   const [canCancel, setCanCancel] = useState(false);
+   const [searchingStatus, setSearchingStatus] = useState<string>("Searching for a driver...");
+   const [driverFound, setDriverFound] = useState(false);
+   const mapRef = useRef<any>(null);
+   const [mapInstance, setMapInstance] = useState<any>(null);
+   const driverMarkerRef = useRef<any>(null);
+   const passengerMarkerRef = useRef<any>(null);
+   const routePolylineRef = useRef<any>(null);
+   const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+   const socketRef = useRef<any>(null);
+   const [chatMessages, setChatMessages] = useState<any[]>([]);
+   const [chatInput, setChatInput] = useState('');
+   const [showChat, setShowChat] = useState(false);
+
+  // Initialize Google Maps
+  useEffect(() => {
+    const initializeMap = async () => {
+      if (typeof window === 'undefined' || mapInstance) return;
+
+      // Load Google Maps API if not already loaded
+      if (!(window as any).google) {
+        (window as any).initGoogleMapsWaiting = () => {};
+        const script = document.createElement('script');
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places,directions&language=da&callback=initGoogleMapsWaiting`;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+
+        await new Promise((resolve) => {
+          const checkGoogle = () => {
+            if ((window as any).google) resolve(null);
+            else setTimeout(checkGoogle, 100);
+          };
+          checkGoogle();
+        });
+      }
+
+      const google = (window as any).google;
+      const mapContainer = document.getElementById('waiting-map');
+      if (!mapContainer) return;
+
+      const map = new google.maps.Map(mapContainer, {
+        center: { lat: 56.2639, lng: 9.5018 }, // Denmark center
+        zoom: 7,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false
+      });
+      mapRef.current = map;
+      setMapInstance(map);
+    };
+
+    initializeMap();
+  }, [mapInstance]);
+
+  // Play sound when driver is found
+  useEffect(() => {
+    if (driverFound) {
+      try {
+        // Create a simple beep sound using Web Audio API
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+
+        oscillator.frequency.setValueAtTime(800, audioContext.currentTime); // Frequency in Hz
+        oscillator.type = 'sine'; // Waveform type
+
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime); // Volume
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5); // Fade out
+
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.5); // Duration
+      } catch (error) {
+        console.warn('Could not play notification sound:', error);
+      }
+    }
+  }, [driverFound]);
+
+  // Initialize chat socket when driver is found
+  useEffect(() => {
+    if (driverFound && bookingId) {
+      const socket = io();
+      socketRef.current = socket;
+
+      socket.emit('joinChat', { bookingId });
+
+      socket.on('newMessage', (data: any) => {
+        setChatMessages(prev => [...prev, data]);
+      });
+
+      return () => {
+        socket.disconnect();
+      };
+    }
+  }, [driverFound, bookingId]);
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!bookingId) {
       router.replace("/");
       return;
     }
-
-    let hasValidated = false;
-
-    // Prevent page unload only after validation
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!hasValidated) return; // Don't show warning during initial load
-      e.preventDefault();
-      e.returnValue = "You will lose your booking if you continue. Are you sure?";
-      return "You will lose your booking if you continue. Are you sure?";
-    };
-
-    const handleUnload = async () => {
-      // Cancel the booking when user leaves the page after validation
-      if (bookingId && hasValidated) {
-        try {
-          await fetch(`/api/bookings/${bookingId}/cancel`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-          });
-        } catch (error) {
-          console.error("Failed to cancel booking on page unload:", error);
-        }
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('unload', handleUnload);
 
     // Validate access conditions
     const validateAccess = async () => {
@@ -105,282 +175,77 @@ export default function WaitingForDriverPage() {
         }
 
         setBookingDetails(booking);
-        bookingRef.current = booking;
-        setIsValid(true);
-        hasValidated = true;
 
-        // If driver is already assigned, wait for acceptance
-        if (booking.driverId) {
-          setCurrentDriverId(booking.driverId);
-          setSearchingStatus("Waiting for driver response...");
-          setOfferCountdown(30);
+        // Check if driver is already assigned
+         if (booking.driverId && (booking.status === 'DISPATCHED' || booking.status === 'ONGOING')) {
+           setDriverFound(true);
+           setSearchingStatus("Driver found! Driver is on the way...");
+           updateMap(booking);
+           // Do not redirect, stay on this page until ride completes
+           return;
+         }
 
-          // Check acceptance every second
-          const checkInterval = setInterval(async () => {
-            try {
-              const rideResponse = await fetch(`/api/bookings/${bookingId}`);
-              if (rideResponse.ok) {
-                const rideData = await rideResponse.json();
-                const ride = rideData.ride || rideData;
-                if (ride.status === 'DISPATCHED' || ride.status === 'ONGOING') {
-                  clearInterval(checkInterval);
-                  setDriverAccepted(true);
-                  setSearchingStatus("Driver found! Redirecting...");
-                  setTimeout(() => router.push("/bookings"), 3000);
-                }
-              }
-            } catch (error) {
-              console.error("Failed to check ride status:", error);
-            }
-          }, 1000);
-
-          // Handle timeout
-          setTimeout(async () => {
-            clearInterval(checkInterval);
-            if (!driverAccepted) {
-              // Driver didn't accept - exclude for 1 minute
-              excludedDrivers.current[booking.driverId] = Date.now() + 60000;
-
-              // Driver didn't accept
-              console.log(`waiting-for-driver: Setting driver ${booking.driverId} to busy after timeout`);
-              const response = await fetch(`/api/drivers/${booking.driverId}/ride`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ currentRideId: null, isBusy: true })
-              });
-              if (response.ok) {
-                console.log(`waiting-for-driver: Driver ${booking.driverId} set to busy`);
-              } else {
-                console.error('Failed to update driver status');
-              }
-
-              // Deduct rating
-              await fetch(`/api/drivers/${booking.driverId}/rating`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deduct: 0.01 })
-              });
-
-              // Try next vehicle or restart search
-              setOfferCountdown(null);
-              setCurrentDriverId(null);
-              setSearchingStatus("Searching for a car");
-              setTimeout(() => {
-                const nextIndex = currentVehicleIndex + 1;
-                if (nextIndex < availableVehicles.length) {
-                  setCurrentVehicleIndex(nextIndex);
-                  const nextVehicleId = availableVehicles[nextIndex];
-                  assignRideToDriver(bookingRef.current.id, nextVehicleId);
-                } else {
-                  // No more vehicles in list, get new list
-                  startCarSearch(bookingRef.current);
-                }
-              }, 1000);
-            }
-          }, 30000);
-        } else {
-          // Start searching for cars after validation
-          if (booking.startLatLon) {
-            startCarSearch(booking);
-          } else {
-            setSearchingStatus("Error: Booking location data is missing");
-          }
+        // Check if booking is confirmed (driver assigned but not accepted yet)
+        if (booking.status === 'CONFIRMED') {
+          setSearchingStatus("Driver assigned! Waiting for driver to accept...");
+          // Continue to check status
         }
-        hasValidated = true;
+
+        // Note: Pending rides are processed by the background service in server.js
+        // No need to process them here to avoid duplicate processing
+
+        // Start checking booking status
+        const checkInterval = setInterval(async () => {
+          try {
+            console.log(`[WAITING] Checking booking ${bookingId} status...`);
+            const rideResponse = await fetch(`/api/bookings/${bookingId}`, {
+              credentials: "include",
+            });
+            if (rideResponse.ok) {
+              const rideData = await rideResponse.json();
+              const ride = rideData.ride || rideData;
+              console.log(`[WAITING] Booking ${bookingId} status: ${ride.status}, driverId: ${ride.driverId}, car: ${ride.car}`);
+              if (ride.status === 'DISPATCHED' || ride.status === 'ONGOING') {
+                console.log(`[WAITING] Driver found for booking ${bookingId}`);
+                clearInterval(checkInterval);
+                clearInterval(processInterval);
+                setDriverFound(true);
+                setSearchingStatus("Driver found! Driver is on the way...");
+                updateMap(ride);
+                // Continue checking for ride completion
+                const completionInterval = setInterval(async () => {
+                  try {
+                    const rideResponse = await fetch(`/api/bookings/${bookingId}`, { credentials: "include" });
+                    if (rideResponse.ok) {
+                      const rideData = await rideResponse.json();
+                      const ride = rideData.ride || rideData;
+                      if (ride.status === 'COMPLETED') {
+                        clearInterval(completionInterval);
+                        setSearchingStatus("Ride completed! Redirecting...");
+                        setTimeout(() => router.push("/bookings"), 3000);
+                      }
+                    }
+                  } catch (error) {
+                    console.error("Failed to check ride completion:", error);
+                  }
+                }, 5000); // Check every 5 seconds for completion
+              }
+            } else {
+              console.log(`[WAITING] Failed to fetch booking ${bookingId}, status: ${rideResponse.status}`);
+            }
+          } catch (error) {
+            console.error("Failed to check ride status:", error);
+          }
+        }, 1000);
+
+        // Clean up intervals after 5 minutes (maximum wait time)
+        setTimeout(() => {
+          clearInterval(checkInterval);
+        }, 300000); // 5 minutes
+
       } catch (error) {
         console.error("❌ Failed to validate access:", error);
         router.push('/404');
-      }
-    };
-
-    const startCarSearch = async (booking: any) => {
-      if (!booking) {
-        setSearchingStatus("Error: Invalid booking data");
-        return;
-      }
-      if (!booking.startLatLon) {
-        setSearchingStatus("Error: Invalid booking data");
-        return;
-      }
-
-      setSearchingStatus("Searching for a car");
-      try {
-        // If we don't have vehicles yet, call vehicle selection API
-        if (availableVehicles.length === 0) {
-          const excludedIds = Object.keys(excludedDrivers.current)
-            .filter(id => excludedDrivers.current[id] > Date.now())
-            .map(id => parseInt(id));
-          const selectionResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              pickupLat: booking.startLatLon?.lat,
-              pickupLon: booking.startLatLon?.lon,
-              dropoffLat: booking.endLatLon?.lat,
-              dropoffLon: booking.endLatLon?.lon,
-              vehicleTypeId: booking.vehicleTypeId,
-              maxVehicles: 3,
-              excludedDriverIds: excludedIds
-            })
-          });
-
-          if (selectionResponse.ok) {
-            const selectionData = await selectionResponse.json();
-            if (selectionData.ok && selectionData.vehicles?.length > 0) {
-              setAvailableVehicles(selectionData.vehicles);
-              setCurrentVehicleIndex(0);
-              const closestVehicleId = selectionData.vehicles[0];
-              await assignRideToDriver(booking.id, closestVehicleId);
-            } else {
-              // No vehicles available, try again in 10 seconds
-              setTimeout(() => startCarSearch(booking), 10000);
-            }
-          }
-        } else {
-          // Try next vehicle in the list
-          const nextIndex = currentVehicleIndex + 1;
-          if (nextIndex < availableVehicles.length) {
-            setCurrentVehicleIndex(nextIndex);
-            const nextVehicleId = availableVehicles[nextIndex];
-            await assignRideToDriver(booking.id, nextVehicleId);
-          } else {
-            // All vehicles tried, search again in 10 seconds
-            setAvailableVehicles([]);
-            setCurrentVehicleIndex(0);
-            setTimeout(() => startCarSearch(booking), 10000);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to search for cars:", error);
-        // Retry after 10 seconds
-        setTimeout(() => startCarSearch(booking), 10000);
-      }
-    };
-
-    const assignRideToDriver = async (rideId: string, vehicleId: string) => {
-      try {
-        // Find driver for this vehicle
-        const driverResponse = await fetch(`/api/admin/vehicles/${vehicleId}/driver`);
-        if (driverResponse.ok) {
-          const driverData = await driverResponse.json();
-          if (driverData.driver) {
-            const driverId = driverData.driver.id;
-
-            // Check if driver is excluded
-            const excludedUntil = excludedDrivers.current[driverId];
-            if (excludedUntil && excludedUntil > Date.now()) {
-              // Try next vehicle in current list
-              const nextIndex = currentVehicleIndex + 1;
-              if (nextIndex < availableVehicles.length) {
-                setCurrentVehicleIndex(nextIndex);
-                const nextVehicleId = availableVehicles[nextIndex];
-                setTimeout(() => assignRideToDriver(bookingRef.current.id, nextVehicleId), 1000);
-              } else {
-                // No more vehicles in list, get new list
-                setTimeout(() => {
-                  if (bookingRef.current?.startLatLon) {
-                    startCarSearch(bookingRef.current);
-                  } else {
-                    setSearchingStatus("Error: Cannot find available drivers");
-                  }
-                }, 1000);
-              }
-              return;
-            }
-            setCurrentDriverId(driverId);
-
-            // Update ride with assigned vehicle info
-            const vehicleResponse = await fetch(`/api/admin/vehicles/${vehicleId}`);
-            if (vehicleResponse.ok) {
-              const vehicleData = await vehicleResponse.json();
-              const vehicle = vehicleData.vehicle;
-              if (vehicle) {
-                await fetch(`/api/bookings/${rideId}`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    explanation: `Assigned vehicle: ${vehicle.regNumber} (selected by strategy)`
-                  })
-                });
-              }
-            }
-
-            // Update driver with currentRideId
-            await fetch(`/api/drivers/${driverId}/ride`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ currentRideId: rideId, rideAccepted: 0 })
-            });
-
-            // Start 30-second countdown
-            setOfferCountdown(30);
-            setSearchingStatus("Waiting for driver response...");
-
-            // Check acceptance every second
-            const checkInterval = setInterval(async () => {
-              try {
-                const rideResponse = await fetch(`/api/bookings/${bookingRef.current.id}`);
-                if (rideResponse.ok) {
-                  const rideData = await rideResponse.json();
-                  const ride = rideData.ride || rideData;
-                  if (ride.status === 'DISPATCHED' || ride.status === 'ONGOING') {
-                    clearInterval(checkInterval);
-                    setDriverAccepted(true);
-                    setSearchingStatus("Driver found! Redirecting...");
-                    setTimeout(() => router.push("/bookings"), 3000);
-                  }
-                }
-              } catch (error) {
-                console.error("Failed to check ride status:", error);
-              }
-            }, 1000);
-
-            // Handle timeout
-            setTimeout(async () => {
-              clearInterval(checkInterval);
-              if (!driverAccepted) {
-                // Driver didn't accept - exclude for 1 minute
-                excludedDrivers.current[driverId] = Date.now() + 60000; // 1 minute from now
-
-                // Driver didn't accept
-                await fetch(`/api/drivers/${driverId}/ride`, {
-                  method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ currentRideId: null, isBusy: true })
-                });
-
-                // Deduct rating
-                await fetch(`/api/drivers/${driverId}/rating`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ deduct: 0.01 })
-                });
-
-                // Try next vehicle in the list
-                setOfferCountdown(null);
-                setCurrentDriverId(null);
-                setSearchingStatus("Searching for a car");
-                setTimeout(() => {
-                  const nextIndex = currentVehicleIndex + 1;
-                  if (nextIndex < availableVehicles.length) {
-                    setCurrentVehicleIndex(nextIndex);
-                    const nextVehicleId = availableVehicles[nextIndex];
-                    assignRideToDriver(bookingRef.current.id, nextVehicleId);
-                  } else {
-                    // No more vehicles in list, get new list
-                    if (bookingRef.current?.startLatLon) {
-                      startCarSearch(bookingRef.current);
-                    } else {
-                      setSearchingStatus("Error: Cannot find available drivers");
-                    }
-                  }
-                }, 1000);
-              }
-            }, 30000);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to assign ride to driver:", error);
       }
     };
 
@@ -400,32 +265,130 @@ export default function WaitingForDriverPage() {
 
     return () => {
       clearInterval(timer);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('unload', handleUnload);
     };
   }, [bookingId, router]);
-
-  // Offer countdown timer
-  useEffect(() => {
-    if (offerCountdown === null || offerCountdown <= 0) return;
-
-    const offerTimer = setInterval(() => {
-      setOfferCountdown((prev) => {
-        if (prev && prev <= 1) {
-          return 0;
-        }
-        return prev ? prev - 1 : null;
-      });
-    }, 1000);
-
-    return () => clearInterval(offerTimer);
-  }, [offerCountdown]);
 
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Update map with driver and passenger locations
+  const updateMap = async (booking: any) => {
+    if (!mapInstance || !booking.driver) return;
+
+    const google = (window as any).google;
+    const driverLocation = booking.driver.lastLocation;
+    if (!driverLocation || !driverLocation.lat || !driverLocation.lon) return;
+
+    const passengerLatLng = booking.startLatLon ? { lat: booking.startLatLon[0], lng: booking.startLatLon[1] } : null;
+    if (!passengerLatLng) return;
+
+    // Clear existing markers and polyline
+    if (driverMarkerRef.current) driverMarkerRef.current.setMap(null);
+    if (passengerMarkerRef.current) passengerMarkerRef.current.setMap(null);
+    if (routePolylineRef.current) routePolylineRef.current.setMap(null);
+
+    // Add driver marker
+    driverMarkerRef.current = new google.maps.Marker({
+      position: { lat: driverLocation.lat, lng: driverLocation.lon },
+      map: mapInstance,
+      icon: {
+        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+          <svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="20" r="18" fill="white" stroke="black" stroke-width="2"/>
+            <path d="M8 15l4-8h16l4 8v12a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-2H12v2a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V15z" fill="#22c55e"/>
+            <circle cx="12" cy="22" r="2" fill="white"/>
+            <circle cx="28" cy="22" r="2" fill="white"/>
+          </svg>
+        `),
+        scaledSize: new google.maps.Size(40, 40),
+        anchor: new google.maps.Point(20, 20)
+      },
+      title: `Driver: ${booking.driver.drFname} ${booking.driver.drLname}`
+    });
+
+    // Add passenger marker
+    passengerMarkerRef.current = new google.maps.Marker({
+      position: passengerLatLng,
+      map: mapInstance,
+      icon: {
+        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+          <svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="15" cy="15" r="14" fill="white" stroke="black" stroke-width="2"/>
+            <circle cx="15" cy="10" r="4" fill="#3b82f6"/>
+            <path d="M8 25c0-5 7-8 7-8s7 3 7 8" fill="#3b82f6"/>
+          </svg>
+        `),
+        scaledSize: new google.maps.Size(30, 30),
+        anchor: new google.maps.Point(15, 15)
+      },
+      title: 'Pickup Location'
+    });
+
+    // Draw route
+    const directionsService = new google.maps.DirectionsService();
+    const directionsRenderer = new google.maps.DirectionsRenderer({
+      map: mapInstance,
+      suppressMarkers: true,
+      polylineOptions: { strokeColor: '#3b82f6', strokeWeight: 4 }
+    });
+
+    directionsService.route({
+      origin: { lat: driverLocation.lat, lng: driverLocation.lon },
+      destination: passengerLatLng,
+      travelMode: google.maps.TravelMode.DRIVING
+    }, (result: any, status: any) => {
+      if (status === google.maps.DirectionsStatus.OK) {
+        directionsRenderer.setDirections(result);
+        routePolylineRef.current = directionsRenderer;
+      }
+    });
+
+    // Fit bounds
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: driverLocation.lat, lng: driverLocation.lon });
+    bounds.extend(passengerLatLng);
+    mapInstance.fitBounds(bounds);
+
+    // Start updating driver location every 10 seconds
+    const updateDriverLocation = async () => {
+      try {
+        const response = await fetch(`/api/bookings/${booking.id}`, { credentials: 'include' });
+        if (response.ok) {
+          const data = await response.json();
+          const updatedBooking = data.ride || data;
+          if (updatedBooking.driver && updatedBooking.driver.lastLocation) {
+            const newLocation = updatedBooking.driver.lastLocation;
+            if (driverMarkerRef.current) {
+              driverMarkerRef.current.setPosition({ lat: newLocation.lat, lng: newLocation.lon });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error updating driver location:', error);
+      }
+    };
+
+    locationIntervalRef.current = setInterval(updateDriverLocation, 10000);
+  };
+
+  const sendMessage = () => {
+    if (chatInput.trim() && socketRef.current && bookingId) {
+      socketRef.current.emit('sendMessage', {
+        bookingId,
+        message: chatInput.trim(),
+        sender: 'passenger'
+      });
+      setChatMessages(prev => [...prev, {
+        message: chatInput.trim(),
+        sender: 'passenger',
+        timestamp: new Date().toISOString()
+      }]);
+      setChatInput('');
+    }
   };
 
   const handleCancelBooking = async () => {
@@ -485,35 +448,82 @@ export default function WaitingForDriverPage() {
           </div>
         </div>
 
-        {/* Lower section - Searching for car */}
-        <div className="p-6 text-center">
-          <div className="mb-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-            <p className="text-lg font-medium text-gray-900">{searchingStatus}</p>
-            {offerCountdown !== null && (
-              <p className="text-sm text-gray-500 mt-2">{offerCountdown} seconds remaining</p>
-            )}
-          </div>
+        {/* Map section - Show when driver is found */}
+         {driverFound && (
+           <div className="border-t border-gray-200">
+             <div id="waiting-map" className="h-64 w-full"></div>
+           </div>
+         )}
 
-          <div className="mt-8">
-            <button
-              onClick={handleCancelBooking}
-              disabled={!canCancel}
-              className={`w-full py-3 px-6 rounded-xl font-semibold transition-colors ${
-                canCancel
-                  ? "bg-red-600 text-white hover:bg-red-700"
-                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
-              }`}
-            >
-              Cancel booking
-            </button>
-            {!canCancel && (
-              <p className="text-sm text-gray-500 mt-2">
-                ({formatTime(countdown)})
-              </p>
-            )}
-          </div>
-        </div>
+         {/* Lower section - Searching for car */}
+         <div className="p-6 text-center">
+           <div className="mb-4">
+             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+             <p className="text-lg font-medium text-gray-900">{searchingStatus}</p>
+           </div>
+
+           {driverFound && (
+             <div className="mb-4">
+               <button
+                 onClick={() => setShowChat(!showChat)}
+                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+               >
+                 {showChat ? 'Hide Chat' : 'Chat with Driver'}
+               </button>
+             </div>
+           )}
+
+           <div className="mt-8">
+             <button
+               onClick={handleCancelBooking}
+               disabled={!canCancel}
+               className={`w-full py-3 px-6 rounded-xl font-semibold transition-colors ${
+                 canCancel
+                   ? "bg-red-600 text-white hover:bg-red-700"
+                   : "bg-gray-300 text-gray-500 cursor-not-allowed"
+               }`}
+             >
+               Cancel booking
+             </button>
+             {!canCancel && (
+               <p className="text-sm text-gray-500 mt-2">
+                 ({formatTime(countdown)})
+               </p>
+             )}
+           </div>
+         </div>
+
+         {/* Chat Modal */}
+         {showChat && (
+           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+             <div className="bg-white rounded-lg w-80 h-96 flex flex-col">
+               <div className="p-4 border-b flex justify-between items-center">
+                 <h3 className="font-semibold">Chat with Driver</h3>
+                 <button onClick={() => setShowChat(false)} className="text-gray-500">✕</button>
+               </div>
+               <div className="flex-1 p-4 overflow-y-auto">
+                 {chatMessages.map((msg, idx) => (
+                   <div key={idx} className={`mb-2 ${msg.sender === 'passenger' ? 'text-right' : 'text-left'}`}>
+                     <div className={`inline-block p-2 rounded-lg ${msg.sender === 'passenger' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}>
+                       {msg.message}
+                     </div>
+                   </div>
+                 ))}
+               </div>
+               <div className="p-4 border-t flex">
+                 <input
+                   type="text"
+                   value={chatInput}
+                   onChange={(e) => setChatInput(e.target.value)}
+                   onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                   className="flex-1 border rounded-l px-2 py-1"
+                   placeholder="Type message..."
+                 />
+                 <button onClick={sendMessage} className="bg-blue-500 text-white px-4 py-1 rounded-r">Send</button>
+               </div>
+             </div>
+           </div>
+         )}
       </div>
     </div>
   );

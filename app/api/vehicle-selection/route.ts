@@ -45,14 +45,91 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Query available vehicles from database
-    // Get online drivers with assigned cars
+    // Get available drivers from connected drivers (real-time socket data)
+    const connectedDrivers = (global as any).connectedDrivers || new Map();
+
+    // Filter connected drivers by vehicle type and exclude specified drivers
+    let availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
+      .filter(([driverId, driverData]) =>
+        driverData.vehicleTypeId === vehicleTypeId &&
+        driverData.location && // Must have location
+        !excludedDriverIds.includes(parseInt(driverId))
+      )
+      .map(([driverId, driverData]) => ({
+        driverId: parseInt(driverId),
+        location: driverData.location,
+        socketId: driverData.socketId
+      }));
+
+    // If no connected drivers, fall back to database-based selection
+    let useDatabaseFallback = false;
+    if (availableDrivers.length === 0) {
+      console.log('No connected drivers found, using database fallback for vehicle selection');
+      useDatabaseFallback = true;
+
+      // Get online drivers from database
+      const onlineDriversFromDb: any[] = await (prisma as any).comDriver.findMany({
+        where: {
+          isOnline: true,
+          isActive: true,
+          car: { not: null }
+        },
+        select: {
+          id: true,
+          car: true
+        }
+      });
+
+      if (onlineDriversFromDb.length > 0) {
+        const carPlates = onlineDriversFromDb.map(d => d.car).filter(car => car !== null);
+
+        // Get vehicles with location data
+        const vehiclesWithLocation: any[] = await (prisma as any).comVehicles.findMany({
+          where: {
+            regNumber: { in: carPlates },
+            lastLat: { not: null },
+            lastLon: { not: null }
+          },
+          select: {
+            id: true,
+            regNumber: true,
+            lastLat: true,
+            lastLon: true
+          }
+        });
+
+        // Create availableDrivers from database data
+        availableDrivers = vehiclesWithLocation.map(vehicle => {
+          const driver = onlineDriversFromDb.find(d => d.car === vehicle.regNumber);
+          if (driver) {
+            return {
+              driverId: driver.id,
+              location: { lat: vehicle.lastLat, lng: vehicle.lastLon },
+              socketId: null // No socket for database fallback
+            };
+          }
+          return null;
+        }).filter(d => d !== null) as any[];
+      }
+    }
+
+    if (availableDrivers.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        vehicles: [],
+        totalAvailable: 0,
+        selectedCount: 0,
+        strategy: useDatabaseFallback ? 'Database fallback: no online drivers with location' : 'Real-time socket-based selection: no connected drivers'
+      });
+    }
+
+    // Get driver and vehicle details from database for scoring
+    const driverIds = availableDrivers.map(d => d.driverId);
     const onlineDrivers: any[] = await (prisma as any).comDriver.findMany({
       where: {
-        isOnline: true,
+        id: { in: driverIds },
         isActive: true,
-        car: { not: null },
-        id: { notIn: excludedDriverIds }
+        car: { not: null }
       },
       select: {
         id: true,
@@ -63,30 +140,16 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    if (onlineDrivers.length === 0) {
-      return NextResponse.json({
-        ok: true,
-        vehicles: [],
-        totalAvailable: 0,
-        selectedCount: 0,
-        strategy: 'Advanced scoring: distance + rating + experience + commission'
-      });
-    }
-
     const carPlates = onlineDrivers.map((d: any) => d.car).filter((car: any): car is string => car !== null);
 
-    // Get vehicles with location data
+    // Get vehicles (we still need vehicle IDs for response)
     const vehicles: any[] = await (prisma as any).comVehicles.findMany({
       where: {
-        regNumber: { in: carPlates },
-        lastLat: { not: null },
-        lastLon: { not: null }
+        regNumber: { in: carPlates }
       },
       select: {
         id: true,
         regNumber: true,
-        lastLat: true,
-        lastLon: true,
         comId: true
       }
     });
@@ -149,30 +212,44 @@ export async function POST(request: NextRequest) {
     });
     const incomeMap = new Map(incomes.map((i: any) => [i.car, i._sum.price || 0]));
 
-    // Calculate scores for each vehicle using the agreed strategy
-    const vehicleScores: VehicleScore[] = await Promise.all(vehicles.map(async (vehicle: any) => {
+    // Calculate distances using real-time socket locations
+    const driverDistances = availableDrivers.map((driver: any) => ({
+      driver,
+      distance: calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng)
+    }));
+
+    // Sort by distance and select top candidates (e.g., within 20km)
+    const candidates = driverDistances
+      .filter(item => item.distance <= 20) // Only drivers within 20km
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, Math.min(10, availableDrivers.length)); // Take top 10 closest
+
+    // For real-time selection, we skip Google Distance Matrix and use direct distance
+    // Google will be used later only for final pricing when dropoff is provided
+    const candidateResults = candidates.map((candidate) => ({
+      driver: candidate.driver,
+      distance: candidate.distance,
+      etaMinutes: Math.ceil((candidate.distance / 30) * 60) // Estimate based on 30 km/h
+    }));
+
+    // Calculate scores for each candidate driver using the agreed strategy
+    const vehicleScores: VehicleScore[] = candidateResults.map((item) => {
+      // Find the vehicle for this driver
+      const driverInfo = onlineDrivers.find(d => d.id === item.driver.driverId);
+      if (!driverInfo) return null;
+
+      const vehicle = vehicles.find(v => v.regNumber === driverInfo.car);
+      if (!vehicle) return null;
+
       const driver = driverMap.get(vehicle.regNumber) as DriverInfo | undefined;
       if (!driver) return null;
 
       const commissionRate = companyMap.get(vehicle.comId) || 0;
       const income = incomeMap.get(vehicle.regNumber) || 0;
 
-      // Try Google Distance Matrix first, fallback to Haversine
-      let distance = calculateDistance(pickupLat, pickupLon, vehicle.lastLat, vehicle.lastLon);
-      let etaMinutes = Math.ceil((distance / 30) * 60); // Default calculation
-
-      try {
-        const googleResult = await getDistanceAndDuration(
-          [{ lat: pickupLat, lng: pickupLon }],
-          [{ lat: vehicle.lastLat, lng: vehicle.lastLon }]
-        );
-        if (googleResult) {
-          distance = googleResult.distance;
-          etaMinutes = Math.ceil(googleResult.duration);
-        }
-      } catch (error) {
-        console.warn('Failed to get Google distance for vehicle', vehicle.id, error);
-      }
+      // Use real-time distance
+      let distance = item.distance;
+      let etaMinutes = item.etaMinutes;
 
       // Priority scoring system (distance, type, income, rating)
       let score = 0;
@@ -222,10 +299,13 @@ export async function POST(request: NextRequest) {
         experience,
         income
       };
-    })).then(scores => scores.filter((item): item is VehicleScore => item !== null));
+    }).filter((item): item is VehicleScore => item !== null);
 
     // Check if any vehicles are within 15km (15 minutes)
     const vehiclesWithin15km = vehicleScores.filter(v => v.distance <= 15);
+
+    // Store whether we used scoring algorithm for response
+    const usedScoringAlgorithm = vehiclesWithin15km.length > 0;
 
     let topVehicles: VehicleScore[];
 
@@ -263,9 +343,6 @@ export async function POST(request: NextRequest) {
     let longWait = false;
     let fallbackVehicles: number[] = [];
 
-    // Store whether we used scoring algorithm for response
-    const usedScoringAlgorithm = vehiclesWithin15km.length > 0;
-
     // Fallback for distant vehicles if all selected vehicles are too far (>30 min) and dropoff provided
     const allVehiclesTooFar = finalVehicles.length > 0 && vehicleScores.every(v => v.distance > 30); // More than 30 min (30km at 60km/h)
     const shouldTriggerFallback = (finalVehicles.length === 0 || allVehiclesTooFar) && dropoffLat && dropoffLon;
@@ -280,16 +357,25 @@ export async function POST(request: NextRequest) {
       const pickupTime = new Date(); // Use current time for estimation
       const estimatedPrice = await computePrice(tripDistance, tripTimeMin, pickupTime, vehicleTypeId);
 
-      // Check each vehicle for profitability
-      for (const vehicle of vehicleScores) {
-        const timeToPickupHours = vehicle.distance / 30;
+      // Check each candidate driver for profitability
+      for (const item of candidateResults) {
+        const driverInfo = onlineDrivers.find(d => d.id === item.driver.driverId);
+        if (!driverInfo) continue;
+
+        const vehicle = vehicles.find(v => v.regNumber === driverInfo.car);
+        if (!vehicle) continue;
+
+        const vehicleScore = vehicleScores.find(v => v.vehicleId === vehicle.id);
+        if (!vehicleScore) continue;
+
+        const timeToPickupHours = vehicleScore.distance / 30;
         const returnTimeHours = tripDistance / 30;
         const totalTimeHours = timeToPickupHours + tripTimeHours + returnTimeHours;
 
         if (totalTimeHours > 0) {
           const pricePerHour = estimatedPrice / totalTimeHours;
           if (pricePerHour > 400) { // 400 DKK per hour threshold
-            fallbackVehicles.push(vehicle.vehicleId);
+            fallbackVehicles.push(vehicleScore.vehicleId);
           }
         }
       }
@@ -312,7 +398,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       vehicles: finalVehicles,
-      totalAvailable: vehicleScores.length,
+      totalAvailable: vehicles.length, // Total vehicles available, not just candidates
       selectedCount: finalVehicles.length,
       strategy: strategyDescription,
       usedScoringAlgorithm,

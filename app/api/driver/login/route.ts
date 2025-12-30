@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { signToken } from '@/lib/auth';
 
 const prisma = new PrismaClient();
 
@@ -160,7 +161,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    const token = jwt.sign({ driverId: driver.id, type: 'driver' }, process.env.JWT_SECRET!, { expiresIn: '24h' });
+    const token = signToken({ driverId: driver.id, type: 'driver' });
 
     return NextResponse.json({
       success: true,

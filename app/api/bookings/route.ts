@@ -8,6 +8,116 @@ import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 import { sanitizeInput } from '@/lib/sanitize';
 import { assessBookingRisk, updateBookingRisk } from '@/lib/risk-assessment';
 import { calculateDistance } from '@/lib/distance';
+import { authorizeCardPayment } from '@/lib/payment-processor';
+
+// Function to assign driver to ride based on booking explanation
+async function assignDriverToRide(rideId: number) {
+  try {
+    console.log(`Assigning driver for ride ${rideId}`);
+
+    // Get the ride to find the assigned vehicle from explanation
+    const ride = await prisma.ride.findUnique({
+      where: { id: rideId },
+      select: {
+        explanation: true
+      }
+    });
+
+    if (!ride || !ride.explanation) {
+      console.warn(`No explanation found for ride ${rideId}`);
+      return;
+    }
+
+    // Extract vehicle regNumber from explanation (format: "Assigned vehicle: XX XX XXX (distance)")
+    const match = ride.explanation.match(/Assigned vehicle: ([A-Z]{2} \d{2} \d{3})/);
+    if (!match) {
+      console.warn(`No vehicle regNumber found in explanation: ${ride.explanation}`);
+      return;
+    }
+
+    const regNumber = match[1];
+    console.log(`Extracted vehicle regNumber: ${regNumber} from explanation: ${ride.explanation}`);
+
+    // Find the vehicle
+    const vehicle = await prisma.comVehicles.findFirst({
+      where: { regNumber },
+      select: {
+        id: true,
+        regNumber: true
+      }
+    });
+
+    if (!vehicle) {
+      console.warn(`Vehicle ${regNumber} not found`);
+      return;
+    }
+
+    // Find driver who drives this vehicle
+    const driver = await prisma.comDriver.findFirst({
+      where: {
+        car: regNumber,
+        isOnline: true,
+        isActive: true,
+        currentRideId: null // Not busy
+      },
+      select: {
+        id: true,
+        drFname: true,
+        drLname: true,
+        currentRideId: true
+      }
+    });
+
+    if (!driver) {
+      console.warn(`No available driver found for vehicle ${regNumber}`);
+      return;
+    }
+
+    console.log(`Found driver ${driver.drFname} ${driver.drLname} with currentRideId: ${driver.currentRideId}`);
+
+    // Assign ride to driver
+    await prisma.comDriver.update({
+      where: { id: driver.id },
+      data: {
+        currentRideId: rideId,
+        rideAccepted: 0
+      }
+    });
+
+    console.log(`Assigned ride ${rideId} to driver ${driver.drFname} ${driver.drLname} (vehicle: ${regNumber})`);
+
+    // Send notification to driver immediately
+    try {
+      if ((global as any).io) {
+        const ride = await prisma.ride.findUnique({
+          where: { id: rideId },
+          include: { vehicleType: true }
+        });
+        if (ride) {
+          (global as any).io.to(`driver_${driver.id}`).emit('newRide', {
+            rideId: ride.id,
+            price: ride.price,
+            pickupAddress: ride.pickupAddress,
+            dropoffAddress: ride.dropoffAddress,
+            etaMinutes: 5,
+            riderName: ride.riderName,
+            distanceKm: ride.distanceKm,
+            durationMin: ride.durationMin,
+            vehicleType: ride.vehicleType.key,
+            passengers: ride.passengers,
+            paymentMethod: ride.paymentMethod,
+            scheduled: ride.scheduled,
+          });
+          console.log(`Sent notification to driver ${driver.id} for ride ${rideId}`);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to send notification to driver:', error);
+    }
+  } catch (error) {
+    console.error('Failed to assign driver to ride:', error);
+  }
+}
 
 // Validation schema for booking creation
 const createBookingSchema = z.object({
@@ -337,7 +447,7 @@ export async function POST(request: NextRequest) {
         durationMin,
         price,
         status: 'PENDING', // Awaiting payment confirmation
-        paymentStatus: 'PENDING_PAYMENT', // New status for post-trip payment
+        paymentStatus: 'UNPAID', // Awaiting payment method selection
         paymentMethod: paymentMethod,
         vehicleTypeId: validatedData.vehicleTypeId,
         driverQueue,
@@ -378,18 +488,83 @@ export async function POST(request: NextRequest) {
       // Don't fail the booking if risk assessment fails
     }
 
+    // Authorize card payment if card payment method is selected
+    if (paymentMethod === 'card' && selectedPaymentMethodId) {
+      try {
+        console.log(`[DEBUG] Authorizing card payment for booking ${booking.id}, selectedPaymentMethodId: ${selectedPaymentMethodId}`);
+
+        // Get the payment method details
+        const paymentMethodDetails = await prisma.userPaymentMethod.findUnique({
+          where: { id: selectedPaymentMethodId },
+          select: { id: true, token: true, provider: true, type: true }
+        });
+
+        console.log(`[DEBUG] Payment method details:`, paymentMethodDetails);
+
+        if (!paymentMethodDetails || paymentMethodDetails.provider !== 'stripe') {
+          console.error(`[DEBUG] Invalid payment method for booking ${booking.id}: ${JSON.stringify(paymentMethodDetails)}`);
+        } else {
+          // Authorize the payment (reserve funds)
+          const authResult = await authorizeCardPayment(booking, paymentMethodDetails);
+
+          console.log(`[DEBUG] Authorization result:`, authResult);
+
+          if (authResult.success) {
+            // Update booking with payment capture
+            await prisma.ride.update({
+              where: { id: booking.id },
+              data: {
+                status: 'CONFIRMED',
+                // paymentStatus is set by authorizeCardPayment
+                explanation: `Payment authorized - Transaction: ${authResult.transactionId}`,
+                paymentRef: authResult.transactionId // Store Payment Intent ID
+              }
+            });
+
+            console.log(`[DEBUG] Payment authorized for booking ${booking.id}, transaction: ${authResult.transactionId}`);
+
+            // Assign driver for the ride
+            await assignDriverToRide(booking.id);
+          } else {
+            console.error(`[DEBUG] Payment authorization failed for booking ${booking.id}: ${authResult.error}`);
+            // Keep booking as PENDING, payment method will be handled later
+          }
+        }
+      } catch (authError) {
+        console.error(`[DEBUG] Exception during payment authorization for booking ${booking.id}:`, authError);
+        // Don't fail the booking if payment authorization fails
+      }
+    } else {
+      console.log(`[DEBUG] Not authorizing payment: paymentMethod=${paymentMethod}, selectedPaymentMethodId=${selectedPaymentMethodId}`);
+    }
+
+    // Get updated booking status
+    const updatedBooking = await prisma.ride.findUnique({
+      where: { id: booking.id },
+      select: {
+        status: true,
+        paymentStatus: true,
+        explanation: true
+      }
+    });
+
     // Send notification to admin (async, don't wait)
     const adminEmail = process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL;
     if (adminEmail) {
       // Fetch current cancellation fees from settings
       const settings = await prisma.settings.findFirst();
 
-      const title = 'New scheduled booking (post-trip payment)';
+      const isPaymentAuthorized = updatedBooking?.status === 'CONFIRMED';
+      const title = isPaymentAuthorized ? 'New booking (payment authorized)' : 'New scheduled booking (post-trip payment)';
+      const paymentNote = isPaymentAuthorized
+        ? 'Payment has been authorized and a driver has been assigned. Payment will be captured upon trip completion.'
+        : 'Payment will be collected after trip completion.';
+
       import('@/lib/email').then(({ sendEmail }) =>
         sendEmail(
           adminEmail,
           `${title} #${booking.id}`,
-          `<p>New booking details (payment will be collected after trip completion):</p>
+          `<p>New booking details (${paymentNote}):</p>
           <ul>
             <li><strong>Booking ID:</strong> ${booking.id}</li>
             <li><strong>Customer:</strong> ${(user as any).firstName} ${(user as any).lastName} (${(user as any).email})</li>
@@ -402,7 +577,7 @@ export async function POST(request: NextRequest) {
             <li><strong>Duration:</strong> ${booking.durationMin} minutes</li>
             <li><strong>Price:</strong> ${booking.price} DKK</li>
             <li><strong>Payment Method:</strong> ${paymentMethod}</li>
-            <li><strong>Status:</strong> PENDING (awaiting payment confirmation)</li>
+            <li><strong>Status:</strong> ${updatedBooking?.status || 'PENDING'} (${updatedBooking?.explanation || 'awaiting payment confirmation'})</li>
           </ul>
           <h3>Cancellation Policy</h3>
           <p>Please inform the customer about our current cancellation policy:</p>
@@ -418,6 +593,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const message = updatedBooking?.status === 'CONFIRMED'
+      ? 'Booking confirmed successfully. Payment has been authorized and a driver will be assigned. Payment will be captured upon trip completion.'
+      : 'Booking created successfully. Payment will be collected after trip completion.';
+
     return NextResponse.json({
       ok: true,
       ride: {
@@ -427,12 +606,12 @@ export async function POST(request: NextRequest) {
         dropoffAddress: booking.dropoffAddress,
         pickupTime: booking.pickupTime.toISOString(),
         price: booking.price,
-        status: booking.status,
-        paymentStatus: booking.paymentStatus,
+        status: updatedBooking?.status || booking.status,
+        paymentStatus: updatedBooking?.paymentStatus || booking.paymentStatus,
         paymentMethod: booking.paymentMethod,
         vehicleType: (booking as any).vehicleType || { title: 'Standard', capacity: 4 }
       },
-      message: 'Booking confirmed successfully. Payment will be collected after trip completion.'
+      message
     }, { status: 201 });
 
   } catch (error) {

@@ -71,7 +71,25 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, ride: booking });
+    // Fetch driver info if assigned
+    let driverInfo = null;
+    if (booking.driverId) {
+      const driver = await prisma.comDriver.findUnique({
+        where: { id: booking.driverId },
+        select: {
+          id: true,
+          drFname: true,
+          drLname: true,
+          drPhone: true,
+          rating: true,
+          lastLocation: true,
+          car: true
+        }
+      });
+      driverInfo = driver;
+    }
+
+    return NextResponse.json({ ok: true, ride: { ...booking, driver: driverInfo } });
   } catch (e: any) {
     console.error('Error fetching booking:', e);
     return NextResponse.json({ ok: false, error: 'Internal server error' }, { status: 500 });

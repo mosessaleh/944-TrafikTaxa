@@ -86,7 +86,7 @@ export default function AddressAutocomplete({
         <div ref={dropdownRef} className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-b-xl shadow-lg z-10 max-h-60 overflow-y-auto">
           {suggestions.map((suggestion, index) => (
             <div
-              key={suggestion.id || index}
+              key={suggestion.id || suggestion.text}
               className="px-3 py-2 hover:bg-gray-100 cursor-pointer"
               onClick={() => handleSelect(suggestion)}
             >

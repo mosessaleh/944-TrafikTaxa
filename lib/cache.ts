@@ -19,6 +19,12 @@ const priceCache = new LRUCache<string, { price: number; timestamp: number }>({
   ttl: 1000 * 60 * 30, // 30 minutes TTL
 });
 
+// Cache for distance/duration calculations
+const distanceCache = new LRUCache<string, { distance: number; duration: number; timestamp: number }>({
+  max: 5000, // Maximum 5000 entries
+  ttl: 1000 * 60 * 15, // 15 minutes TTL
+});
+
 export class CacheManager {
   // API Response Caching
   static setApiCache(key: string, data: any): void {
@@ -62,6 +68,18 @@ export class CacheManager {
     return cached ? cached.price : null;
   }
 
+  // Distance/Duration Cache
+  static setDistanceCache(originLat: number, originLng: number, destLat: number, destLng: number, distance: number, duration: number): void {
+    const key = `dist:${originLat.toFixed(4)}:${originLng.toFixed(4)}:${destLat.toFixed(4)}:${destLng.toFixed(4)}`;
+    distanceCache.set(key, { distance, duration, timestamp: Date.now() });
+  }
+
+  static getDistanceCache(originLat: number, originLng: number, destLat: number, destLng: number): { distance: number; duration: number } | null {
+    const key = `dist:${originLat.toFixed(4)}:${originLng.toFixed(4)}:${destLat.toFixed(4)}:${destLng.toFixed(4)}`;
+    const cached = distanceCache.get(key);
+    return cached ? { distance: cached.distance, duration: cached.duration } : null;
+  }
+
   // Cache Statistics
   static getStats() {
     return {
@@ -77,6 +95,10 @@ export class CacheManager {
         size: priceCache.size,
         maxSize: priceCache.max,
       },
+      distanceCache: {
+        size: distanceCache.size,
+        maxSize: distanceCache.max,
+      },
     };
   }
 
@@ -85,6 +107,7 @@ export class CacheManager {
     apiCache.clear();
     geoCache.clear();
     priceCache.clear();
+    distanceCache.clear();
   }
 
   // Clear specific cache types
@@ -98,6 +121,10 @@ export class CacheManager {
 
   static clearPriceCache(): void {
     priceCache.clear();
+  }
+
+  static clearDistanceCache(): void {
+    distanceCache.clear();
   }
 }
 

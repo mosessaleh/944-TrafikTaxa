@@ -23,6 +23,7 @@ export async function middleware(req: NextRequest) {
     process.env.NODE_ENV === 'production'
       ? process.env.PUBLIC_BASE_URL || 'https://944.dk'
       : 'http://localhost:3000',
+    'http://192.168.0.146:3000', // Driver app origin
     // Add additional allowed origins if needed
   ].filter(Boolean);
 

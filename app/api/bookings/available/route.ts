@@ -13,41 +13,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get available bookings (confirmed, paid, not assigned to driver or car)
-    const availableBookings = await prisma.ride.findMany({
-      where: {
-        status: 'CONFIRMED',
-        paymentMethod: { not: null },
-        driverId: null,
-        car: null
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            phone: true,
-          }
-        },
-        vehicleType: {
-          select: {
-            id: true,
-            title: true,
-            capacity: true
-          }
-        }
-      },
-      orderBy: {
-        pickupTime: 'asc'
-      }
-    });
-
-    console.log(`[API] Driver ${driver.id} requested available bookings, found ${availableBookings.length} (filtered by new criteria)`);
+    // Note: This API is deprecated. New system uses WebSocket for real-time ride assignment.
+    // Return empty array to indicate no rides available via polling
+    console.log(`[API] Driver ${driver.id} requested available bookings via deprecated API. New system uses WebSocket.`);
 
     return NextResponse.json({
       ok: true,
-      rides: availableBookings
+      rides: [],
+      message: 'Rides are now assigned via WebSocket. Please use the updated driver app.'
     });
 
   } catch (error) {

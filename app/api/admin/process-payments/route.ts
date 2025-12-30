@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromCookie } from '@/lib/auth';
 import { prisma } from '@/lib/db';
-import { processCompletedTripPayments, retryFailedPayments } from '@/lib/payment-processor';
+import { processCompletedTripPayments, retryFailedPayments, chargeSavedPaymentMethod } from '@/lib/payment-processor';
 
 /**
  * POST /api/admin/process-payments - Manually trigger payment processing
@@ -15,13 +15,44 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { action = 'process' } = await request.json().catch(() => ({}));
+    const body = await request.json().catch(() => ({}));
+    const { action = 'process', rideId } = body;
 
     let results;
 
     if (action === 'retry') {
       // Retry failed payments
       results = await retryFailedPayments();
+    } else if (action === 'process_single' && rideId) {
+      // Process single ride payment
+      const ride = await prisma.ride.findUnique({
+        where: { id: parseInt(rideId) },
+        include: { savedPaymentMethod: true, user: true }
+      });
+
+      if (!ride) {
+        return NextResponse.json({ error: 'Ride not found' }, { status: 404 });
+      }
+
+      // Attach the payment method to the ride object as expected by chargeSavedPaymentMethod
+      const rideWithPaymentMethod = {
+        ...ride,
+        userpaymentmethod: ride.savedPaymentMethod
+      };
+
+      if (!ride) {
+        return NextResponse.json({ error: 'Ride not found' }, { status: 404 });
+      }
+
+      const paymentResult = await chargeSavedPaymentMethod(rideWithPaymentMethod);
+
+      results = {
+        processed: 1,
+        successful: paymentResult.success ? 1 : 0,
+        failed: paymentResult.success ? 0 : 1,
+        errors: paymentResult.success ? [] : [paymentResult.error || 'Payment failed'],
+        transactionId: paymentResult.transactionId
+      };
     } else {
       // Process completed trip payments
       results = await processCompletedTripPayments();

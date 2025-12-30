@@ -46,16 +46,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // Assign ride to driver
-    console.log(`[DEBUG] Updating booking ${rideId} status to ONGOING for driver acceptance`);
+    console.log(`[ACCEPT] Updating booking ${rideId} status to ONGOING for driver ${driverId} acceptance`);
     await prisma.ride.update({
       where: { id: rideId },
       data: {
         driverId: driverId,
         car: driver.car, // Add car plate number
-        status: 'ONGOING'
+        status: 'ONGOING',
+        acceptedAt: new Date()
       }
     });
-    console.log(`[DEBUG] Booking ${rideId} status updated to ONGOING`);
+    console.log(`[ACCEPT] Booking ${rideId} status updated to ONGOING, driverId: ${driverId}, car: ${driver.car}`);
 
     // Update driver status
     await prisma.comDriver.update({

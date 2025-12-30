@@ -39,8 +39,15 @@ export async function processCompletedTripPayments(): Promise<{
         status: 'COMPLETED',
         OR: [
           { paymentStatus: 'PENDING_PAYMENT' },
+          { paymentStatus: 'UNPAID' },
+          { paymentStatus: 'AUTHORIZED' }, // Authorized payments that need to be captured
           {
             paymentStatus: 'PENDING_PAYMENT',
+            paymentRetryCount: { lt: 5 },
+            paymentNextRetry: { lte: now }
+          },
+          {
+            paymentStatus: 'UNPAID',
             paymentRetryCount: { lt: 5 },
             paymentNextRetry: { lte: now }
           }
@@ -48,7 +55,7 @@ export async function processCompletedTripPayments(): Promise<{
         savedPaymentMethodId: { not: null }
       },
       include: {
-        userpaymentmethod: true,
+        savedPaymentMethod: true,
         user: true
       }
     });
@@ -90,9 +97,11 @@ export async function processCompletedTripPayments(): Promise<{
 }
 
 /**
- * Authorize card payment without capture (for booking confirmation)
+ * Authorize and capture card payment (for booking confirmation)
  */
 export async function authorizeCardPayment(booking: any, paymentMethod: any): Promise<PaymentResult> {
+  console.log(`[DEBUG] authorizeCardPayment called for booking ${booking.id}, paymentMethod:`, paymentMethod);
+
   if (!paymentMethod || paymentMethod.provider !== 'stripe') {
     return {
       success: false,
@@ -109,6 +118,8 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
       select: { stripeCustomerId: true }
     });
 
+    console.log(`[DEBUG] User stripeCustomerId:`, user?.stripeCustomerId);
+
     if (!user?.stripeCustomerId) {
       return {
         success: false,
@@ -116,46 +127,71 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
       };
     }
 
-    // Create payment intent with manual capture (authorization only)
+    // Ensure the payment method is attached to the customer
+    try {
+      await stripeClient.paymentMethods.attach(paymentMethod.token, { customer: user.stripeCustomerId });
+    } catch (attachError: any) {
+      // Ignore if already attached
+      if (!attachError.message?.includes('already attached')) {
+        console.log(`[DEBUG] Attach error (non-critical):`, attachError.message);
+      }
+    }
+
+    // Create payment intent with manual capture (authorize only)
     const paymentIntent = await stripeClient.paymentIntents.create({
       amount: Math.round(booking.price * 100), // Convert to øre
       currency: 'dkk',
-      payment_method: paymentMethod.token, // Stripe payment method ID
       customer: user.stripeCustomerId, // Required for payment methods from setup intents
-      confirm: true, // Confirm immediately
-      capture_method: 'manual', // Authorize only, don't capture
-      automatic_payment_methods: {
-        enabled: true,
-        allow_redirects: 'never' // Prevent redirect-based payment methods
-      }
+      payment_method_types: ['card'],
+      confirm: false, // Don't confirm yet
+      capture_method: 'manual' // Authorize only, capture later
     });
 
-    if (paymentIntent.status === 'requires_capture') {
+    // Confirm the payment intent with the specific payment method
+    const confirmedIntent = await stripeClient.paymentIntents.confirm(paymentIntent.id, {
+      payment_method: paymentMethod.token
+    });
+
+    if (confirmedIntent.status === 'requires_capture') {
       // Payment authorized successfully - save Payment Intent ID for later capture
       await (prisma as any).ride.update({
         where: { id: booking.id },
         data: {
-          paymentRef: paymentIntent.id // Store Payment Intent ID for capture
+          paymentStatus: 'AUTHORIZED', // Payment is authorized but not captured yet
+          paymentRef: confirmedIntent.id // Store Payment Intent ID
         }
       });
 
       return {
         success: true,
-        transactionId: paymentIntent.id
+        transactionId: confirmedIntent.id
       };
-    } else if (paymentIntent.status === 'requires_action') {
+    } else if (confirmedIntent.status === 'succeeded') {
+      // Payment captured successfully (unexpected for manual capture, but handle it)
+      await (prisma as any).ride.update({
+        where: { id: booking.id },
+        data: {
+          paymentRef: confirmedIntent.id // Store Payment Intent ID
+        }
+      });
+
+      return {
+        success: true,
+        transactionId: confirmedIntent.id
+      };
+    } else if (confirmedIntent.status === 'requires_action') {
       // Handle 3D Secure or other authentication requirements
       return {
         success: false,
         requiresAction: true,
-        actionUrl: paymentIntent.next_action?.redirect_to_url?.url || undefined,
+        actionUrl: confirmedIntent.next_action?.redirect_to_url?.url || undefined,
         error: 'Customer authentication required'
       };
     } else {
-      // Authorization failed
+      // Payment failed
       return {
         success: false,
-        error: `Authorization ${paymentIntent.status}: ${paymentIntent.last_payment_error?.message || 'Unknown error'}`
+        error: `Payment ${confirmedIntent.status}: ${confirmedIntent.last_payment_error?.message || 'Unknown error'}`
       };
     }
 
@@ -183,10 +219,13 @@ export async function chargeSavedPaymentMethod(trip: any): Promise<PaymentResult
   console.log(`Trip data:`, {
     savedPaymentMethodId: trip.savedPaymentMethodId,
     paymentMethod: trip.paymentMethod,
+    paymentStatus: trip.paymentStatus,
+    paymentRef: trip.paymentRef,
+    price: trip.price,
     hasUserPaymentMethod: !!trip.userpaymentmethod
   });
 
-  const paymentMethod = trip.userpaymentmethod;
+  const paymentMethod = trip.savedPaymentMethod;
 
   if (!paymentMethod) {
     console.log(`❌ No saved payment method found for trip ${trip.id}`);
@@ -229,91 +268,111 @@ export async function chargeSavedPaymentMethod(trip: any): Promise<PaymentResult
 async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise<PaymentResult> {
   const stripeClient = stripe();
 
+  console.log(`🔄 Processing Stripe payment for trip ${trip.id}, paymentMethod:`, {
+    id: paymentMethod.id,
+    token: paymentMethod.token,
+    provider: paymentMethod.provider,
+    type: paymentMethod.type
+  });
+
   try {
+    // Check if payment was already captured
+    if (trip.paymentStatus === 'PAID' && trip.paymentRef) {
+      console.log(`✅ Payment already captured for trip ${trip.id}, transaction: ${trip.paymentRef}`);
+      return {
+        success: true,
+        transactionId: trip.paymentRef
+      };
+    }
+
     // Check if we have a stored Payment Intent ID for capture
     if (trip.paymentRef) {
-      console.log(`🔄 Capturing existing Payment Intent: ${trip.paymentRef}`);
+      console.log(`🔄 Attempting to capture existing Payment Intent: ${trip.paymentRef}`);
 
-      // Capture the existing authorized payment
-      const capturedPaymentIntent = await stripeClient.paymentIntents.capture(trip.paymentRef);
+      try {
+        // Capture the existing authorized payment
+        const capturedPaymentIntent = await stripeClient.paymentIntents.capture(trip.paymentRef);
 
-      if (capturedPaymentIntent.status === 'succeeded') {
-        // Update trip payment status
-        await updateTripPaymentSuccess(trip.id, {
-          transactionId: capturedPaymentIntent.id,
-          provider: 'stripe',
-          amount: trip.price
-        });
+        if (capturedPaymentIntent.status === 'succeeded') {
+          // Update trip payment status
+          await updateTripPaymentSuccess(trip.id, {
+            transactionId: capturedPaymentIntent.id,
+            provider: 'stripe',
+            amount: trip.price
+          });
 
-        return {
-          success: true,
-          transactionId: capturedPaymentIntent.id
-        };
-      } else {
-        return {
-          success: false,
-          error: `Capture failed: ${capturedPaymentIntent.status}`
-        };
-      }
-    } else {
-      // Fallback: Create new payment intent (for backward compatibility)
-      console.log(`⚠️ No stored Payment Intent found, creating new one for trip ${trip.id}`);
-
-      // Get the user's Stripe customer ID from database
-      const user = await prisma.user.findUnique({
-        where: { id: trip.userId },
-        select: { stripeCustomerId: true }
-      });
-
-      if (!user?.stripeCustomerId) {
-        return {
-          success: false,
-          error: 'User does not have a Stripe customer account'
-        };
-      }
-
-      // Create payment intent with saved payment method
-      const paymentIntent = await stripeClient.paymentIntents.create({
-        amount: Math.round(trip.price * 100), // Convert to øre
-        currency: 'dkk',
-        payment_method: paymentMethod.token, // Stripe payment method ID
-        customer: user.stripeCustomerId, // Required for payment methods from setup intents
-        confirm: true, // Confirm immediately
-        automatic_payment_methods: {
-          enabled: true,
-          allow_redirects: 'never' // Prevent redirect-based payment methods
+          return {
+            success: true,
+            transactionId: capturedPaymentIntent.id
+          };
+        } else {
+          console.log(`⚠️ Capture failed with status: ${capturedPaymentIntent.status}, falling back to new payment intent`);
         }
+      } catch (captureError: any) {
+        console.log(`⚠️ Capture exception: ${captureError.message}, falling back to new payment intent`);
+      }
+    }
+
+    // Fallback: Create new payment intent
+    console.log(`💳 Creating new payment intent for trip ${trip.id}`);
+
+    // Get the user's Stripe customer ID from database
+    const user = await prisma.user.findUnique({
+      where: { id: trip.userId },
+      select: { stripeCustomerId: true }
+    });
+
+    console.log(`User stripeCustomerId for trip ${trip.id}:`, user?.stripeCustomerId);
+
+    if (!user?.stripeCustomerId) {
+      console.log(`❌ No Stripe customer ID found for user ${trip.userId} in trip ${trip.id}`);
+      return {
+        success: false,
+        error: 'User does not have a Stripe customer account'
+      };
+    }
+
+    // Create payment intent with saved payment method
+    const paymentIntent = await stripeClient.paymentIntents.create({
+      amount: Math.round(trip.price * 100), // Convert to øre
+      currency: 'dkk',
+      payment_method: paymentMethod.token, // Stripe payment method ID
+      customer: user.stripeCustomerId, // Required for payment methods from setup intents
+      confirm: true, // Confirm immediately
+      automatic_payment_methods: {
+        enabled: true,
+        allow_redirects: 'never' // Prevent redirect-based payment methods
+      }
+    });
+
+    if (paymentIntent.status === 'succeeded') {
+      // Update trip payment status
+      await updateTripPaymentSuccess(trip.id, {
+        transactionId: paymentIntent.id,
+        provider: 'stripe',
+        amount: trip.price
       });
 
-      if (paymentIntent.status === 'succeeded') {
-        // Update trip payment status
-        await updateTripPaymentSuccess(trip.id, {
-          transactionId: paymentIntent.id,
-          provider: 'stripe',
-          amount: trip.price
-        });
+      return {
+        success: true,
+        transactionId: paymentIntent.id
+      };
+    } else if (paymentIntent.status === 'requires_action') {
+      // Handle 3D Secure or other authentication requirements
+      await updateTripPaymentRequiresAction(trip.id, paymentIntent);
 
-        return {
-          success: true,
-          transactionId: paymentIntent.id
-        };
-      } else if (paymentIntent.status === 'requires_action') {
-        // Handle 3D Secure or other authentication requirements
-        await updateTripPaymentRequiresAction(trip.id, paymentIntent);
-
-        return {
-          success: false,
-          requiresAction: true,
-          actionUrl: paymentIntent.next_action?.redirect_to_url?.url || undefined,
-          error: 'Customer authentication required'
-        };
-      } else {
-        // Payment failed
-        return {
-          success: false,
-          error: `Payment ${paymentIntent.status}: ${paymentIntent.last_payment_error?.message || 'Unknown error'}`
-        };
-      }
+      return {
+        success: false,
+        requiresAction: true,
+        actionUrl: paymentIntent.next_action?.redirect_to_url?.url || undefined,
+        error: 'Customer authentication required'
+      };
+    } else {
+      // Payment failed
+      return {
+        success: false,
+        error: `Payment ${paymentIntent.status}: ${paymentIntent.last_payment_error?.message || 'Unknown error'}`
+      };
     }
 
   } catch (error: any) {
@@ -388,6 +447,22 @@ async function updateTripPaymentSuccess(
   });
 
   console.log(`✅ Updated ride ${tripId} payment status to PAID, method: ${updateData.paymentMethod || currentRide?.paymentMethod}`);
+
+  // Record the payment in CardPayment table for card transactions
+  if (paymentData.provider === 'stripe') {
+    try {
+      await prisma.cardPayment.create({
+        data: {
+          userId: null, // Will be set if we have user context
+          amountDkk: paymentData.amount / 100, // Convert from øre to DKK
+          status: 'paid'
+        }
+      });
+      console.log(`✅ Recorded card payment for ride ${tripId} in CardPayment table`);
+    } catch (cardPaymentError: any) {
+      console.error(`❌ Failed to record card payment for ride ${tripId}:`, cardPaymentError);
+    }
+  }
 
   // TODO: Create receipt/invoice record
   // TODO: Send payment confirmation notification
@@ -467,13 +542,23 @@ export async function retryFailedPayments(): Promise<{
     // Find trips eligible for retry
     const eligibleForRetry = await (prisma as any).ride.findMany({
       where: {
-        paymentStatus: 'PENDING_PAYMENT',
-        paymentRetryCount: { lt: 5 }, // Max 5 retries
-        paymentNextRetry: { lte: now },
-        savedPaymentMethodId: { not: null }
+        OR: [
+          {
+            paymentStatus: 'PENDING_PAYMENT',
+            paymentRetryCount: { lt: 5 }, // Max 5 retries
+            paymentNextRetry: { lte: now },
+            savedPaymentMethodId: { not: null }
+          },
+          {
+            paymentStatus: 'UNPAID',
+            paymentRetryCount: { lt: 5 }, // Max 5 retries
+            paymentNextRetry: { lte: now },
+            savedPaymentMethodId: { not: null }
+          }
+        ]
       },
       include: {
-        userpaymentmethod: true,
+        savedPaymentMethod: true,
         user: true
       }
     });

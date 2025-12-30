@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
       paypalPayments,
       revolutPayments,
       invoicePayments,
+      pendingRidePayments,
     ] = await Promise.all([
       prisma.cardPayment.findMany({
         orderBy: { createdAt: 'desc' },
@@ -87,6 +88,29 @@ export async function GET(request: NextRequest) {
         },
         orderBy: { createdAt: 'desc' },
       }) as any,
+      prisma.ride.findMany({
+        where: {
+          status: 'COMPLETED',
+          OR: [
+            { paymentStatus: 'PENDING_PAYMENT' },
+            { paymentStatus: 'UNPAID' },
+            { paymentStatus: 'AUTHORIZED' }, // Authorized payments that need to be captured
+          ],
+          savedPaymentMethodId: { not: null },
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          savedPaymentMethod: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      }) as any,
     ]);
 
     // Collect user IDs from payment tables to hydrate user info
@@ -119,6 +143,11 @@ export async function GET(request: NextRequest) {
     for (const inv of invoicePayments) {
       if (inv.userId) {
         userIdSet.add(inv.userId);
+      }
+    }
+    for (const ride of pendingRidePayments) {
+      if (ride.userId) {
+        userIdSet.add(ride.userId);
       }
     }
 
@@ -320,6 +349,37 @@ export async function GET(request: NextRequest) {
           paymentRef: inv.paymentRef,
           receiptNumber: inv.receiptNumber,
           rideId: inv.ride?.id,
+        },
+      });
+    }
+
+    // Pending ride payments (unprocessed card payments)
+    for (const ride of pendingRidePayments) {
+      const user = ride.user
+        ? {
+            id: ride.user.id,
+            firstName: ride.user.firstName,
+            lastName: ride.user.lastName,
+            email: ride.user.email,
+          }
+        : null;
+
+      pushItem({
+        id: `ride:${ride.id}`,
+        sourceId: String(ride.id),
+        type: 'card',
+        methodKey: 'card',
+        amountDkk: Number(ride.price || 0),
+        status: String(ride.paymentStatus || 'PENDING_PAYMENT'),
+        createdAt: (ride.createdAt instanceof Date ? ride.createdAt : new Date(ride.createdAt)).toISOString(),
+        user,
+        invoiceId: null,
+        invoiceNumber: null,
+        extra: {
+          provider: 'Stripe',
+          rideId: ride.id,
+          paymentMethod: ride.paymentMethod,
+          savedPaymentMethodId: ride.savedPaymentMethodId,
         },
       });
     }
