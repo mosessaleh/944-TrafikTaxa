@@ -18,8 +18,8 @@ export function signToken(payload: Record<string, any>){
 export async function hashPassword(password: string){ return hsh(password); }
 export async function comparePassword(plain: string, hashed: string){ return cmp(plain, hashed); }
 
-export function setSessionCookie(token: string){
-  const jar = cookies();
+export async function setSessionCookie(token: string){
+  const jar = await cookies();
   const isProd = process.env.NODE_ENV === 'production';
 
   // Improved secure cookie detection
@@ -56,8 +56,8 @@ export function setSessionCookie(token: string){
   }
 }
 
-export function clearSessionCookie(){
-  const jar = cookies();
+export async function clearSessionCookie(){
+  const jar = await cookies();
   const isProd = process.env.NODE_ENV === 'production';
   const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
   const secure = isProd ? true : envSecure;
@@ -78,7 +78,7 @@ export function clearSessionCookie(){
 }
 
 export async function getUserFromCookie(){
-  const jar = cookies();
+  const jar = await cookies();
   const isProd = process.env.NODE_ENV === 'production';
   const primaryName = isProd ? '__Host-session' : 'session';
   const fallbackName = primaryName === '__Host-session' ? 'session' : '__Host-session';

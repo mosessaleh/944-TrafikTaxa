@@ -503,6 +503,7 @@ model comDriver {
   drPass         String      // Will store hashed password
   apiKey         String?     @unique // API key for server-to-server calls
   lastLocation   Json?       // {lat: float, lon: float}
+  penaltyUntil   DateTime?   // Penalty until this time
   createdAt      DateTime    @default(now())
 
   company PartnerCompany @relation(fields: [comId], references: [id])
@@ -512,6 +513,7 @@ model comDriver {
   @@index([isOnline])
   @@index([currentRideId])
   @@index([apiKey])
+  @@index([penaltyUntil])
 }
 
 model comVehicles {

@@ -36,7 +36,7 @@ export async function POST(req: NextRequest){
     }
 
     const token = signToken({ id: driver.id, type: 'driver' });
-    setSessionCookie(token);
+    await setSessionCookie(token);
 
     return NextResponse.json({ ok:true, message:'Logged in successfully' });
   }catch(e:any){

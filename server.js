@@ -258,7 +258,13 @@ app.prepare().then(() => {
     // Get driver details from database
     const driverIds = availableDrivers.map(d => d.driverId);
     const drivers = await prisma.comDriver.findMany({
-      where: { id: { in: driverIds } },
+      where: {
+        id: { in: driverIds },
+        OR: [
+          { penaltyUntil: null },
+          { penaltyUntil: { lt: new Date() } }
+        ]
+      },
       select: {
         id: true,
         car: true,
@@ -335,19 +341,19 @@ app.prepare().then(() => {
     }));
 
     // Calculate scores
-    const driverScores = candidateResults.map((item) => {
-      const driver = drivers.find(d => d.id === item.driver.driverId);
+    const driverScores = candidateResults.map((candidate) => {
+      const driver = drivers.find(d => d.id === candidate.driver.driverId);
       if (!driver) return null;
 
       const commissionRate = companyMap.get(driver.comId) || 0;
       const income = incomeMap.get(driver.car) || 0;
 
-      let distance = item.distance;
-      let etaMinutes = item.etaMinutes;
+      let distance = candidate.distance;
+      let etaMinutes = candidate.etaMinutes;
 
       // Check profitability if ETA > 21 minutes
       if (etaMinutes > 21 && ride.endLatLon) {
-        const tripDistance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, ride.endLatLon.lat, ride.endLatLon.lon);
+        const tripDistance = calculateDistance({lat: ride.startLatLon.lat, lng: ride.startLatLon.lon}, {lat: ride.endLatLon.lat, lng: ride.endLatLon.lon});
         const timeToPickupHours = distance / 30;
         const tripTimeHours = tripDistance / 30;
         const returnTimeHours = tripDistance / 30;
@@ -362,13 +368,13 @@ app.prepare().then(() => {
           const minHourlyRate = ride.vehicleTypeId === 1 ? 450 : ride.vehicleTypeId === 2 ? 500 : ride.vehicleTypeId === 3 ? 600 : 800;
 
           if (pricePerHour < minHourlyRate - 20) { // Allow 20 DKK less
-            console.log(`Driver ${item.driver.driverId} not profitable: ${pricePerHour} DKK/h < ${minHourlyRate} DKK/h`);
+            console.log(`Driver ${candidate.driver.driverId} not profitable: ${pricePerHour} DKK/h < ${minHourlyRate} DKK/h`);
             return null; // Exclude this driver
           }
         }
       }
 
-      console.log(`Driver ${item.driver.driverId}: Distance ${distance}km, ETA ${etaMinutes}min`);
+      console.log(`Driver ${candidate.driver.driverId}: Distance ${distance}km, ETA ${etaMinutes}min`);
 
       // Scoring system
       let score = 0;
@@ -458,7 +464,13 @@ app.prepare().then(() => {
       });
 
       for (const ride of newRides) {
-        console.log(`Checking ride ${ride.id} with vehicleTypeId ${ride.vehicleTypeId}, pickup: ${ride.pickupLat}, ${ride.pickupLng}`);
+        // Skip rides without coordinates
+        if (!ride.startLatLon || !ride.startLatLon.lat || !ride.startLatLon.lon) {
+          console.log(`Skipping ride ${ride.id} - missing coordinates`);
+          continue;
+        }
+
+        console.log(`Checking ride ${ride.id} with vehicleTypeId ${ride.vehicleTypeId}, pickup: ${ride.startLatLon.lat}, ${ride.startLatLon.lon}`);
         console.log(`Connected drivers count: ${connectedDrivers.size}`);
 
         // New strategy based on vehicle type
@@ -494,7 +506,7 @@ app.prepare().then(() => {
             }));
 
           const within10 = availableDrivers.filter(driver => {
-            const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+            const distance = calculateDistance({lat: ride.startLatLon.lat, lng: ride.startLatLon.lon}, driver.location);
             const eta = Math.ceil((distance / 30) * 60);
             return eta <= 10;
           });
@@ -524,7 +536,7 @@ app.prepare().then(() => {
               }));
 
             const within10 = availableDrivers.filter(driver => {
-              const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+              const distance = calculateDistance({lat: ride.startLatLon.lat, lng: ride.startLatLon.lon}, driver.location);
               const eta = Math.ceil((distance / 30) * 60);
               return eta <= 10;
             });
@@ -553,7 +565,7 @@ app.prepare().then(() => {
             }));
 
           const within10 = availableDrivers.filter(driver => {
-            const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+            const distance = calculateDistance({lat: ride.startLatLon.lat, lng: ride.startLatLon.lon}, driver.location);
             const eta = Math.ceil((distance / 30) * 60);
             return eta <= 10;
           });
@@ -590,7 +602,7 @@ app.prepare().then(() => {
             }));
 
           availableDrivers = availableDrivers.filter(driver => {
-            const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+            const distance = calculateDistance({lat: ride.startLatLon.lat, lng: ride.startLatLon.lon}, driver.location);
             const eta = Math.ceil((distance / 30) * 60);
             return eta >= 11 && eta <= 20;
           });
@@ -689,6 +701,14 @@ app.prepare().then(() => {
                 console.log(`Ride ${ride.id} accepted by driver ${driverScore.driver.driverId}`);
               } else {
                 console.log(`Ride ${ride.id} not accepted by driver ${driverScore.driver.driverId}`);
+                // Reset currentRideId since the driver didn't accept
+                await prisma.comDriver.update({
+                  where: { id: driverScore.driver.driverId },
+                  data: {
+                    currentRideId: null,
+                    rideAccepted: 0
+                  }
+                });
               }
               resolve(null);
             }, 30000);
@@ -725,8 +745,33 @@ app.prepare().then(() => {
     return deg * (Math.PI/180);
   }
 
+  // Function to retry timed-out assignments
+  const retryTimedOutAssignments = async () => {
+    try {
+      console.log('Checking for timed-out ride assignments...');
+      const response = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/admin/retry-assignments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Retry assignments result:', result);
+      } else {
+        console.error('Failed to retry assignments:', response.status);
+      }
+    } catch (error) {
+      console.error('Error retrying assignments:', error);
+    }
+  };
+
   // Check for new rides every 10 seconds
   setInterval(checkForNewRides, 10000);
+
+  // Retry timed-out assignments every 30 seconds
+  setInterval(retryTimedOutAssignments, 30000);
 
   server.listen(3000, (err) => {
     if (err) throw err;

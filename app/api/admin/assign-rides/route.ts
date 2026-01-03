@@ -302,11 +302,9 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      // Try to assign to selected vehicles in order
-      let assigned = false;
+      // Send ride offer to all selected drivers simultaneously
+      const offeredDrivers = [];
       for (const vehicleId of selectedVehicles) {
-        if (assigned) break;
-
         const driverId = vehicleToDriverMap.get(vehicleId);
         if (!driverId) {
           console.log(`[ASSIGN] No driver found for vehicle ${vehicleId}, skipping`);
@@ -324,8 +322,7 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Only update driver status - DO NOT update ride status/car/driverId yet
-        // These will be updated when driver accepts the ride
+        // Update driver status - set currentRideId and rideAccepted to 0 (offered)
         await prisma.comDriver.update({
           where: { id: driverId },
           data: {
@@ -334,6 +331,8 @@ export async function POST(request: NextRequest) {
             // Keep isBusy as false until ride is accepted
           }
         });
+
+        offeredDrivers.push(driverId);
 
         // Send WebSocket notification to driver
         const io = getSocketServer();
@@ -349,8 +348,9 @@ export async function POST(request: NextRequest) {
         }
 
         console.log(`[ASSIGN] Ride ${ride.id} offered to driver ${driverId} via vehicle ${vehicleId}`);
-        assigned = true;
       }
+
+      const assigned = offeredDrivers.length > 0;
 
       if (!assigned) {
         console.log(`No driver accepted ride ${ride.id}`);
