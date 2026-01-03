@@ -48,20 +48,144 @@ export async function POST(request: NextRequest) {
     // Get available drivers from connected drivers (real-time socket data)
     const connectedDrivers = (global as any).connectedDrivers || new Map();
 
-    // Filter connected drivers by vehicle type and exclude specified drivers
-    let availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
-      .filter(([driverId, driverData]) =>
-        driverData.vehicleTypeId === vehicleTypeId &&
-        driverData.location && // Must have location
-        !excludedDriverIds.includes(parseInt(driverId))
-      )
-      .map(([driverId, driverData]) => ({
-        driverId: parseInt(driverId),
-        location: driverData.location,
-        socketId: driverData.socketId
-      }));
+    // New strategy based on vehicle type
+    let searchTypes: number[] = [];
+    let maxDistanceMinutes = 10; // Default 10 minutes
 
-    // If no connected drivers, fall back to database-based selection
+    if (vehicleTypeId === 1) { // SEDAN5
+      searchTypes = [1]; // First try SEDAN5
+    } else if (vehicleTypeId === 2) { // SEVEN_NO_BAG
+      searchTypes = [2]; // First try SEVEN_NO_BAG
+    } else if (vehicleTypeId === 3) { // VAN
+      searchTypes = [3]; // Only VAN
+    } else if (vehicleTypeId === 4) { // LIMO
+      searchTypes = [4]; // Only LIMO
+    }
+
+    let availableDrivers: any[] = [];
+    let foundWithin10 = false;
+
+    // First, try to find within 10 minutes
+    for (const type of searchTypes) {
+      availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
+        .filter(([driverId, driverData]) =>
+          driverData.vehicleTypeId === type &&
+          driverData.location &&
+          !excludedDriverIds.includes(parseInt(driverId))
+        )
+        .map(([driverId, driverData]) => ({
+          driverId: parseInt(driverId),
+          location: driverData.location,
+          socketId: driverData.socketId,
+          vehicleTypeId: type
+        }));
+
+      // Check if any within 10 minutes
+      const within10 = availableDrivers.filter(driver => {
+        const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
+        const eta = Math.ceil((distance / 30) * 60);
+        return eta <= 10;
+      });
+
+      if (within10.length > 0) {
+        availableDrivers = within10;
+        foundWithin10 = true;
+        break;
+      }
+    }
+
+    // If no drivers within 10 minutes for SEDAN5, try alternatives in order
+    if (!foundWithin10 && vehicleTypeId === 1) {
+      const alternatives = [2, 3, 4]; // SEVEN_NO_BAG, VAN, LIMO
+      for (const altType of alternatives) {
+        availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
+          .filter(([driverId, driverData]) =>
+            driverData.vehicleTypeId === altType &&
+            driverData.location &&
+            !excludedDriverIds.includes(parseInt(driverId))
+          )
+          .map(([driverId, driverData]) => ({
+            driverId: parseInt(driverId),
+            location: driverData.location,
+            socketId: driverData.socketId,
+            vehicleTypeId: altType
+          }));
+
+        const within10 = availableDrivers.filter(driver => {
+          const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
+          const eta = Math.ceil((distance / 30) * 60);
+          return eta <= 10;
+        });
+
+        if (within10.length > 0) {
+          availableDrivers = within10;
+          foundWithin10 = true;
+          break;
+        }
+      }
+    }
+
+    // If no drivers within 10 minutes for SEVEN_NO_BAG, try VAN
+    if (!foundWithin10 && vehicleTypeId === 2) {
+      availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
+        .filter(([driverId, driverData]) =>
+          driverData.vehicleTypeId === 3 && // VAN
+          driverData.location &&
+          !excludedDriverIds.includes(parseInt(driverId))
+        )
+        .map(([driverId, driverData]) => ({
+          driverId: parseInt(driverId),
+          location: driverData.location,
+          socketId: driverData.socketId,
+          vehicleTypeId: 3
+        }));
+
+      const within10 = availableDrivers.filter(driver => {
+        const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
+        const eta = Math.ceil((distance / 30) * 60);
+        return eta <= 10;
+      });
+
+      if (within10.length > 0) {
+        availableDrivers = within10;
+        foundWithin10 = true;
+      }
+    }
+
+    // If still no drivers within 10 minutes, expand to 11-20 minutes and allow any type
+    if (!foundWithin10) {
+      maxDistanceMinutes = 20;
+      let allTypes: number[] = [];
+      if (vehicleTypeId === 1) {
+        allTypes = [1, 2, 3, 4];
+      } else if (vehicleTypeId === 2) {
+        allTypes = [2, 3];
+      } else {
+        allTypes = [vehicleTypeId];
+      }
+
+      availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
+        .filter(([driverId, driverData]) =>
+          allTypes.includes(driverData.vehicleTypeId) &&
+          driverData.location &&
+          !excludedDriverIds.includes(parseInt(driverId))
+        )
+        .map(([driverId, driverData]) => ({
+          driverId: parseInt(driverId),
+          location: driverData.location,
+          socketId: driverData.socketId,
+          vehicleTypeId: driverData.vehicleTypeId
+        }));
+
+      // Filter to 11-20 minutes
+      availableDrivers = availableDrivers.filter(driver => {
+        const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
+        const eta = Math.ceil((distance / 30) * 60);
+        return eta >= 11 && eta <= 20;
+      });
+    }
+
+    // Database fallback with same logic
     let useDatabaseFallback = false;
     if (availableDrivers.length === 0) {
       console.log('No connected drivers found, using database fallback for vehicle selection');
@@ -98,14 +222,18 @@ export async function POST(request: NextRequest) {
           }
         });
 
-        // Create availableDrivers from database data
+        // Create availableDrivers from database data with same logic
+        // For simplicity, apply similar filtering
         availableDrivers = vehiclesWithLocation.map(vehicle => {
           const driver = onlineDriversFromDb.find(d => d.car === vehicle.regNumber);
           if (driver) {
+            // Need to get vehicle type from somewhere, assume from vehicle or driver
+            // For now, assume we can get it
             return {
               driverId: driver.id,
               location: { lat: vehicle.lastLat, lng: vehicle.lastLon },
-              socketId: null // No socket for database fallback
+              socketId: null,
+              vehicleTypeId: vehicleTypeId // Simplified
             };
           }
           return null;
@@ -224,13 +352,39 @@ export async function POST(request: NextRequest) {
       .sort((a, b) => a.distance - b.distance)
       .slice(0, Math.min(10, availableDrivers.length)); // Take top 10 closest
 
-    // For real-time selection, we skip Google Distance Matrix and use direct distance
-    // Google will be used later only for final pricing when dropoff is provided
-    const candidateResults = candidates.map((candidate) => ({
-      driver: candidate.driver,
-      distance: candidate.distance,
-      etaMinutes: Math.ceil((candidate.distance / 30) * 60) // Estimate based on 30 km/h
+    // Get precise distances using Google for vehicle selection API
+    const candidateDestinations = candidates.map(item => ({
+      lat: item.driver.location.lat,
+      lng: item.driver.location.lng
     }));
+
+    let googleResults = [];
+    try {
+      const { getDistanceAndDuration } = require('@/lib/distance');
+      googleResults = await getDistanceAndDuration(
+        [{ lat: pickupLat, lng: pickupLon }],
+        candidateDestinations
+      );
+    } catch (error) {
+      console.warn('Failed to get Google distances for vehicle selection:', error);
+      googleResults = candidateDestinations.map(() => null);
+    }
+
+    const candidateResults = candidates.map((candidate, index) => {
+      let distance = candidate.distance;
+      let etaMinutes = Math.ceil((candidate.distance / 30) * 60);
+
+      if (googleResults[index]) {
+        distance = googleResults[index].distance;
+        etaMinutes = Math.ceil(googleResults[index].duration);
+      }
+
+      return {
+        driver: candidate.driver,
+        distance,
+        etaMinutes
+      };
+    });
 
     // Calculate scores for each candidate driver using the agreed strategy
     const vehicleScores: VehicleScore[] = candidateResults.map((item) => {

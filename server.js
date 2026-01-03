@@ -326,42 +326,49 @@ app.prepare().then(() => {
 
     console.log('Candidates within 20km:', candidates.length);
 
-    // Get precise distances using Google
-    const candidateDestinations = candidates.map(item => ({
-      lat: item.driver.location.lat,
-      lng: item.driver.location.lng
+    // For real-time selection, we skip Google Distance Matrix and use direct distance
+    // Google will be used later only for final pricing when dropoff is provided
+    const candidateResults = candidates.map((candidate) => ({
+      driver: candidate.driver,
+      distance: candidate.distance,
+      etaMinutes: Math.ceil((candidate.distance / 30) * 60) // Estimate based on 30 km/h
     }));
 
-    let googleResults = [];
-    try {
-      const { getDistanceAndDuration } = require('./lib/distance');
-      googleResults = await getDistanceAndDuration(
-        [rideLocation],
-        candidateDestinations
-      );
-    } catch (error) {
-      console.warn('Failed to get Google distances:', error);
-      googleResults = candidateDestinations.map(() => null);
-    }
-
     // Calculate scores
-    const driverScores = candidates.map((candidate, index) => {
-      const driver = drivers.find(d => d.id === candidate.driver.driverId);
+    const driverScores = candidateResults.map((item) => {
+      const driver = drivers.find(d => d.id === item.driver.driverId);
       if (!driver) return null;
 
       const commissionRate = companyMap.get(driver.comId) || 0;
       const income = incomeMap.get(driver.car) || 0;
 
-      let distance = candidate.distance;
-      let etaMinutes = Math.ceil((distance / 30) * 60);
+      let distance = item.distance;
+      let etaMinutes = item.etaMinutes;
 
-      if (googleResults[index]) {
-        distance = googleResults[index].distance;
-        etaMinutes = Math.ceil(googleResults[index].duration);
-        console.log(`Driver ${candidate.driver.driverId}: Google distance ${distance}km, ETA ${etaMinutes}min`);
-      } else {
-        console.log(`Driver ${candidate.driver.driverId}: Rough distance ${distance}km, ETA ${etaMinutes}min`);
+      // Check profitability if ETA > 21 minutes
+      if (etaMinutes > 21 && ride.endLatLon) {
+        const tripDistance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, ride.endLatLon.lat, ride.endLatLon.lon);
+        const timeToPickupHours = distance / 30;
+        const tripTimeHours = tripDistance / 30;
+        const returnTimeHours = tripDistance / 30;
+        const totalTimeHours = timeToPickupHours + tripTimeHours + returnTimeHours;
+
+        if (totalTimeHours > 0) {
+          const pickupTime = new Date(ride.pickupTime || Date.now());
+          const estimatedPrice = computePrice(tripDistance, totalTimeHours * 60, pickupTime, ride.vehicleTypeId);
+          const pricePerHour = estimatedPrice / totalTimeHours;
+
+          // Minimum hourly rates
+          const minHourlyRate = ride.vehicleTypeId === 1 ? 450 : ride.vehicleTypeId === 2 ? 500 : ride.vehicleTypeId === 3 ? 600 : 800;
+
+          if (pricePerHour < minHourlyRate - 20) { // Allow 20 DKK less
+            console.log(`Driver ${item.driver.driverId} not profitable: ${pricePerHour} DKK/h < ${minHourlyRate} DKK/h`);
+            return null; // Exclude this driver
+          }
+        }
       }
+
+      console.log(`Driver ${item.driver.driverId}: Distance ${distance}km, ETA ${etaMinutes}min`);
 
       // Scoring system
       let score = 0;
@@ -454,21 +461,142 @@ app.prepare().then(() => {
         console.log(`Checking ride ${ride.id} with vehicleTypeId ${ride.vehicleTypeId}, pickup: ${ride.pickupLat}, ${ride.pickupLng}`);
         console.log(`Connected drivers count: ${connectedDrivers.size}`);
 
-        // Find available drivers for this vehicle type
-        let availableDrivers = Array.from(connectedDrivers.entries())
-          .filter(([driverId, driverData]) => {
-            const matchesType = driverData.vehicleTypeId === ride.vehicleTypeId;
-            const hasLocation = !!driverData.location;
-            console.log(`Driver ${driverId}: type ${driverData.vehicleTypeId} (${matchesType ? 'match' : 'no match'}), location: ${hasLocation ? 'yes' : 'no'}`);
-            return matchesType && hasLocation;
-          })
-          .map(([driverId, driverData]) => ({
-            driverId: parseInt(driverId),
-            location: driverData.location,
-            socketId: driverData.socketId
-          }));
+        // New strategy based on vehicle type
+        let searchTypes = [];
+        let maxDistanceMinutes = 10;
 
-        // If no drivers with socket location, try to get from database
+        if (ride.vehicleTypeId === 1) { // SEDAN5
+          searchTypes = [1];
+        } else if (ride.vehicleTypeId === 2) { // SEVEN_NO_BAG
+          searchTypes = [2];
+        } else if (ride.vehicleTypeId === 3) { // VAN
+          searchTypes = [3];
+        } else if (ride.vehicleTypeId === 4) { // LIMO
+          searchTypes = [4];
+        }
+
+        let availableDrivers = [];
+        let foundWithin10 = false;
+
+        // First, try to find within 10 minutes
+        for (const type of searchTypes) {
+          availableDrivers = Array.from(connectedDrivers.entries())
+            .filter(([driverId, driverData]) => {
+              const matchesType = driverData.vehicleTypeId === type;
+              const hasLocation = !!driverData.location;
+              return matchesType && hasLocation;
+            })
+            .map(([driverId, driverData]) => ({
+              driverId: parseInt(driverId),
+              location: driverData.location,
+              socketId: driverData.socketId,
+              vehicleTypeId: type
+            }));
+
+          const within10 = availableDrivers.filter(driver => {
+            const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+            const eta = Math.ceil((distance / 30) * 60);
+            return eta <= 10;
+          });
+
+          if (within10.length > 0) {
+            availableDrivers = within10;
+            foundWithin10 = true;
+            break;
+          }
+        }
+
+        // Alternatives for SEDAN5
+        if (!foundWithin10 && ride.vehicleTypeId === 1) {
+          const alternatives = [2, 3, 4];
+          for (const altType of alternatives) {
+            availableDrivers = Array.from(connectedDrivers.entries())
+              .filter(([driverId, driverData]) => {
+                const matchesType = driverData.vehicleTypeId === altType;
+                const hasLocation = !!driverData.location;
+                return matchesType && hasLocation;
+              })
+              .map(([driverId, driverData]) => ({
+                driverId: parseInt(driverId),
+                location: driverData.location,
+                socketId: driverData.socketId,
+                vehicleTypeId: altType
+              }));
+
+            const within10 = availableDrivers.filter(driver => {
+              const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+              const eta = Math.ceil((distance / 30) * 60);
+              return eta <= 10;
+            });
+
+            if (within10.length > 0) {
+              availableDrivers = within10;
+              foundWithin10 = true;
+              break;
+            }
+          }
+        }
+
+        // Alternative for SEVEN_NO_BAG
+        if (!foundWithin10 && ride.vehicleTypeId === 2) {
+          availableDrivers = Array.from(connectedDrivers.entries())
+            .filter(([driverId, driverData]) => {
+              const matchesType = driverData.vehicleTypeId === 3; // VAN
+              const hasLocation = !!driverData.location;
+              return matchesType && hasLocation;
+            })
+            .map(([driverId, driverData]) => ({
+              driverId: parseInt(driverId),
+              location: driverData.location,
+              socketId: driverData.socketId,
+              vehicleTypeId: 3
+            }));
+
+          const within10 = availableDrivers.filter(driver => {
+            const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+            const eta = Math.ceil((distance / 30) * 60);
+            return eta <= 10;
+          });
+
+          if (within10.length > 0) {
+            availableDrivers = within10;
+            foundWithin10 = true;
+          }
+        }
+
+        // If still no within 10, expand to 11-20
+        if (!foundWithin10) {
+          maxDistanceMinutes = 20;
+          let allTypes = [];
+          if (ride.vehicleTypeId === 1) {
+            allTypes = [1, 2, 3, 4];
+          } else if (ride.vehicleTypeId === 2) {
+            allTypes = [2, 3];
+          } else {
+            allTypes = [ride.vehicleTypeId];
+          }
+
+          availableDrivers = Array.from(connectedDrivers.entries())
+            .filter(([driverId, driverData]) => {
+              const matchesType = allTypes.includes(driverData.vehicleTypeId);
+              const hasLocation = !!driverData.location;
+              return matchesType && hasLocation;
+            })
+            .map(([driverId, driverData]) => ({
+              driverId: parseInt(driverId),
+              location: driverData.location,
+              socketId: driverData.socketId,
+              vehicleTypeId: driverData.vehicleTypeId
+            }));
+
+          availableDrivers = availableDrivers.filter(driver => {
+            const distance = calculateDistance(ride.startLatLon.lat, ride.startLatLon.lon, driver.location.lat, driver.location.lng);
+            const eta = Math.ceil((distance / 30) * 60);
+            return eta >= 11 && eta <= 20;
+          });
+        }
+
+        // Database fallback
         if (availableDrivers.length === 0) {
           const connectedDriverIds = Array.from(connectedDrivers.keys()).map(id => parseInt(id));
           const driversWithDbLocation = await prisma.comDriver.findMany({
@@ -503,13 +631,12 @@ app.prepare().then(() => {
             const driver = driversWithDbLocation.find(d => d.car === vehicle.regNumber);
             if (driver && connectedDrivers.has(driver.id.toString())) {
               const driverData = connectedDrivers.get(driver.id.toString());
-              if (driverData.vehicleTypeId === ride.vehicleTypeId) {
-                return {
-                  driverId: driver.id,
-                  location: { lat: vehicle.lastLat, lng: vehicle.lastLon },
-                  socketId: driverData.socketId
-                };
-              }
+              return {
+                driverId: driver.id,
+                location: { lat: vehicle.lastLat, lng: vehicle.lastLon },
+                socketId: driverData.socketId,
+                vehicleTypeId: driverData.vehicleTypeId
+              };
             }
             return null;
           }).filter(d => d !== null);
