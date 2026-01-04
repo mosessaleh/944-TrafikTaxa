@@ -505,6 +505,7 @@ model comDriver {
   lastLocation   Json?       // {lat: float, lon: float}
   penaltyUntil   DateTime?   // Penalty until this time
   createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @default(now()) @updatedAt
 
   company PartnerCompany @relation(fields: [comId], references: [id])
   shifts   driversvagt[]
@@ -565,3 +566,4 @@ model driversvagt {
   @@index([drId])
   @@index([date])
 }
+

@@ -37,6 +37,7 @@ export type Driver = {
   rating: number;
   isOnline: boolean;
   isActive: boolean;
+  isBusy: boolean;
   car?: string | null;
   currentRideId?: number | null;
   drUsername: string;
@@ -171,6 +172,35 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
     }
   }
 
+  async function handleToggleBusy(id: number, currentBusy: boolean) {
+    setLoading(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/admin/drivers/${id}/toggle-busy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ busy: !currentBusy }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to toggle busy status");
+      }
+
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, isBusy: !currentBusy } : d))
+      );
+      setActionMessage({ type: "success", text: `Driver ${!currentBusy ? 'set as busy' : 'set as available'} successfully.` });
+    } catch (e: any) {
+      setActionMessage({
+        type: "error",
+        text: e?.message || "Failed to toggle busy status",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -222,6 +252,7 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                 <th className="px-4 py-3">Company</th>
                 <th className="px-4 py-3">API Key</th>
                 <th className="px-4 py-3">Active</th>
+                <th className="px-4 py-3">Busy</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -266,6 +297,17 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                       {d.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => handleToggleBusy(d.id, d.isBusy)}
+                      className={`text-xs px-2 py-1 rounded-full transition-colors ${
+                        d.isBusy ? 'bg-orange-100 text-orange-800 hover:bg-orange-200' : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                      }`}
+                      title={d.isBusy ? 'Set as available' : 'Set as busy'}
+                    >
+                      {d.isBusy ? 'Busy' : 'Available'}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -289,7 +331,7 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
               {filteredDrivers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={6}
+                    colSpan={7}
                     className="px-4 py-12 text-center text-gray-500"
                   >
                     <div className="flex flex-col items-center justify-center">

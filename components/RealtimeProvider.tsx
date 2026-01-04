@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
-import { RealtimeMessage, BookingUpdatePayload, NotificationPayload, ChatMessagePayload } from '@/lib/realtime';
+import { RealtimeMessage, BookingUpdatePayload, NotificationPayload, ChatMessagePayload } from '../lib/realtime';
 
 interface RealtimeContextType {
   isConnected: boolean;
@@ -34,6 +34,7 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
   const [notifications, setNotifications] = useState<NotificationPayload[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessagePayload[]>([]);
   const esRef = useRef<EventSource | null>(null);
+  const connectionIdRef = useRef<string | null>(null);
 
   const handleMessage = (message: RealtimeMessage) => {
     switch (message.type) {
@@ -56,7 +57,10 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
         break;
 
       case 'pong':
-        // No-op for SSE
+        // Store connection ID if provided
+        if (message.payload && message.payload.connectionId) {
+          connectionIdRef.current = message.payload.connectionId;
+        }
         break;
 
       default:
@@ -101,13 +105,60 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
     }
   };
 
-  const subscribeToBooking = (bookingId: number) => {
-    console.warn('[Realtime] subscribeToBooking over SSE is not implemented yet', bookingId);
+  const subscribeToBooking = async (bookingId: number) => {
+    if (!connectionIdRef.current) {
+      console.warn('[Realtime] No connection ID available for subscription');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/realtime', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'subscribe',
+          bookingId,
+          connectionId: connectionIdRef.current
+        })
+      });
+
+      if (!response.ok) {
+        console.error('[Realtime] Failed to subscribe to booking:', response.statusText);
+      }
+    } catch (error) {
+      console.error('[Realtime] Error subscribing to booking:', error);
+    }
   };
 
-  const unsubscribeFromBooking = (bookingId: number) => {
+  const unsubscribeFromBooking = async (bookingId: number) => {
     setBookingUpdates(prev => prev.filter(update => update.bookingId !== bookingId));
     setChatMessages(prev => prev.filter(msg => msg.bookingId !== bookingId));
+
+    if (!connectionIdRef.current) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/realtime', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'unsubscribe',
+          bookingId,
+          connectionId: connectionIdRef.current
+        })
+      });
+
+      if (!response.ok) {
+        console.error('[Realtime] Failed to unsubscribe from booking:', response.statusText);
+      }
+    } catch (error) {
+      console.error('[Realtime] Error unsubscribing from booking:', error);
+    }
   };
 
   const sendChatMessage = (bookingId: number, message: string, toUserId: string) => {
@@ -116,6 +167,7 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
       toUserId,
       message,
     });
+    // TODO: Implement chat message sending via HTTP API
   };
 
   const clearNotifications = () => {

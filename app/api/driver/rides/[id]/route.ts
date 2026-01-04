@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { requireDriverByJWT } from '@/lib/auth';
 import { validateDriverApiOrigin } from '@/lib/security-headers';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Validate request origin for driver API
   const originCheck = validateDriverApiOrigin(req);
   if (!originCheck.ok) {
@@ -18,7 +18,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   try {
-    const rideId = parseInt(params.id);
+    const { id } = await params;
+    const rideId = parseInt(id);
     if (isNaN(rideId)) {
       return NextResponse.json({ ok: false, error: 'Invalid ride ID' }, { status: 400 });
     }

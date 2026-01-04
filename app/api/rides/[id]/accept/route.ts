@@ -23,11 +23,18 @@ export async function POST(
         drLname: true,
         car: true,
         isActive: true,
+        currentRideId: true,
+        isBusy: true,
       },
     });
 
     if (!driver || !driver.isActive) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Check if driver is available (not busy and no current ride)
+    if (driver.currentRideId !== null || driver.isBusy) {
+      return NextResponse.json({ error: 'Driver is currently busy with another ride' }, { status: 409 });
     }
 
     const rideId = parseInt(params.id);

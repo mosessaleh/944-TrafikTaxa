@@ -6,7 +6,6 @@ import { ConfirmCardPaymentSchema } from "@/lib/validation";
 import { notifyAdmin } from "@/lib/notify";
 import { notifyBookingConfirmedUnified, notifyPaymentReceivedUnified } from "@/lib/notification-service";
 import { validateRequestOrigin } from "@/lib/security-headers";
-import { RealtimeManager } from "@/lib/realtime";
 
 export async function POST(request: Request) {
   try {
@@ -395,7 +394,13 @@ export async function POST(request: Request) {
             // Notify the closest driver by setting currentRideId
             if (closestVehicle) {
               const driver = await prisma.comDriver.findFirst({
-                where: { car: closestVehicle.regNumber, isOnline: true, isActive: true }
+                where: {
+                  car: closestVehicle.regNumber,
+                  isOnline: true,
+                  isActive: true,
+                  currentRideId: null, // Driver must not have a current ride
+                  isBusy: false // Driver must not be busy
+                }
               });
               if (driver) {
                   await prisma.comDriver.update({
@@ -404,7 +409,7 @@ export async function POST(request: Request) {
                   });
                   console.log(`card/confirm: Assigned ride ${updatedBooking.id} to driver ${driver.id} with rideAccepted: 0`);
                 } else {
-                  console.log(`card/confirm: No driver found for vehicle ${closestVehicle.regNumber}`);
+                  console.log(`card/confirm: No available driver found for vehicle ${closestVehicle.regNumber} (driver busy or has current ride)`);
                 }
             }
           } else {
@@ -418,13 +423,6 @@ export async function POST(request: Request) {
       console.warn('card/confirm: Failed to assign vehicle to booking:', assignError);
     }
 
-    // === STEP 2.6: Broadcast confirmed booking to drivers ===
-    try {
-      await RealtimeManager.broadcastConfirmedBookingsUpdate('new', updatedBooking);
-      console.log("card/confirm: Confirmed booking broadcasted to drivers");
-    } catch (e) {
-      console.error("card/confirm: Failed to broadcast confirmed booking", e);
-    }
 
     // === STEP 3: Create/Update invoice as receipt ===
     console.log("card/confirm: Checking/creating invoice as receipt");

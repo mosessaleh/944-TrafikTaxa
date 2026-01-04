@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/db';
-import { RealtimeManager } from '@/lib/realtime';
 import {
   notifyUserBookingConfirmation,
   notifyUserPaymentReceived,
@@ -41,7 +40,7 @@ export async function createNotification(userId: number, params: {
   data?: any;
   sendRealtime?: boolean;
 }) {
-  const { type, title, body, data, sendRealtime = true } = params;
+  const { type, title, body, data } = params;
 
   const notification = await prismaAny.notification.create({
     data: {
@@ -52,16 +51,6 @@ export async function createNotification(userId: number, params: {
       data: data ?? {},
     },
   });
-
-  if (sendRealtime) {
-    RealtimeManager.sendNotificationToUser(String(userId), {
-      id: String(notification.id),
-      type: 'info',
-      title,
-      message: body,
-      actionUrl: data?.actionUrl,
-    });
-  }
 
   return notification;
 }

@@ -196,7 +196,9 @@ export async function POST(request: NextRequest) {
         where: {
           isOnline: true,
           isActive: true,
-          car: { not: null }
+          car: { not: null },
+          currentRideId: null, // Driver must not have a current ride
+          isBusy: false // Driver must not be busy
         },
         select: {
           id: true,
@@ -257,7 +259,9 @@ export async function POST(request: NextRequest) {
       where: {
         id: { in: driverIds },
         isActive: true,
-        car: { not: null }
+        car: { not: null },
+        currentRideId: null, // Driver must not have a current ride
+        isBusy: false // Driver must not be busy
       },
       select: {
         id: true,
@@ -267,6 +271,10 @@ export async function POST(request: NextRequest) {
         comId: true
       }
     });
+
+    // Filter availableDrivers to only include drivers that are not busy
+    const availableDriverIds = onlineDrivers.map(d => d.id);
+    availableDrivers = availableDrivers.filter(d => availableDriverIds.includes(d.driverId));
 
     const carPlates = onlineDrivers.map((d: any) => d.car).filter((car: any): car is string => car !== null);
 

@@ -10,115 +10,6 @@ import { assessBookingRisk, updateBookingRisk } from '@/lib/risk-assessment';
 import { calculateDistance } from '@/lib/distance';
 import { authorizeCardPayment } from '@/lib/payment-processor';
 
-// Function to assign driver to ride based on booking explanation
-async function assignDriverToRide(rideId: number) {
-  try {
-    console.log(`Assigning driver for ride ${rideId}`);
-
-    // Get the ride to find the assigned vehicle from explanation
-    const ride = await prisma.ride.findUnique({
-      where: { id: rideId },
-      select: {
-        explanation: true
-      }
-    });
-
-    if (!ride || !ride.explanation) {
-      console.warn(`No explanation found for ride ${rideId}`);
-      return;
-    }
-
-    // Extract vehicle regNumber from explanation (format: "Assigned vehicle: XX XX XXX (distance)")
-    const match = ride.explanation.match(/Assigned vehicle: ([A-Z]{2} \d{2} \d{3})/);
-    if (!match) {
-      console.warn(`No vehicle regNumber found in explanation: ${ride.explanation}`);
-      return;
-    }
-
-    const regNumber = match[1];
-    console.log(`Extracted vehicle regNumber: ${regNumber} from explanation: ${ride.explanation}`);
-
-    // Find the vehicle
-    const vehicle = await prisma.comVehicles.findFirst({
-      where: { regNumber },
-      select: {
-        id: true,
-        regNumber: true
-      }
-    });
-
-    if (!vehicle) {
-      console.warn(`Vehicle ${regNumber} not found`);
-      return;
-    }
-
-    // Find driver who drives this vehicle
-    const driver = await prisma.comDriver.findFirst({
-      where: {
-        car: regNumber,
-        isOnline: true,
-        isActive: true,
-        currentRideId: null // Not busy
-      },
-      select: {
-        id: true,
-        drFname: true,
-        drLname: true,
-        currentRideId: true
-      }
-    });
-
-    if (!driver) {
-      console.warn(`No available driver found for vehicle ${regNumber}`);
-      return;
-    }
-
-    console.log(`Found driver ${driver.drFname} ${driver.drLname} with currentRideId: ${driver.currentRideId}`);
-
-    // Assign ride to driver
-    await prisma.comDriver.update({
-      where: { id: driver.id },
-      data: {
-        currentRideId: rideId,
-        rideAccepted: 0
-      }
-    });
-
-    console.log(`Assigned ride ${rideId} to driver ${driver.drFname} ${driver.drLname} (vehicle: ${regNumber})`);
-
-    // Send notification to driver immediately
-    try {
-      if ((global as any).io) {
-        const ride = await prisma.ride.findUnique({
-          where: { id: rideId },
-          include: { vehicleType: true }
-        });
-        if (ride) {
-          (global as any).io.to(`driver_${driver.id}`).emit('newRide', {
-            rideId: ride.id,
-            price: ride.price,
-            pickupAddress: ride.pickupAddress,
-            dropoffAddress: ride.dropoffAddress,
-            etaMinutes: 5,
-            riderName: ride.riderName,
-            distanceKm: ride.distanceKm,
-            durationMin: ride.durationMin,
-            vehicleType: ride.vehicleType.key,
-            passengers: ride.passengers,
-            paymentMethod: ride.paymentMethod,
-            scheduled: ride.scheduled,
-          });
-          console.log(`Sent notification to driver ${driver.id} for ride ${rideId}`);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to send notification to driver:', error);
-    }
-  } catch (error) {
-    console.error('Failed to assign driver to ride:', error);
-  }
-}
-
 // Validation schema for booking creation
 const createBookingSchema = z.object({
   riderName: z.string()
@@ -523,8 +414,10 @@ export async function POST(request: NextRequest) {
 
             console.log(`[DEBUG] Payment authorized for booking ${booking.id}, transaction: ${authResult.transactionId}`);
 
-            // Assign driver for the ride
-            await assignDriverToRide(booking.id);
+            // Check for new rides after confirmation
+            if ((global as any).checkForNewRides) {
+              (global as any).checkForNewRides();
+            }
           } else {
             console.error(`[DEBUG] Payment authorization failed for booking ${booking.id}: ${authResult.error}`);
             // Keep booking as PENDING, payment method will be handled later
