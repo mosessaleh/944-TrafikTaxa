@@ -17,6 +17,138 @@ const prisma = new PrismaClient();
 const rejectedRides = new Map(); // rideId -> Set of driverIds who rejected
 global.rejectedRides = rejectedRides;
 
+// Function to get available vehicles for a ride
+async function getAvailableVehiclesForRide(ride) {
+  try {
+    const rideDetails = await prisma.ride.findUnique({
+      where: { id: ride.id },
+      select: {
+        startLatLon: true,
+        vehicleTypeId: true
+      }
+    });
+
+    if (!rideDetails || !rideDetails.startLatLon) {
+      console.log(`Ride ${ride.id} missing location data`);
+      return [];
+    }
+
+    // Get excluded driver IDs (rejected for this ride)
+    const rejectedDrivers = global.rejectedRides?.get(ride.id) || new Set();
+    const excludedDriverIds = Array.from(rejectedDrivers);
+
+    const response = await fetch(`http://localhost:3000/api/vehicle-selection`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        pickupLat: rideDetails.startLatLon.lat,
+        pickupLon: rideDetails.startLatLon.lon,
+        vehicleTypeId: rideDetails.vehicleTypeId,
+        maxVehicles: 3,
+        excludedDriverIds
+      })
+    });
+
+    if (!response.ok) {
+      console.log(`Failed to get available vehicles for ride ${ride.id}`);
+      return [];
+    }
+
+    const data = await response.json();
+
+    if (!data.vehicles || data.vehicles.length === 0) {
+      console.log(`No vehicles available for ride ${ride.id}`);
+      return [];
+    }
+
+    const vehicles = await prisma.comVehicles.findMany({
+      where: {
+        id: { in: data.vehicles }
+      },
+      select: {
+        id: true,
+        regNumber: true
+      }
+    });
+
+    const carPlates = vehicles.map(v => v.regNumber);
+    const drivers = await prisma.comDriver.findMany({
+      where: {
+        car: { in: carPlates }
+      },
+      select: {
+        id: true,
+        car: true
+      }
+    });
+
+    const driverMap = new Map(drivers.map(d => [d.car, d.id]));
+
+    const vehicleInfo = await Promise.all(vehicles.map(async (vehicle, index) => {
+      const driverId = driverMap.get(vehicle.regNumber);
+      if (!driverId) return `car${index + 1}: [${vehicle.id}, unknown, unknown]`;
+
+      const connectedDriver = connectedDrivers?.get(driverId);
+      let distance = 'unknown';
+
+      if (connectedDriver && connectedDriver.location) {
+        const lat1 = rideDetails.startLatLon.lat;
+        const lon1 = rideDetails.startLatLon.lon;
+        const lat2 = connectedDriver.location.lat;
+        const lon2 = connectedDriver.location.lng;
+
+        const R = 6371;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distanceKm = R * c;
+        const timeMinutes = Math.ceil(distanceKm * 2);
+        distance = timeMinutes.toString();
+      } else {
+        try {
+          const driverLocation = await prisma.comDriver.findUnique({
+            where: { id: driverId },
+            select: { lastLocation: true }
+          });
+
+          if (driverLocation && driverLocation.lastLocation && Array.isArray(driverLocation.lastLocation)) {
+            const lat2 = driverLocation.lastLocation[0];
+            const lon2 = driverLocation.lastLocation[1];
+
+            const lat1 = rideDetails.startLatLon.lat;
+            const lon1 = rideDetails.startLatLon.lon;
+
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const distanceKm = R * c;
+            const timeMinutes = Math.ceil(distanceKm * 2);
+            distance = timeMinutes.toString();
+          }
+        } catch (error) {
+          console.error(`Error getting location for driver ${driverId}:`, error);
+        }
+      }
+
+      return `car${index + 1}: [${vehicle.id}, ${driverId}, ${distance}]`;
+    }));
+
+    return vehicleInfo;
+  } catch (error) {
+    console.error(`Error getting available vehicles for ride ${ride.id}:`, error);
+    return [];
+  }
+}
+
 // Function to auto-assign ride to the closest available driver
 async function autoAssignRide(ride, vehicleInfo) {
   try {
@@ -38,9 +170,18 @@ async function autoAssignRide(ride, vehicleInfo) {
     // Sort by time (closest first)
     availableDrivers.sort((a, b) => a.timeMinutes - b.timeMinutes);
 
+    // Get rejected drivers for this ride
+    const rejectedDrivers = global.rejectedRides?.get(ride.id) || new Set();
+
     // Try to assign to the closest driver
     for (const driver of availableDrivers) {
       try {
+        // Check if driver has rejected this ride
+        if (rejectedDrivers.has(driver.driverId)) {
+          console.log(`Skipping driver ${driver.driverId} - previously rejected ride ${ride.id}`);
+          continue;
+        }
+
         // Check driver conditions
         const driverData = await prisma.comDriver.findUnique({
           where: { id: driver.driverId },
@@ -71,6 +212,21 @@ async function autoAssignRide(ride, vehicleInfo) {
             isBusy: true
           }
         });
+
+        // Double-check driver status before sending offer
+        const finalCheck = await prisma.comDriver.findUnique({
+          where: { id: driver.driverId },
+          select: {
+            currentRideId: true,
+            isOnline: true,
+            isBusy: true
+          }
+        });
+
+        if (!finalCheck || finalCheck.currentRideId !== null || !finalCheck.isOnline || finalCheck.isBusy) {
+          console.log(`Driver ${driver.driverId} became unavailable during assignment - skipping`);
+          continue; // Skip this driver
+        }
 
         // Send ride offer to driver
         const driverSocket = connectedDrivers.get(driver.driverId);
@@ -116,6 +272,69 @@ async function autoAssignRide(ride, vehicleInfo) {
     console.log(`No available drivers found for ride ${ride.id} - checked ${availableDrivers.length} drivers`);
   } catch (error) {
     console.error('Error in auto-assign ride:', error);
+  }
+}
+
+// Function to reassign a ride to another driver
+async function reassignRide(rideId) {
+  try {
+    // Check if ride is still available
+    const ride = await prisma.ride.findUnique({
+      where: { id: rideId },
+      select: {
+        id: true,
+        status: true,
+        driverId: true,
+        pickupAddress: true,
+        dropoffAddress: true,
+        price: true,
+        distanceKm: true,
+        riderName: true,
+        startLatLon: true,
+        endLatLon: true,
+        vehicleTypeId: true
+      }
+    });
+
+    if (!ride || ride.status !== 'CONFIRMED' || ride.driverId) {
+      console.log(`Ride ${rideId} is no longer available for reassignment`);
+      return;
+    }
+
+    console.log(`Reassigning ride ${rideId} to another driver`);
+    const vehicleInfo = await getAvailableVehiclesForRide(ride);
+    if (vehicleInfo.length > 0) {
+      await autoAssignRide(ride, vehicleInfo);
+    } else {
+      console.log(`No alternative drivers available for ride ${rideId}`);
+    }
+  } catch (error) {
+    console.error(`Error reassigning ride ${rideId}:`, error);
+  }
+}
+
+// Function to get rejection timeout based on available vehicles
+async function getRejectionTimeoutMs(rideId) {
+  try {
+    const ride = await prisma.ride.findUnique({
+      where: { id: rideId },
+      select: {
+        startLatLon: true,
+        vehicleTypeId: true
+      }
+    });
+
+    if (!ride || !ride.startLatLon) return 60000; // Default 1 minute
+
+    const vehicleInfo = await getAvailableVehiclesForRide(ride);
+    const availableCount = vehicleInfo.length;
+
+    if (availableCount <= 1) return 0; // No timeout if only 1 or 0 vehicles
+    if (availableCount === 2) return 30000; // 30 seconds for 2 vehicles
+    return 60000; // 1 minute for 3+ vehicles
+  } catch (error) {
+    console.error(`Error calculating rejection timeout for ride ${rideId}:`, error);
+    return 60000; // Default
   }
 }
 
@@ -235,128 +454,13 @@ async function checkForNewRides() {
         }
         // Get available vehicles for this ride
         try {
-          const rideDetails = await prisma.ride.findUnique({
-            where: { id: ride.id },
-            select: {
-              startLatLon: true,
-              vehicleTypeId: true
-            }
-          });
-
-          if (rideDetails && rideDetails.startLatLon) {
-            const response = await fetch(`http://localhost:3000/api/vehicle-selection`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                pickupLat: rideDetails.startLatLon.lat,
-                pickupLon: rideDetails.startLatLon.lon,
-                vehicleTypeId: rideDetails.vehicleTypeId,
-                maxVehicles: 3
-              })
-            });
-
-            if (response.ok) {
-              const data = await response.json();
-
-              // Get driver info for each vehicle
-              if (data.vehicles && data.vehicles.length > 0) {
-                const vehicles = await prisma.comVehicles.findMany({
-                  where: {
-                    id: { in: data.vehicles }
-                  },
-                  select: {
-                    id: true,
-                    regNumber: true
-                  }
-                });
-
-                const carPlates = vehicles.map(v => v.regNumber);
-                const drivers = await prisma.comDriver.findMany({
-                  where: {
-                    car: { in: carPlates }
-                  },
-                  select: {
-                    id: true,
-                    car: true
-                  }
-                });
-
-                const driverMap = new Map(drivers.map(d => [d.car, d.id]));
-
-                // Calculate distance for each vehicle
-                const vehicleInfo = await Promise.all(vehicles.map(async (vehicle, index) => {
-                  const driverId = driverMap.get(vehicle.regNumber);
-                  if (!driverId) return `car${index + 1}: [${vehicle.id}, unknown, unknown]`;
-
-                  // Get driver location from connected drivers or database
-                  const connectedDriver = connectedDrivers?.get(driverId);
-                  let distance = 'unknown';
-
-                  if (connectedDriver && connectedDriver.location) {
-                    // Calculate distance from real-time location
-                    const lat1 = rideDetails.startLatLon.lat;
-                    const lon1 = rideDetails.startLatLon.lon;
-                    const lat2 = connectedDriver.location.lat;
-                    const lon2 = connectedDriver.location.lng;
-
-                    const R = 6371; // Earth's radius in kilometers
-                    const dLat = (lat2 - lat1) * Math.PI / 180;
-                    const dLon = (lon2 - lon1) * Math.PI / 180;
-                    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                              Math.sin(dLon/2) * Math.sin(dLon/2);
-                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                    const distanceKm = R * c;
-                    const timeMinutes = Math.ceil(distanceKm * 2); // Assuming 30 km/h = 2 min/km
-                    distance = timeMinutes.toString(); // Time in minutes
-                  } else {
-                    // Fallback to database location
-                    try {
-                      const driverLocation = await prisma.comDriver.findUnique({
-                        where: { id: driverId },
-                        select: { lastLocation: true }
-                      });
-
-                      if (driverLocation && driverLocation.lastLocation && Array.isArray(driverLocation.lastLocation)) {
-                        const lat2 = driverLocation.lastLocation[0];
-                        const lon2 = driverLocation.lastLocation[1];
-
-                        const lat1 = rideDetails.startLatLon.lat;
-                        const lon1 = rideDetails.startLatLon.lon;
-
-                        const R = 6371; // Earth's radius in kilometers
-                        const dLat = (lat2 - lat1) * Math.PI / 180;
-                        const dLon = (lon2 - lon1) * Math.PI / 180;
-                        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                                  Math.sin(dLon/2) * Math.sin(dLon/2);
-                        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-                        const distanceKm = R * c;
-                        const timeMinutes = Math.ceil(distanceKm * 2); // Assuming 30 km/h = 2 min/km
-                        distance = timeMinutes.toString(); // Time in minutes
-                      }
-                    } catch (error) {
-                      console.error(`Error getting location for driver ${driverId}:`, error);
-                    }
-                  }
-
-                  return `car${index + 1}: [${vehicle.id}, ${driverId}, ${distance}]`;
-                }));
-
-                console.log(`Ride ${ride.id} will get one of these: ${vehicleInfo.join(', ')}`);
-
-                // Auto-assign the ride to the closest available driver
-                await autoAssignRide(ride, vehicleInfo);
-              } else {
-                console.log(`Ride ${ride.id} has not been offered to any driver yet (no vehicles available)`);
-              }
-            } else {
-              console.log(`Ride ${ride.id} has not been offered to any driver yet (failed to get available vehicles)`);
-            }
+          const vehicleInfo = await getAvailableVehiclesForRide(ride);
+          if (vehicleInfo.length > 0) {
+            console.log(`Ride ${ride.id} will get one of these: ${vehicleInfo.join(', ')}`);
+            // Auto-assign the ride to the closest available driver
+            await autoAssignRide(ride, vehicleInfo);
           } else {
-            console.log(`Ride ${ride.id} has not been offered to any driver yet (missing location data)`);
+            console.log(`Ride ${ride.id} has not been offered to any driver yet (no vehicles available)`);
           }
         } catch (error) {
           console.error(`Error getting available vehicles for ride ${ride.id}:`, error);
@@ -596,31 +700,39 @@ app.prepare().then(() => {
       }
       global.rejectedRides.get(data.rideId).add(data.driverId);
 
-      // Set timeout to remove rejection after 1 minute
-      setTimeout(() => {
-        if (global.rejectedRides.has(data.rideId)) {
-          global.rejectedRides.get(data.rideId).delete(data.driverId);
-          if (global.rejectedRides.get(data.rideId).size === 0) {
-            global.rejectedRides.delete(data.rideId);
+      // Get dynamic timeout based on available vehicles
+      const timeoutMs = await getRejectionTimeoutMs(data.rideId);
+
+      // Set timeout to remove rejection
+      if (timeoutMs > 0) {
+        setTimeout(() => {
+          if (global.rejectedRides.has(data.rideId)) {
+            global.rejectedRides.get(data.rideId).delete(data.driverId);
+            if (global.rejectedRides.get(data.rideId).size === 0) {
+              global.rejectedRides.delete(data.rideId);
+            }
           }
-        }
-      }, 60000); // 1 minute
+        }, timeoutMs);
+      }
 
       // Send rejection confirmation to clear offer on client side
       socket.emit('rideOfferRejected', {
         rideId: data.rideId
       });
+
+      // Try to reassign to another driver
+      setTimeout(() => reassignRide(data.rideId), 1000);
     });
 
     socket.on('rideTimeout', async (data) => {
       console.log(`Driver ${data.driverId} timed out on ride ${data.rideId}`);
       try {
-        // Reset driver status
+        // Reset driver status (keep not busy)
         await prisma.comDriver.update({
           where: { id: data.driverId },
           data: {
             currentRideId: null,
-            isBusy: true // Set to busy to prevent immediate reassignment
+            isBusy: false
           }
         });
 
@@ -630,10 +742,25 @@ app.prepare().then(() => {
         }
         global.rejectedRides.get(data.rideId).add(data.driverId);
 
+        // Get dynamic timeout based on available vehicles
+        const timeoutMs = await getRejectionTimeoutMs(data.rideId);
+
+        // Set timeout to remove rejection
+        if (timeoutMs > 0) {
+          setTimeout(() => {
+            if (global.rejectedRides.has(data.rideId)) {
+              global.rejectedRides.get(data.rideId).delete(data.driverId);
+              if (global.rejectedRides.get(data.rideId).size === 0) {
+                global.rejectedRides.delete(data.rideId);
+              }
+            }
+          }, timeoutMs);
+        }
+
         // Send status update to driver app
         socket.emit('driverStatusUpdate', {
           currentRideId: null,
-          isBusy: true,
+          isBusy: false,
           rideAccepted: null
         });
 
@@ -643,6 +770,9 @@ app.prepare().then(() => {
         });
 
         console.log(`Driver ${data.driverId} status reset after ride timeout`);
+
+        // Try to reassign to another driver
+        setTimeout(() => reassignRide(data.rideId), 1000);
       } catch (error) {
         console.error('Error resetting driver status after timeout:', error);
       }
