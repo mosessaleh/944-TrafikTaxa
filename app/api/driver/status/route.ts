@@ -14,9 +14,9 @@ export async function GET(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { driverId: number };
 
-    const driver = await prisma.comDriver.findUnique({
+    const driver = await (prisma as any).comDriver.findUnique({
       where: { id: decoded.driverId },
-      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true },
+      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true, bannedUntil: true },
     });
 
     if (!driver) {
@@ -46,6 +46,7 @@ export async function GET(request: NextRequest) {
       isBusy: driver.isBusy,
       currentRideId: driver.currentRideId,
       rideAccepted: driver.rideAccepted,
+      bannedUntil: driver.bannedUntil ? driver.bannedUntil.toISOString() : null,
       hasActiveShift: !!activeShift,
     };
 
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { driverId: number };
 
     const body = await request.json();
-    const { online, busy } = body;
+    const { online, busy, busyMode } = body;
 
     if (online !== undefined && typeof online !== 'boolean') {
       return NextResponse.json({ error: 'Invalid online status' }, { status: 400 });
@@ -77,14 +78,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid busy status' }, { status: 400 });
     }
 
+    if (busyMode !== undefined && busyMode !== null && busyMode !== 'manual' && busyMode !== 'auto') {
+      return NextResponse.json({ error: 'Invalid busy mode' }, { status: 400 });
+    }
+
     const updateData: any = {};
     if (online !== undefined) updateData.isOnline = online;
     if (busy !== undefined) updateData.isBusy = busy;
+    if (busyMode !== undefined) updateData.busyMode = busyMode;
 
-    const updatedDriver = await prisma.comDriver.update({
+    const updatedDriver = await (prisma as any).comDriver.update({
       where: { id: decoded.driverId },
       data: updateData,
-      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true },
+      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true, bannedUntil: true },
     });
 
     // Send real-time update via Socket.IO
@@ -94,6 +100,7 @@ export async function POST(request: NextRequest) {
         isBusy: updatedDriver.isBusy,
         rideAccepted: updatedDriver.rideAccepted,
         isOnline: updatedDriver.isOnline,
+        bannedUntil: updatedDriver.bannedUntil ? updatedDriver.bannedUntil.toISOString() : null,
         timestamp: Date.now()
       });
       console.log(`Sent driverStatusUpdate for driver ${decoded.driverId}`);

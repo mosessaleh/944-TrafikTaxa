@@ -496,6 +496,8 @@ model comDriver {
   isOnline       Boolean     @default(false)
   isActive       Boolean     @default(true)
   isBusy         Boolean     @default(false)
+  busyMode       String?     // 'manual' or 'auto' - reason for busy status
+  bannedUntil    DateTime?   // Time until driver is banned from receiving rides
   car            String?     // Car ID or license plate
   currentRideId  Int?
   rideAccepted   Int         @default(0) // Number of rides accepted by this driver

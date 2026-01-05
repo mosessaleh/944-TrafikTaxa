@@ -17,6 +17,10 @@ const prisma = new PrismaClient();
 const rejectedRides = new Map(); // rideId -> Set of driverIds who rejected
 global.rejectedRides = rejectedRides;
 
+// In-memory storage for active ride offers
+const activeOffers = new Map(); // rideId -> driverId currently being offered
+global.activeOffers = activeOffers;
+
 // Function to get available vehicles for a ride
 async function getAvailableVehiclesForRide(ride) {
   try {
@@ -188,11 +192,19 @@ async function autoAssignRide(ride, vehicleInfo) {
           select: {
             currentRideId: true,
             isOnline: true,
-            isBusy: true
+            isBusy: true,
+            bannedUntil: true
           }
         });
 
         if (!driverData) continue;
+
+        // Check if driver is banned
+        const now = new Date();
+        if (driverData.bannedUntil && driverData.bannedUntil > now) {
+          console.log(`Driver ${driver.driverId} is banned until ${driverData.bannedUntil}`);
+          continue; // Driver is banned
+        }
 
         // Check conditions: currentRideId = null, isOnline = 1, isBusy = 0
         if (driverData.currentRideId !== null || !driverData.isOnline || driverData.isBusy) {
@@ -212,21 +224,6 @@ async function autoAssignRide(ride, vehicleInfo) {
             isBusy: true
           }
         });
-
-        // Double-check driver status before sending offer
-        const finalCheck = await prisma.comDriver.findUnique({
-          where: { id: driver.driverId },
-          select: {
-            currentRideId: true,
-            isOnline: true,
-            isBusy: true
-          }
-        });
-
-        if (!finalCheck || finalCheck.currentRideId !== null || !finalCheck.isOnline || finalCheck.isBusy) {
-          console.log(`Driver ${driver.driverId} became unavailable during assignment - skipping`);
-          continue; // Skip this driver
-        }
 
         // Send ride offer to driver
         const driverSocket = connectedDrivers.get(driver.driverId);
@@ -256,6 +253,8 @@ async function autoAssignRide(ride, vehicleInfo) {
             console.log(`Ride ${ride.id} assigned to driver ${driver.driverId} (${driver.timeMinutes} minutes away)`);
             console.log('Sent rideOffer data:', rideOfferData);
             console.log(`Driver ${driver.driverId} is connected and should receive the offer`);
+            // Mark as active offer
+            global.activeOffers.set(ride.id, driver.driverId);
             return; // Successfully assigned
           } else {
             console.log(`Global io not available for driver ${driver.driverId}`);
@@ -324,17 +323,18 @@ async function getRejectionTimeoutMs(rideId) {
       }
     });
 
-    if (!ride || !ride.startLatLon) return 60000; // Default 1 minute
+    if (!ride || !ride.startLatLon) return 120000; // Default 2 minutes
 
     const vehicleInfo = await getAvailableVehiclesForRide(ride);
     const availableCount = vehicleInfo.length;
 
-    if (availableCount <= 1) return 0; // No timeout if only 1 or 0 vehicles
+    if (availableCount === 0) return 120000; // 2 minutes if no vehicles available
+    if (availableCount === 1) return 60000; // 1 minute for 1 vehicle
     if (availableCount === 2) return 30000; // 30 seconds for 2 vehicles
     return 60000; // 1 minute for 3+ vehicles
   } catch (error) {
     console.error(`Error calculating rejection timeout for ride ${rideId}:`, error);
-    return 60000; // Default
+    return 120000; // Default 2 minutes
   }
 }
 
@@ -417,7 +417,12 @@ async function checkForNewRides() {
     for (const ride of newRides) {
       console.log(`A new ride detected, ride id: ${ride.id}, status: ${ride.status}`);
 
-      // Check if this ride has been offered to any driver
+      // Check if this ride has an active offer or has been offered to any driver
+      if (global.activeOffers.has(ride.id)) {
+        console.log(`Ride ${ride.id} has active offer to driver: ${global.activeOffers.get(ride.id)} - skipping`);
+        continue;
+      }
+
       const driverWithRide = await prisma.comDriver.findFirst({
         where: {
           currentRideId: ride.id
@@ -634,6 +639,9 @@ app.prepare().then(() => {
           }
         });
 
+        // Clear active offer
+        global.activeOffers.delete(data.rideId);
+
         // Notify driver of success
         socket.emit('rideAccepted', { rideId: data.rideId });
 
@@ -680,18 +688,42 @@ app.prepare().then(() => {
     socket.on('rejectRide', async (data) => {
       console.log(`Driver ${data.driverId} rejected ride ${data.rideId}`);
       try {
-        // Clear currentRideId and set driver as not busy
+        // Clear currentRideId and ban driver for 2 minutes
+        const bannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
         await prisma.comDriver.update({
           where: { id: data.driverId },
           data: {
             currentRideId: null,
-            isBusy: false,
-            rideAccepted: 0
+            bannedUntil,
+            rideAccepted: 0,
+            isBusy: false
           }
         });
-        console.log(`Cleared currentRideId for driver ${data.driverId} after ride rejection`);
+        console.log(`Banned driver ${data.driverId} until ${bannedUntil} after ride rejection`);
+
+        // Send status update to driver app
+        socket.emit('driverStatusUpdate', {
+          currentRideId: null,
+          bannedUntil: bannedUntil.toISOString(),
+          rideAccepted: null
+        });
+
+        // Auto-unban after 2 minutes
+        setTimeout(async () => {
+          try {
+            await prisma.comDriver.update({
+              where: { id: data.driverId },
+              data: {
+                bannedUntil: null
+              }
+            });
+            console.log(`Unbanned driver ${data.driverId} after 2 minutes`);
+          } catch (error) {
+            console.error(`Error unbanning driver ${data.driverId}:`, error);
+          }
+        }, 120000); // 2 minutes
       } catch (error) {
-        console.error(`Error clearing currentRideId for driver ${data.driverId}:`, error);
+        console.error(`Error updating driver ${data.driverId} after rejection:`, error);
       }
 
       // Add to rejected rides to avoid re-offering
@@ -700,20 +732,19 @@ app.prepare().then(() => {
       }
       global.rejectedRides.get(data.rideId).add(data.driverId);
 
-      // Get dynamic timeout based on available vehicles
-      const timeoutMs = await getRejectionTimeoutMs(data.rideId);
-
-      // Set timeout to remove rejection
-      if (timeoutMs > 0) {
-        setTimeout(() => {
-          if (global.rejectedRides.has(data.rideId)) {
-            global.rejectedRides.get(data.rideId).delete(data.driverId);
-            if (global.rejectedRides.get(data.rideId).size === 0) {
-              global.rejectedRides.delete(data.rideId);
-            }
+      // Set timeout to remove rejection after 30 seconds for each driver
+      const timeoutMs = 30000; // 30 seconds
+      setTimeout(() => {
+        if (global.rejectedRides.has(data.rideId)) {
+          global.rejectedRides.get(data.rideId).delete(data.driverId);
+          if (global.rejectedRides.get(data.rideId).size === 0) {
+            global.rejectedRides.delete(data.rideId);
           }
-        }, timeoutMs);
-      }
+        }
+      }, timeoutMs);
+
+      // Clear active offer
+      global.activeOffers.delete(data.rideId);
 
       // Send rejection confirmation to clear offer on client side
       socket.emit('rideOfferRejected', {
@@ -727,11 +758,13 @@ app.prepare().then(() => {
     socket.on('rideTimeout', async (data) => {
       console.log(`Driver ${data.driverId} timed out on ride ${data.rideId}`);
       try {
-        // Reset driver status (keep not busy)
+        // Reset driver status and ban for 2 minutes
+        const bannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
         await prisma.comDriver.update({
           where: { id: data.driverId },
           data: {
             currentRideId: null,
+            bannedUntil,
             isBusy: false
           }
         });
@@ -742,34 +775,48 @@ app.prepare().then(() => {
         }
         global.rejectedRides.get(data.rideId).add(data.driverId);
 
-        // Get dynamic timeout based on available vehicles
-        const timeoutMs = await getRejectionTimeoutMs(data.rideId);
-
-        // Set timeout to remove rejection
-        if (timeoutMs > 0) {
-          setTimeout(() => {
-            if (global.rejectedRides.has(data.rideId)) {
-              global.rejectedRides.get(data.rideId).delete(data.driverId);
-              if (global.rejectedRides.get(data.rideId).size === 0) {
-                global.rejectedRides.delete(data.rideId);
-              }
+        // Set timeout to remove rejection after 30 seconds
+        const timeoutMs = 30000; // 30 seconds
+        setTimeout(() => {
+          if (global.rejectedRides.has(data.rideId)) {
+            global.rejectedRides.get(data.rideId).delete(data.driverId);
+            if (global.rejectedRides.get(data.rideId).size === 0) {
+              global.rejectedRides.delete(data.rideId);
             }
-          }, timeoutMs);
-        }
+          }
+        }, timeoutMs);
 
         // Send status update to driver app
         socket.emit('driverStatusUpdate', {
           currentRideId: null,
-          isBusy: false,
+          bannedUntil: bannedUntil.toISOString(),
           rideAccepted: null
         });
+
+        // Clear active offer
+        global.activeOffers.delete(data.rideId);
 
         // Send timeout event to stop the sound and clear offer
         socket.emit('rideOfferTimeout', {
           rideId: data.rideId
         });
 
-        console.log(`Driver ${data.driverId} status reset after ride timeout`);
+        console.log(`Driver ${data.driverId} banned until ${bannedUntil} after ride timeout`);
+
+        // Auto-unban after 2 minutes
+        setTimeout(async () => {
+          try {
+            await prisma.comDriver.update({
+              where: { id: data.driverId },
+              data: {
+                bannedUntil: null
+              }
+            });
+            console.log(`Unbanned driver ${data.driverId} after 2 minutes`);
+          } catch (error) {
+            console.error(`Error unbanning driver ${data.driverId}:`, error);
+          }
+        }, 120000); // 2 minutes
 
         // Try to reassign to another driver
         setTimeout(() => reassignRide(data.rideId), 1000);
