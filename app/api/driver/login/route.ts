@@ -142,24 +142,39 @@ export async function POST(request: NextRequest) {
     }
     */
 
-    // Note: Driver online status will be set when they press "Go" button in the app
-    // For now, just keep them offline until they start working
-
-    // Create driversvagt record
-    const now = new Date();
-
-    const shift = await prisma.driversvagt.create({
-      data: {
+    // Check if driver has an active shift (not ended)
+    const existingActiveShift = await prisma.driversvagt.findFirst({
+      where: {
         drId: driver.id,
-        startVagt: now as any, // DateTime object
-        date: now,
-        salary: 0, // Will be calculated later
-        hourSalary: 0, // Will be calculated later
-        startKM: startKM,
-        endKM: startKM, // Initially same as start
-        deffKM: 0, // Initially 0
+        endVagt: null // Shift hasn't ended yet
       },
+      orderBy: {
+        date: 'desc' // Get the most recent active shift
+      }
     });
+
+    let shift;
+    if (existingActiveShift) {
+      // Use existing active shift
+      shift = existingActiveShift;
+      console.log(`Using existing active shift for driver ${driver.id}, started at ${shift.startVagt}`);
+    } else {
+      // Create new driversvagt record
+      const now = new Date();
+      shift = await prisma.driversvagt.create({
+        data: {
+          drId: driver.id,
+          startVagt: now as any, // DateTime object
+          date: now,
+          salary: 0, // Will be calculated later
+          hourSalary: 0, // Will be calculated later
+          startKM: startKM,
+          endKM: startKM, // Initially same as start
+          deffKM: 0, // Initially 0
+        },
+      });
+      console.log(`Created new shift for driver ${driver.id}`);
+    }
 
     const token = signToken({ driverId: driver.id, type: 'driver' });
 
@@ -173,6 +188,7 @@ export async function POST(request: NextRequest) {
         car: driver.car,
       },
       shiftId: shift.id,
+      shiftStartTime: shift.startVagt ? shift.startVagt.toISOString() : null,
     }, {
       headers: {
         'Access-Control-Allow-Origin': '*',

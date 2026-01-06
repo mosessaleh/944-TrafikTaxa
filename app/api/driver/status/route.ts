@@ -23,18 +23,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Driver not found' }, { status: 404 });
     }
 
-    // Check if there is an active shift for today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    // Check if there is an active shift (not ended yet)
     const activeShift = await prisma.driversvagt.findFirst({
       where: {
         drId: decoded.driverId,
-        date: {
-          gte: today,
-          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
-        },
         endVagt: null // Shift hasn't ended yet
+      },
+      orderBy: {
+        date: 'desc' // Get the most recent active shift
       }
     });
 
@@ -48,6 +44,7 @@ export async function GET(request: NextRequest) {
       rideAccepted: driver.rideAccepted,
       bannedUntil: driver.bannedUntil ? driver.bannedUntil.toISOString() : null,
       hasActiveShift: !!activeShift,
+      shiftStartTime: activeShift && activeShift.startVagt ? activeShift.startVagt.toISOString() : null,
     };
 
     return NextResponse.json(response);
