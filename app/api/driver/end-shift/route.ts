@@ -19,18 +19,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find the current shift (today's shift that hasn't ended yet)
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Check for active rides that haven't been completed
+    const activeRides = await prisma.ride.findMany({
+      where: {
+        driverId: driver.id,
+        status: { in: ['DISPATCHED', 'ONGOING', 'IN_PROGRESS'] }
+      },
+      select: { id: true, status: true }
+    });
 
+    if (activeRides.length > 0) {
+      return NextResponse.json(
+        { error: 'Cannot end shift while having active rides. Please complete all rides first.' },
+        { status: 400 }
+      );
+    }
+
+    // Find the current shift (active shift that hasn't ended yet)
     const currentShift = await prisma.driversvagt.findFirst({
       where: {
         drId: driver.id,
-        date: {
-          gte: today,
-          lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
-        },
         endVagt: null // Shift hasn't ended yet
+      },
+      orderBy: {
+        date: 'desc' // Get the most recent active shift
       }
     });
 

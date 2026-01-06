@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireDriver } from '@/lib/auth';
+import { requireDriverByJWT } from '@/lib/auth';
 
 export async function GET(req: NextRequest){
-  try{ await requireDriver(); }catch(e:any){ return NextResponse.json({ ok:false, error:'Forbidden' }, { status: e?.status||403 }); }
+  let driver;
+  try{ driver = await requireDriverByJWT(req); }catch(e:any){ return NextResponse.json({ ok:false, error:'Forbidden' }, { status: e?.status||403 }); }
 
   try{
-    // For now, return all rides with status DISPATCHED, ONGOING (assuming driver can see assigned rides)
-    // In real implementation, filter by driver assignment
+    // Return rides assigned to this driver with status DISPATCHED, ONGOING
     const rides = await prisma.ride.findMany({
       where: {
+        driverId: driver.id,
         status: { in: ['DISPATCHED', 'ONGOING'] }
       },
       include: {
