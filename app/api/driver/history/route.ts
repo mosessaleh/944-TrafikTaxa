@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     }
 
     const start = startDate ? new Date(startDate) : defaultStart;
-    const end = endDate ? new Date(endDate) : defaultEnd;
+    const end = endDate ? new Date(`${endDate}T23:59:59.999`) : defaultEnd;
 
     const rides = await prisma.ride.findMany({
       where: {

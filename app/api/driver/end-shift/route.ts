@@ -83,12 +83,28 @@ export async function POST(request: NextRequest) {
         }
       },
       select: {
-        price: true
+        price: true,
+        distanceKm: true
       }
     });
 
     // Calculate total salary from rides
     const totalSalary = shiftRides.reduce((sum, ride) => sum + ride.price, 0);
+
+    // Calculate total distance from rides
+    const totalRideDistance = shiftRides.reduce((sum, ride) => sum + (ride.distanceKm || 0), 0);
+
+    // Validate endKM against minimum required
+    const minEndKM = currentShift.startKM + totalRideDistance;
+    if (endKM < minEndKM) {
+      return NextResponse.json(
+        {
+          error: `End kilometers is too low. You drove ${totalRideDistance} km in rides. Please enter at least ${minEndKM} km.`,
+          message: `End kilometers is too low. You drove ${totalRideDistance} km in rides. Please enter at least ${minEndKM} km.`
+        },
+        { status: 400 }
+      );
+    }
 
     // Calculate hourly salary
     const hourSalary = workTimeHours > 0 ? totalSalary / workTimeHours : 0;

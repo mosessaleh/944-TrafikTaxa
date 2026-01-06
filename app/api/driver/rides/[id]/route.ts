@@ -26,7 +26,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const ride = await prisma.ride.findUnique({
       where: { id: rideId },
-      include: { vehicleType: true }
+      include: {
+        vehicleType: true,
+        user: {
+          select: { phone: true }
+        }
+      }
     });
 
     if (!ride) {
@@ -48,6 +53,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       data: {
         id: ride.id,
         riderName: ride.riderName,
+        riderPhone: ride.user?.phone,
         pickupAddress: ride.pickupAddress,
         dropoffAddress: ride.dropoffAddress,
         startLatLon: ride.startLatLon,

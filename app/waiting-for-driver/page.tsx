@@ -86,7 +86,7 @@ export default function WaitingForDriverPage() {
       if (!(window as any).google) {
         // Load Google Maps API
         const script = document.createElement('script');
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,directions&language=da`;
+        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&language=da`;
         script.async = true;
         script.defer = true;
         document.head.appendChild(script);
@@ -128,25 +128,39 @@ export default function WaitingForDriverPage() {
     if (driverFound) {
       try {
         const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-
-        oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-        oscillator.type = 'sine';
-
-        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.5);
+        if (audioContext.state === 'suspended') {
+          audioContext.resume().then(() => {
+            playSound(audioContext);
+          }).catch(err => console.warn('Could not resume audio context:', err));
+        } else {
+          playSound(audioContext);
+        }
       } catch (err) {
         console.warn('Could not play notification sound:', err);
       }
     }
   }, [driverFound]);
+
+  const playSound = (audioContext: AudioContext) => {
+    try {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.type = 'sine';
+
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (err) {
+      console.warn('Could not play sound:', err);
+    }
+  };
 
   // Initialize chat when driver is found
   useEffect(() => {
@@ -158,6 +172,25 @@ export default function WaitingForDriverPage() {
       });
     }
   }, [driverFound, bookingId]);
+
+  // Initialize map when driver is found
+  useEffect(() => {
+    if (driverFound && bookingDetails) {
+      initializeMap().then(() => {
+        updateMap(bookingDetails);
+      }).catch(err => {
+        console.error('Failed to initialize map:', err);
+        setMapError(true);
+      });
+    }
+  }, [driverFound, bookingDetails]);
+
+  // Periodic refresh of booking data
+  useEffect(() => {
+    const refreshInterval = setInterval(refreshBookingData, 30000); // Refresh every 30 seconds
+
+    return () => clearInterval(refreshInterval);
+  }, [bookingId, driverFound]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -343,6 +376,31 @@ export default function WaitingForDriverPage() {
     }
   };
 
+  // Function to periodically refresh booking data
+  const refreshBookingData = async () => {
+    if (!bookingId) return;
+
+    try {
+      const response = await fetch(`/api/bookings/${bookingId}`, { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        const updatedBooking: Booking = data.ride || data;
+
+        // Update booking details if changed
+        if (JSON.stringify(updatedBooking) !== JSON.stringify(bookingDetails)) {
+          setBookingDetails(updatedBooking);
+
+          // Update map if driver location changed
+          if (updatedBooking.driver?.lastLocation && driverFound) {
+            updateMap(updatedBooking);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error refreshing booking data:', error);
+    }
+  };
+
   const updateMap = async (booking: Booking) => {
     console.log('Updating map for booking:', booking);
     if (!booking.driver?.lastLocation) {
@@ -350,23 +408,25 @@ export default function WaitingForDriverPage() {
       return;
     }
 
-    if (mapError) {
-      console.log('Map previously failed to load, skipping update');
-      return;
-    }
-
-    await initializeMap();
-
-    if (!mapRef.current) {
-      console.warn('Map not initialized');
+    if (mapError || !mapRef.current) {
+      console.log('Map not available, skipping update');
       return;
     }
 
     const google = (window as any).google;
-    const driverLocation = booking.driver.lastLocation;
-    const passengerLatLng = booking.startLatLon ? { lat: booking.startLatLon[0], lng: booking.startLatLon[1] } : null;
+    const driverLocationRaw = booking.driver.lastLocation;
+    const driverLocation: { lat: number; lng: number } = Array.isArray(driverLocationRaw)
+      ? { lat: driverLocationRaw[0], lng: driverLocationRaw[1] }
+      : { lat: (driverLocationRaw as any).lat, lng: (driverLocationRaw as any).lon || (driverLocationRaw as any).lng };
 
-    if (!passengerLatLng) {
+    const passengerLatLngRaw = booking.startLatLon;
+    const passengerLatLng: { lat: number; lng: number } | null = passengerLatLngRaw
+      ? Array.isArray(passengerLatLngRaw)
+        ? { lat: passengerLatLngRaw[0], lng: passengerLatLngRaw[1] }
+        : { lat: (passengerLatLngRaw as any).lat || passengerLatLngRaw[0], lng: (passengerLatLngRaw as any).lng || passengerLatLngRaw[1] }
+      : null;
+
+    if (!passengerLatLng || isNaN(passengerLatLng.lat) || isNaN(passengerLatLng.lng)) {
       console.warn('Passenger location not available');
       return;
     }
@@ -381,7 +441,7 @@ export default function WaitingForDriverPage() {
 
     // Add driver marker
     driverMarkerRef.current = new google.maps.Marker({
-      position: { lat: driverLocation.lat, lng: driverLocation.lon },
+      position: { lat: driverLocation.lat, lng: driverLocation.lng },
       map: mapRef.current,
       icon: {
         url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
@@ -425,18 +485,20 @@ export default function WaitingForDriverPage() {
     });
 
     directionsService.route({
-      origin: { lat: driverLocation.lat, lng: driverLocation.lon },
+      origin: { lat: driverLocation.lat, lng: driverLocation.lng },
       destination: passengerLatLng,
       travelMode: google.maps.TravelMode.DRIVING
     }, (result: any, status: any) => {
       if (status === google.maps.DirectionsStatus.OK && routeRendererRef.current) {
         routeRendererRef.current.setDirections(result);
+      } else {
+        console.warn('Directions request failed:', status);
       }
     });
 
     // Fit bounds
     const bounds = new google.maps.LatLngBounds();
-    bounds.extend({ lat: driverLocation.lat, lng: driverLocation.lon });
+    bounds.extend({ lat: driverLocation.lat, lng: driverLocation.lng });
     bounds.extend(passengerLatLng);
     mapRef.current.fitBounds(bounds);
 
@@ -448,14 +510,36 @@ export default function WaitingForDriverPage() {
           const data = await response.json();
           const updatedBooking: Booking = data.ride || data;
           if (updatedBooking.driver?.lastLocation && driverMarkerRef.current) {
-            const newLocation = updatedBooking.driver.lastLocation;
-            driverMarkerRef.current.setPosition({ lat: newLocation.lat, lng: newLocation.lon });
+            const newLocationRaw = updatedBooking.driver.lastLocation;
+            const newLocation = Array.isArray(newLocationRaw)
+              ? { lat: newLocationRaw[0], lng: newLocationRaw[1] }
+              : { lat: (newLocationRaw as any).lat, lng: (newLocationRaw as any).lon || (newLocationRaw as any).lng };
+            console.log('Updating driver marker position:', newLocation);
+            driverMarkerRef.current.setPosition({ lat: newLocation.lat, lng: newLocation.lng });
+
+            // Update route if needed
+            if (routeRendererRef.current && passengerLatLng) {
+              directionsService.route({
+                origin: { lat: newLocation.lat, lng: newLocation.lng },
+                destination: passengerLatLng,
+                travelMode: google.maps.TravelMode.DRIVING
+              }, (result: any, status: any) => {
+                if (status === google.maps.DirectionsStatus.OK && routeRendererRef.current) {
+                  routeRendererRef.current.setDirections(result);
+                }
+              });
+            }
           }
         }
       } catch (err) {
         console.error('Error updating driver location:', err);
       }
     };
+
+    // Clear any existing interval
+    if (locationIntervalRef.current) {
+      clearInterval(locationIntervalRef.current);
+    }
 
     locationIntervalRef.current = setInterval(updateDriverLocation, 10000);
   };

@@ -95,13 +95,11 @@ export async function POST(request: NextRequest) {
       orderBy: { date: 'desc' },
     });
 
-    // Temporarily disable odometer validation for debugging
-    /*
     if (lastShift && lastShift.endKM !== null) {
       console.log('Last shift endKM:', lastShift.endKM, 'startKM:', startKM);
       if (startKM < lastShift.endKM) {
         return NextResponse.json(
-          { error: 'Odometer reading is invalid - lower than last recorded reading', message: 'Invalid odometer reading' },
+          { error: 'There is something incorrect in the kilometers', message: 'There is something incorrect in the kilometers' },
           {
             status: 400,
             headers: {
@@ -140,7 +138,6 @@ export async function POST(request: NextRequest) {
         );
       }
     }
-    */
 
     // Check if driver has an active shift (not ended)
     const existingActiveShift = await prisma.driversvagt.findFirst({
