@@ -12,7 +12,7 @@ interface User {
 
 interface DriverLocation {
   lat: number;
-  lon: number;
+  lng: number;
 }
 
 interface Driver {
@@ -20,6 +20,8 @@ interface Driver {
   drFname: string;
   drLname: string;
   lastLocation?: DriverLocation;
+  car?: string; // Vehicle registration number
+  profileImage?: string;
 }
 
 interface Booking {
@@ -31,7 +33,7 @@ interface Booking {
   dropoffAddress: string;
   pickupTime: string;
   price: number;
-  startLatLon?: [number, number];
+  startLatLon?: [number, number] | { lat: number; lng: number };
   driver?: Driver;
 }
 
@@ -54,6 +56,7 @@ export default function WaitingForDriverPage() {
 
   const [bookingDetails, setBookingDetails] = useState<Booking | null>(null);
   const [countdown, setCountdown] = useState(180);
+  const [autoCancelCountdown, setAutoCancelCountdown] = useState(600); // 10 minutes
   const [canCancel, setCanCancel] = useState(false);
   const [searchingStatus, setSearchingStatus] = useState<string>("Searching for a driver...");
   const [driverFound, setDriverFound] = useState(false);
@@ -67,6 +70,7 @@ export default function WaitingForDriverPage() {
   const routeRendererRef = useRef<any>(null);
   const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const autoCancelIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [showChat, setShowChat] = useState(false);
@@ -198,6 +202,9 @@ export default function WaitingForDriverPage() {
       if (locationIntervalRef.current) {
         clearInterval(locationIntervalRef.current);
       }
+      if (autoCancelIntervalRef.current) {
+        clearInterval(autoCancelIntervalRef.current);
+      }
       if (socketRef.current) {
         socketRef.current.disconnect();
       }
@@ -236,6 +243,38 @@ export default function WaitingForDriverPage() {
           }
         });
 
+        socket.on('driverLocationUpdate', (data: any) => {
+          console.log('Received driver location update:', data);
+          if (driverFound && driverMarkerRef.current && mapRef.current) {
+            const newLocation = { lat: data.location.lat, lng: data.location.lng };
+            driverMarkerRef.current.setPosition(newLocation);
+
+            // Update route if passenger location available
+            if (bookingDetails?.startLatLon) {
+              const passengerLatLng = Array.isArray(bookingDetails.startLatLon)
+                ? { lat: bookingDetails.startLatLon[0], lng: bookingDetails.startLatLon[1] }
+                : { lat: bookingDetails.startLatLon.lat, lng: bookingDetails.startLatLon.lng };
+
+              const google = (window as any).google;
+              if (google && google.maps) {
+                const directionsService = new google.maps.DirectionsService();
+                const routeRenderer = routeRendererRef.current;
+                if (routeRenderer) {
+                  directionsService.route({
+                    origin: newLocation,
+                    destination: passengerLatLng,
+                    travelMode: google.maps.TravelMode.DRIVING
+                  }, (result: any, status: any) => {
+                    if (status === google.maps.DirectionsStatus.OK) {
+                      routeRenderer.setDirections(result);
+                    }
+                  });
+                }
+              }
+            }
+          }
+        });
+
         socket.on('connect_error', (err) => {
           console.error('Socket connection error:', err);
           setError('Connection error. Please refresh the page.');
@@ -266,8 +305,28 @@ export default function WaitingForDriverPage() {
       });
     }, 1000);
 
+    // Auto cancel timer (10 minutes)
+    autoCancelIntervalRef.current = setInterval(() => {
+      setAutoCancelCountdown((prev) => {
+        if (prev <= 1) {
+          // Auto cancel if no driver assigned
+          if (!bookingDetails?.driverId) {
+            handleAutoCancel();
+          }
+          if (autoCancelIntervalRef.current) {
+            clearInterval(autoCancelIntervalRef.current);
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
     return () => {
       clearInterval(timer);
+      if (autoCancelIntervalRef.current) {
+        clearInterval(autoCancelIntervalRef.current);
+      }
     };
   }, [bookingId, router]);
 
@@ -340,6 +399,11 @@ export default function WaitingForDriverPage() {
       console.log('Driver assigned, updating UI');
       setSearchingStatus("Driver assigned! Waiting for driver to accept...");
       setCanCancel(false); // Hide cancel button when driver is assigned
+      // Stop auto cancel timer
+      if (autoCancelIntervalRef.current) {
+        clearInterval(autoCancelIntervalRef.current);
+        autoCancelIntervalRef.current = null;
+      }
       // Fetch updated booking to show driver info
       fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
         .then(res => res.json())
@@ -359,6 +423,11 @@ export default function WaitingForDriverPage() {
       setDriverFound(true);
       setSearchingStatus("Driver found! Driver is on the way...");
       setCanCancel(false); // Hide cancel button when driver accepts
+      // Stop auto cancel timer
+      if (autoCancelIntervalRef.current) {
+        clearInterval(autoCancelIntervalRef.current);
+        autoCancelIntervalRef.current = null;
+      }
       // Fetch updated booking
       fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
         .then(res => res.json())
@@ -372,6 +441,10 @@ export default function WaitingForDriverPage() {
     } else if (data.status === 'COMPLETED') {
       console.log('Ride completed');
       setSearchingStatus("Ride completed! Redirecting...");
+      setTimeout(() => router.push("/bookings"), 3000);
+    } else if (data.status === 'CANCELED') {
+      console.log('Ride canceled');
+      setSearchingStatus("Ride canceled! Redirecting...");
       setTimeout(() => router.push("/bookings"), 3000);
     }
   };
@@ -417,13 +490,13 @@ export default function WaitingForDriverPage() {
     const driverLocationRaw = booking.driver.lastLocation;
     const driverLocation: { lat: number; lng: number } = Array.isArray(driverLocationRaw)
       ? { lat: driverLocationRaw[0], lng: driverLocationRaw[1] }
-      : { lat: (driverLocationRaw as any).lat, lng: (driverLocationRaw as any).lon || (driverLocationRaw as any).lng };
+      : { lat: driverLocationRaw.lat, lng: driverLocationRaw.lng };
 
     const passengerLatLngRaw = booking.startLatLon;
     const passengerLatLng: { lat: number; lng: number } | null = passengerLatLngRaw
       ? Array.isArray(passengerLatLngRaw)
         ? { lat: passengerLatLngRaw[0], lng: passengerLatLngRaw[1] }
-        : { lat: (passengerLatLngRaw as any).lat || passengerLatLngRaw[0], lng: (passengerLatLngRaw as any).lng || passengerLatLngRaw[1] }
+        : { lat: passengerLatLngRaw.lat, lng: passengerLatLngRaw.lng }
       : null;
 
     if (!passengerLatLng || isNaN(passengerLatLng.lat) || isNaN(passengerLatLng.lng)) {
@@ -513,7 +586,7 @@ export default function WaitingForDriverPage() {
             const newLocationRaw = updatedBooking.driver.lastLocation;
             const newLocation = Array.isArray(newLocationRaw)
               ? { lat: newLocationRaw[0], lng: newLocationRaw[1] }
-              : { lat: (newLocationRaw as any).lat, lng: (newLocationRaw as any).lon || (newLocationRaw as any).lng };
+              : { lat: newLocationRaw.lat, lng: newLocationRaw.lng };
             console.log('Updating driver marker position:', newLocation);
             driverMarkerRef.current.setPosition({ lat: newLocation.lat, lng: newLocation.lng });
 
@@ -580,6 +653,28 @@ export default function WaitingForDriverPage() {
     } catch (err) {
       console.error("Error canceling booking:", err);
       setError("Error canceling booking");
+    }
+  };
+
+  const handleAutoCancel = async () => {
+    if (!bookingId) return;
+
+    try {
+      const response = await fetch(`/api/bookings/${bookingId}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        setSearchingStatus("Booking auto-canceled due to no driver found. Redirecting...");
+        setTimeout(() => router.push("/bookings"), 3000);
+      } else {
+        setError("Failed to auto-cancel booking");
+      }
+    } catch (err) {
+      console.error("Error auto-canceling booking:", err);
+      setError("Error auto-canceling booking");
     }
   };
 
@@ -661,6 +756,29 @@ export default function WaitingForDriverPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Driver info section - Show when driver is found */}
+        {driverFound && bookingDetails?.driver && (
+          <div className="border-t border-gray-200 p-4">
+            <div className="flex items-center space-x-4">
+              <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center">
+                {bookingDetails.driver.profileImage ? (
+                  <img src={bookingDetails.driver.profileImage} alt="Driver" className="w-16 h-16 rounded-full object-cover" />
+                ) : (
+                  <span className="text-2xl">👤</span>
+                )}
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {bookingDetails.driver.drFname} {bookingDetails.driver.drLname}
+                </h3>
+                <p className="text-gray-600">
+                  Vehicle: {bookingDetails.driver.car || 'N/A'}
+                </p>
+              </div>
+            </div>
           </div>
         )}
 

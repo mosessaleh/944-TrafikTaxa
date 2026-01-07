@@ -556,7 +556,7 @@ app.prepare().then(() => {
           // Find the vehicle assigned to this driver
           const driver = await prisma.comDriver.findUnique({
             where: { id: data.driverId },
-            select: { car: true }
+            select: { car: true, currentRideId: true }
           });
 
           if (driver && driver.car) {
@@ -582,6 +582,15 @@ app.prepare().then(() => {
                   lastLocation: [data.location.lat, data.location.lng]
                 }
               });
+
+              // Notify passenger of location update if driver has active ride
+              if (driver.currentRideId) {
+                io.to(`booking_${driver.currentRideId}`).emit('driverLocationUpdate', {
+                  driverId: data.driverId,
+                  location: data.location,
+                  timestamp: new Date().toISOString()
+                });
+              }
             }
           }
         } catch (error) {
