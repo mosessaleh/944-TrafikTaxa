@@ -503,6 +503,8 @@ model comDriver {
   rideAccepted   Int         @default(0) // Number of rides accepted by this driver
   drUsername     String      @unique
   drPass         String      // Will store hashed password
+  resetToken     String?     // Password reset token
+  resetExpires   DateTime?   // Password reset token expiry
   apiKey         String?     @unique // API key for server-to-server calls
   lastLocation   Json?       // {lat: float, lon: float}
   penaltyUntil   DateTime?   // Penalty until this time
