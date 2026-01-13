@@ -30,6 +30,7 @@ interface RealtimeProviderProps {
 
 export function RealtimeProvider({ children }: RealtimeProviderProps) {
   const [isConnected, setIsConnected] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [bookingUpdates, setBookingUpdates] = useState<BookingUpdatePayload[]>([]);
   const [notifications, setNotifications] = useState<NotificationPayload[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessagePayload[]>([]);
@@ -68,8 +69,32 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
     }
   };
 
-  const connect = () => {
+  const checkAuth = async () => {
+    try {
+      const response = await fetch('/api/auth/me');
+      if (response.ok) {
+        setIsAuthenticated(true);
+        return true;
+      } else {
+        setIsAuthenticated(false);
+        return false;
+      }
+    } catch (error) {
+      console.error('[Realtime] Error checking auth:', error);
+      setIsAuthenticated(false);
+      return false;
+    }
+  };
+
+  const connect = async () => {
     if (esRef.current) return;
+
+    // Check authentication first
+    const authenticated = await checkAuth();
+    if (!authenticated) {
+      console.log('[Realtime] User not authenticated, skipping SSE connection');
+      return;
+    }
 
     try {
       const es = new EventSource('/api/realtime');
@@ -91,7 +116,7 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
         }
       });
 
-      es.onerror = (error) => {
+      es.onerror = async (error) => {
         console.error('[Realtime] SSE error:', error);
         setIsConnected(false);
 
@@ -99,6 +124,9 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
           esRef.current.close();
           esRef.current = null;
         }
+
+        // Recheck authentication in case session expired
+        await checkAuth();
       };
     } catch (error) {
       console.error('[Realtime] Failed to create SSE connection:', error);
@@ -185,9 +213,9 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
   useEffect(() => {
     connect();
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && !isConnected && !esRef.current) {
-        connect();
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && !isConnected && !esRef.current && isAuthenticated) {
+        await connect();
       }
     };
 
@@ -200,7 +228,7 @@ export function RealtimeProvider({ children }: RealtimeProviderProps) {
         esRef.current = null;
       }
     };
-  }, [isConnected]);
+  }, [isConnected, isAuthenticated]);
 
   const value: RealtimeContextType = {
     isConnected,

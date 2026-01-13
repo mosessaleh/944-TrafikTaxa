@@ -252,9 +252,12 @@ export async function requireDriverByJWT(req: Request){
   const token = authHeader.substring(7);
 
   try {
+    console.log('requireDriverByJWT - Verifying token');
     const decoded: any = verify(token, SECRET);
+    console.log('requireDriverByJWT - Token decoded:', { driverId: decoded.driverId, type: decoded.type, exp: decoded.exp });
 
     if (!decoded.driverId || decoded.type !== 'driver') {
+      console.log('requireDriverByJWT - Invalid token payload');
       throw Object.assign(new Error('Invalid token'), { status: 401 });
     }
 

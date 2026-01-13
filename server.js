@@ -7,6 +7,7 @@ const { setSocketServer } = require('./lib/socket-server');
 const { connectedDrivers } = require('./lib/connected-drivers');
 const realtimeService = require('./lib/realtime-service');
 const DriverStatusMonitor = require('./lib/driver-status-monitor');
+const { Expo, ExpoPushMessage, ExpoPushToken } = require('expo-server-sdk');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -335,6 +336,42 @@ async function getRejectionTimeoutMs(rideId) {
   } catch (error) {
     console.error(`Error calculating rejection timeout for ride ${rideId}:`, error);
     return 120000; // Default 2 minutes
+  }
+}
+
+// Function to send push notification to driver
+async function sendPushNotification(driverId, rideData) {
+  try {
+    const driver = await prisma.comDriver.findUnique({
+      where: { id: driverId },
+      select: { expoPushToken: true }
+    });
+
+    if (!driver || !driver.expoPushToken) {
+      console.log(`No push token for driver ${driverId}`);
+      return;
+    }
+
+    // Check if token is valid Expo push token
+    if (!Expo.isExpoPushToken(driver.expoPushToken)) {
+      console.log(`Invalid push token for driver ${driverId}: ${driver.expoPushToken}`);
+      return;
+    }
+
+    const expo = new Expo();
+    const message = {
+      to: driver.expoPushToken,
+      sound: 'default',
+      title: 'New Ride Available!',
+      body: `Pickup: ${rideData.pickupAddress} → Dropoff: ${rideData.dropoffAddress}`,
+      data: { type: 'newRide', rideId: rideData.id },
+      priority: 'high',
+    };
+
+    const ticket = await expo.sendPushNotificationsAsync([message]);
+    console.log(`Push notification sent to driver ${driverId}:`, ticket);
+  } catch (error) {
+    console.error(`Error sending push notification to driver ${driverId}:`, error);
   }
 }
 

@@ -506,6 +506,7 @@ model comDriver {
   resetToken     String?     // Password reset token
   resetExpires   DateTime?   // Password reset token expiry
   apiKey         String?     @unique // API key for server-to-server calls
+  expoPushToken  String?     @unique // Expo push token for notifications
   lastLocation   Json?       // {lat: float, lon: float}
   penaltyUntil   DateTime?   // Penalty until this time
   createdAt      DateTime    @default(now())
