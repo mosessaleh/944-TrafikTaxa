@@ -98,7 +98,7 @@ export async function POST(req: Request){
     // إنشاء الجلسة ككوكي
     const token = authMod.signToken({ id: authenticatedUser.id, type: userType });
     const redirectUrl = userType === 'partner' ? '/partner/dashboard' : '/';
-    const res = NextResponse.json({ ok:true, user: authenticatedUser, next: redirectUrl });
+    const res = NextResponse.json({ ok:true, user: authenticatedUser, token: token, next: redirectUrl });
     
         const isProd = process.env.NODE_ENV === 'production';
         const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
