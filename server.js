@@ -339,6 +339,32 @@ async function getRejectionTimeoutMs(rideId) {
   }
 }
 
+// Function to calculate ETA for driver to pickup location
+async function calculateETA(driverLocation, pickupLat, pickupLon) {
+  if (!driverLocation || !pickupLat || !pickupLon) return null;
+
+  const lat1 = driverLocation.lat;
+  const lon1 = driverLocation.lng;
+  const lat2 = pickupLat;
+  const lon2 = pickupLon;
+
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const distanceKm = R * c;
+  const timeMinutes = Math.ceil(distanceKm * 2); // Assuming 30 km/h average speed
+
+  return {
+    distanceKm: Number(distanceKm.toFixed(1)),
+    timeMinutes: timeMinutes,
+    timeText: timeMinutes <= 1 ? 'Arriving now' : `${timeMinutes} min`
+  };
+}
+
 // Function to send push notification to driver
 async function sendPushNotification(driverId, rideData) {
   try {
@@ -620,11 +646,36 @@ app.prepare().then(() => {
                 }
               });
 
-              // Notify passenger of location update if driver has active ride
+              // Notify passenger of location update and driver info if driver has active ride
               if (driver.currentRideId) {
-                io.to(`booking_${driver.currentRideId}`).emit('driverLocationUpdate', {
+                // Get ride details for ETA calculation
+                const ride = await prisma.ride.findUnique({
+                  where: { id: driver.currentRideId },
+                  select: { startLatLon: true, status: true }
+                });
+
+                let eta = null;
+                if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'IN_PROGRESS')) {
+                  eta = await calculateETA(data.location, ride.startLatLon.lat, ride.startLatLon.lon);
+                }
+
+                // Get driver info
+                const driverInfo = await prisma.comDriver.findUnique({
+                  where: { id: data.driverId },
+                  select: {
+                    id: true,
+                    drFname: true,
+                    drLname: true,
+                    car: true
+                  }
+                });
+
+                io.to(`booking_${driver.currentRideId}`).emit('driverInfoUpdate', {
+                  bookingId: driver.currentRideId,
                   driverId: data.driverId,
+                  driver: driverInfo,
                   location: data.location,
+                  eta: eta,
                   timestamp: new Date().toISOString()
                 });
               }
@@ -711,6 +762,26 @@ app.prepare().then(() => {
           status: 'ONGOING',
           driverId: data.driverId,
           driver: driver,
+          timestamp: new Date().toISOString()
+        });
+
+        // Send initial driver info update
+        const driverInfo = await prisma.comDriver.findUnique({
+          where: { id: data.driverId },
+          select: {
+            id: true,
+            drFname: true,
+            drLname: true,
+            car: true
+          }
+        });
+
+        io.to(`booking_${data.rideId}`).emit('driverInfoUpdate', {
+          bookingId: data.rideId,
+          driverId: data.driverId,
+          driver: driverInfo,
+          location: null,
+          eta: null,
           timestamp: new Date().toISOString()
         });
 

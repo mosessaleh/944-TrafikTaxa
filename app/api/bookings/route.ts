@@ -112,6 +112,7 @@ export async function GET(request: NextRequest) {
         paymentStatus: true,
         paymentMethod: true,
         createdAt: true,
+        driverId: true,
         vehicleType: {
           select: {
             title: true,
@@ -152,25 +153,25 @@ export async function GET(request: NextRequest) {
 
     // Transform bookings for frontend consumption
      const transformedBookings = bookingsWithComplaints.map((booking: typeof bookingsWithComplaints[number]) => ({
-        id: booking.id,
-        riderName: booking.riderName,
-        passengers: booking.passengers,
-        pickupAddress: booking.pickupAddress,
-        dropoffAddress: booking.dropoffAddress,
-        pickupTime: booking.pickupTime.toISOString(),
-        distanceKm: booking.distanceKm,
-        durationMin: booking.durationMin,
-        price: booking.price,
-        status: booking.status,
-        paymentStatus: booking.paymentStatus,
-        explanation: booking.explanation,
-        paymentMethod: booking.paymentMethod,
-        scheduled: booking.scheduled,
-        vehicleType: booking.vehicleType || { title: 'Standard', capacity: 4 },
-        hasComplaint: booking.hasComplaint,
-        complaintStatus: booking.complaintStatus,
-        createdAt: booking.createdAt.toISOString()
-      }));
+         id: booking.id,
+         riderName: booking.riderName,
+         passengers: booking.passengers,
+         pickupAddress: booking.pickupAddress,
+         dropoffAddress: booking.dropoffAddress,
+         pickupTime: booking.pickupTime.toISOString(),
+         distanceKm: booking.distanceKm,
+         durationMin: booking.durationMin,
+         price: booking.price,
+         status: booking.status,
+         paymentStatus: booking.paymentStatus,
+         explanation: booking.explanation,
+         paymentMethod: booking.paymentMethod,
+         scheduled: booking.scheduled,
+         vehicleType: booking.vehicleType || { title: 'Standard', capacity: 4 },
+         hasComplaint: booking.hasComplaint,
+         complaintStatus: booking.complaintStatus,
+         createdAt: booking.createdAt.toISOString()
+       }));
 
     return NextResponse.json({
       ok: true,

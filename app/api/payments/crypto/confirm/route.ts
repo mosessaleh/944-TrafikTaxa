@@ -53,18 +53,10 @@ export async function POST(request: Request) {
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
 
-    // 1) Crypto only for scheduled bookings
-    if (!ride.scheduled) {
+    // Allow crypto for all bookings, but for scheduled, check time
+    if (ride.scheduled && ride.pickupTime <= oneHourFromNow) {
       return NextResponse.json(
-        { error: "Crypto payments are only allowed for scheduled rides" },
-        { status: 400 }
-      );
-    }
-
-    // 2) For scheduled bookings, pickup time must be at least 1 hour from now
-    if (ride.pickupTime <= oneHourFromNow) {
-      return NextResponse.json(
-        { error: "For crypto payments, the scheduled pickup time must be at least 1 hour from now" },
+        { error: "For scheduled crypto payments, the pickup time must be at least 1 hour from now" },
         { status: 400 }
       );
     }
