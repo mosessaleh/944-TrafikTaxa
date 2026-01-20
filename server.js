@@ -480,6 +480,21 @@ async function checkForNewRides() {
     for (const ride of newRides) {
       console.log(`A new ride detected, ride id: ${ride.id}, status: ${ride.status}`);
 
+      // Check if ride is still valid (not cancelled)
+      if (ride.status !== 'CONFIRMED') {
+        console.log(`Ride ${ride.id} is no longer confirmed (status: ${ride.status}) - removing from active offers if present`);
+        if (global.activeOffers.has(ride.id)) {
+          const driverId = global.activeOffers.get(ride.id);
+          // Notify the driver to clear the offer
+          const io = global.io;
+          if (io) {
+            io.to(`driver_${driverId}`).emit('rideCancelled', { rideId: ride.id });
+          }
+          global.activeOffers.delete(ride.id);
+        }
+        continue;
+      }
+
       // Check if this ride has an active offer or has been offered to any driver
       if (global.activeOffers.has(ride.id)) {
         console.log(`Ride ${ride.id} has active offer to driver: ${global.activeOffers.get(ride.id)} - skipping`);
@@ -960,12 +975,13 @@ app.prepare().then(() => {
 
     socket.on('sendMessage', (data) => {
       if (data.bookingId && data.message && data.sender) {
-        // Broadcast to all in the chat room except sender
-        socket.to(`chat_${data.bookingId}`).emit('newMessage', {
+        const messageData = {
           message: data.message,
           sender: data.sender,
           timestamp: new Date().toISOString()
-        });
+        };
+        // Broadcast to all in the chat room including sender
+        io.to(`chat_${data.bookingId}`).emit('newMessage', messageData);
         console.log(`Message sent in chat ${data.bookingId} by ${data.sender}`);
       }
     });

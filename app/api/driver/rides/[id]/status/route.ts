@@ -89,10 +89,17 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     });
 
     // Notify driver via socket
-    const io = getSocketServer();
+    const io = (global as any).io;
     if (io) {
       io.to(`driver_${driver.id}`).emit('ride-update', {
         rideId: rideId,
+        status: status,
+        timestamp: new Date().toISOString()
+      });
+
+      // Notify passenger of booking update
+      io.to(`booking_${rideId}`).emit('bookingUpdate', {
+        bookingId: rideId,
         status: status,
         timestamp: new Date().toISOString()
       });

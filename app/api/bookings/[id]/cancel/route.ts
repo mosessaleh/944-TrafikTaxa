@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
+import { getSocketServer } from '@/lib/socket-server';
 
 /**
  * POST /api/bookings/[id]/cancel - Cancel a booking
@@ -137,6 +138,21 @@ export async function POST(
         status: 'CANCELED'
       }
     });
+
+    // Notify driver if ride was offered to them
+    const io = getSocketServer();
+    if (io && (global as any).activeOffers?.has(bookingId)) {
+      const driverId = (global as any).activeOffers.get(bookingId);
+      console.log(`Notifying driver ${driverId} that ride ${bookingId} was cancelled`);
+
+      // Send cancellation event to clear the offer on driver's screen
+      io.to(`driver_${driverId}`).emit('rideCancelled', {
+        rideId: bookingId
+      });
+
+      // Remove from active offers
+      (global as any).activeOffers.delete(bookingId);
+    }
 
     // Send email to admin
     const adminEmail = process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL;
