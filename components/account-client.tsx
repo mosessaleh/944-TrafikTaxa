@@ -757,7 +757,7 @@ export default function AccountClient() {
                 <div className="p-6">
                   <h1 className="text-3xl font-bold mb-6">{t('account.profile.title')}</h1>
    
-                  {!me.emailVerified && (
+                  {!me.emailVerified && me.role !== 'ADMIN' && (
                     <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200 mb-6">
                       <div className="font-medium text-orange-800">{t('account.profile.unverified')}</div>
                       <div className="text-sm text-orange-700" dangerouslySetInnerHTML={{ __html: t('account.profile.verifyEmail').replace('{email}', `<b>${me.email}</b>`) }} />
@@ -770,7 +770,7 @@ export default function AccountClient() {
                       <div className="grid gap-1">
                         <div className="text-sm text-gray-500">{t('account.profile.email')}</div>
                         <div className="font-semibold flex items-center gap-2">{me.email} <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${me.emailVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{me.emailVerified ? t('account.profile.verified') : t('account.profile.unverified')}</span></div>
-                        {!me.emailVerified && (
+                        {!me.emailVerified && me.role !== 'ADMIN' && (
                           <div className="text-sm text-gray-600" dangerouslySetInnerHTML={{ __html: t('account.profile.needVerification').replace('<Link>', `<a href="/verify?email=${encodeURIComponent(me.email)}" class="underline">`).replace('</Link>', '</a>') }} />
                         )}
                       </div>
@@ -783,7 +783,8 @@ export default function AccountClient() {
                     lastName: me.lastName,
                     phone: me.phone,
                     address: me.address || '',
-                    pendingEmail: me.pendingEmail || null
+                    pendingEmail: me.pendingEmail || null,
+                    role: me.role
                   }} onProfileUpdate={refreshProfile} />
    
                   <div className="mt-8 pt-6 border-t border-slate-200">

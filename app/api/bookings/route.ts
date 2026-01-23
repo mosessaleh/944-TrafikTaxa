@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    if (user.type === 'user' && !((user as any).emailVerified)) {
+    if (user.type === 'user' && !((user as any).emailVerified) && (user as any).role !== 'ADMIN') {
       return NextResponse.json(
         { ok: false, error: 'Email verification required' },
         { status: 403 }
@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (user.type === 'user' && !((user as any).emailVerified)) {
+    if (user.type === 'user' && !((user as any).emailVerified) && (user as any).role !== 'ADMIN') {
       return NextResponse.json(
         { ok: false, error: 'Email verification required' },
         { status: 403 }
