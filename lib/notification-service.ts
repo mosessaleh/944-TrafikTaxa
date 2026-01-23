@@ -4,6 +4,7 @@ import {
   notifyUserPaymentReceived,
   notifyUserInvoiceReady,
 } from '@/lib/notify';
+import { Expo, ExpoPushMessage, ExpoPushToken } from 'expo-server-sdk';
 
 const prismaAny = prisma as any;
 
@@ -81,6 +82,11 @@ export async function notifyBookingConfirmedUnified(
     },
   });
 
+  // Send push notification
+  await sendPushToUser(user.id, 'Booking Confirmed', `Your ride #${bookingDetails.id} is confirmed.`, {
+    bookingId: bookingDetails.id,
+  });
+
   if (await shouldSendEmail(user.id, 'booking')) {
     await notifyUserBookingConfirmation(user.email, user.firstName, bookingDetails);
   }
@@ -150,5 +156,72 @@ export async function notifyInvoiceReadyUnified(
 
   if (await shouldSendEmail(user.id, 'invoice')) {
     await notifyUserInvoiceReady(user.email, user.firstName, invoiceDetails, invoiceId);
+  }
+}
+
+// Push Notification Functions
+const expo = new Expo();
+
+export async function sendPushNotification(
+  pushToken: string,
+  title: string,
+  body: string,
+  data?: any
+) {
+  console.log('sendPushNotification called with token:', pushToken.substring(0, 10) + '...', 'title:', title);
+  if (!Expo.isExpoPushToken(pushToken)) {
+    console.error(`Push token ${pushToken} is not a valid Expo push token`);
+    return;
+  }
+
+  const message: ExpoPushMessage = {
+    to: pushToken,
+    sound: 'default',
+    title,
+    body,
+    data: data || {},
+  };
+
+  try {
+    const ticket = await expo.sendPushNotificationsAsync([message]);
+    console.log('Push notification sent, ticket:', ticket);
+  } catch (error) {
+    console.error('Error sending push notification:', error);
+  }
+}
+
+export async function sendPushToUser(
+  userId: number,
+  title: string,
+  body: string,
+  data?: any
+) {
+  const user = await prismaAny.user.findUnique({
+    where: { id: userId },
+    select: { pushToken: true },
+  });
+
+  if (user?.pushToken) {
+    await sendPushNotification(user.pushToken, title, body, data);
+  }
+}
+
+export async function sendPushToDriver(
+  driverId: number,
+  title: string,
+  body: string,
+  data?: any
+) {
+  console.log('sendPushToDriver called for driverId:', driverId, 'title:', title);
+  const driver = await prismaAny.comDriver.findUnique({
+    where: { id: driverId },
+    select: { expoPushToken: true },
+  });
+
+  console.log('Driver found:', driver ? 'yes' : 'no', 'pushToken:', driver?.expoPushToken ? 'exists' : 'null');
+  if (driver?.expoPushToken) {
+    await sendPushNotification(driver.expoPushToken, title, body, data);
+  } else {
+    console.log('No push token for driverId:', driverId);
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { verify } from 'jsonwebtoken';
+import { sendPushToUser } from '@/lib/notification-service';
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -59,6 +60,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         status: 'IN_PROGRESS',
         pickedAt: new Date()
       }
+    });
+
+    // Send push notification to user
+    await sendPushToUser(ride.userId, 'Driver Arrived', `Your driver has arrived at the pickup location for ride #${rideId}.`, {
+      bookingId: rideId,
     });
 
     return NextResponse.json({

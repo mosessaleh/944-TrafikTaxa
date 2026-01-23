@@ -69,6 +69,7 @@ model User {
   createdAt           DateTime  @default(now())
   canPayByInvoice     Boolean   @default(false)
   stripeCustomerId    String?   @unique // Stripe customer ID for payment processing
+  pushToken           String?   @unique // Expo push token for notifications
 
   rides        Ride[]
   favorites    favoriteaddress[]

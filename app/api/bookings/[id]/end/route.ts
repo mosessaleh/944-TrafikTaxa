@@ -4,6 +4,7 @@ import { verify } from 'jsonwebtoken';
 import { chargeSavedPaymentMethod, PaymentResult } from '@/lib/payment-processor';
 import { notifyUserInvoiceReady } from '@/lib/notify';
 import { getSocketServer } from '@/lib/socket-server';
+import { sendPushToUser } from '@/lib/notification-service';
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -148,6 +149,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         } catch (notifyError) {
           console.error('Failed to notify user about invoice:', notifyError);
         }
+      }
+
+      // Send push notification based on payment method
+      if (paymentResult?.success) {
+        await sendPushToUser(ride.userId, 'Ride Completed', `Your ride #${rideId} has been completed. Payment of ${(ride.price / 100).toFixed(2)} DKK has been charged to your card.`, {
+          bookingId: rideId,
+          invoiceId: invoice.id,
+        });
+      } else if (ride.paymentMethod === 'cash') {
+        await sendPushToUser(ride.userId, 'Ride Completed', `Your ride #${rideId} has been completed. Payment was collected in cash.`, {
+          bookingId: rideId,
+        });
+      } else {
+        await sendPushToUser(ride.userId, 'Ride Completed', `Your ride #${rideId} has been completed. Invoice #${invoiceNumber} is ready for payment.`, {
+          bookingId: rideId,
+          invoiceId: invoice.id,
+        });
       }
 
       console.log(`✅ Invoice created for ride ${rideId}: ${invoiceNumber}`);

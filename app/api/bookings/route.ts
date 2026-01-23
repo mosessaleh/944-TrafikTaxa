@@ -9,6 +9,7 @@ import { sanitizeInput } from '@/lib/sanitize';
 import { assessBookingRisk, updateBookingRisk } from '@/lib/risk-assessment';
 import { calculateDistance } from '@/lib/distance';
 import { authorizeCardPayment } from '@/lib/payment-processor';
+import { notifyBookingConfirmedUnified } from '@/lib/notification-service';
 
 // Validation schema for booking creation
 const createBookingSchema = z.object({
@@ -356,6 +357,20 @@ export async function POST(request: NextRequest) {
     });
     console.log(`[DEBUG] Booking ${booking.id} created with status PENDING`);
 
+    // Send booking confirmation notification
+    await notifyBookingConfirmedUnified(
+      { id: user.id, email: (user as any).email, firstName: (user as any).firstName },
+      {
+        id: booking.id,
+        pickupTime: booking.pickupTime.toISOString(),
+        riderName: booking.riderName,
+        pickupAddress: booking.pickupAddress,
+        dropoffAddress: booking.dropoffAddress,
+        price: booking.price,
+        vehicleTypeId: booking.vehicleTypeId
+      }
+    );
+
     // Vehicle assignment will be done after payment confirmation
     // No vehicle selection or driver assignment at booking creation
 
@@ -414,6 +429,20 @@ export async function POST(request: NextRequest) {
             });
 
             console.log(`[DEBUG] Payment authorized for booking ${booking.id}, transaction: ${authResult.transactionId}`);
+
+            // Send booking confirmation notification
+            await notifyBookingConfirmedUnified(
+              { id: user.id, email: (user as any).email, firstName: (user as any).firstName },
+              {
+                id: booking.id,
+                pickupTime: booking.pickupTime.toISOString(),
+                riderName: booking.riderName,
+                pickupAddress: booking.pickupAddress,
+                dropoffAddress: booking.dropoffAddress,
+                price: booking.price,
+                vehicleTypeId: booking.vehicleTypeId
+              }
+            );
 
             // Check for new rides after confirmation
             if ((global as any).checkForNewRides) {

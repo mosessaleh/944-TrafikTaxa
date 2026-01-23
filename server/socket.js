@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
 const { PrismaClient } = require('@prisma/client');
+const { sendPushToDriver } = require('../lib/notification-service');
 
 const prisma = new PrismaClient();
 
@@ -105,6 +106,13 @@ function initSocketServer(server) {
     const driver = activeDrivers.get(driverId);
     if (driver) {
       io.to(driver.socketId).emit('new-ride', { bookingId, ...rideData });
+
+      // Send push notification to driver
+      sendPushToDriver(driverId, 'New Ride Available', `You have a new ride request from ${rideData.pickupAddress} to ${rideData.dropoffAddress}.`, {
+        bookingId,
+        ...rideData
+      }).catch(error => console.error('Failed to send push notification to driver:', error));
+
       return true;
     }
     return false;

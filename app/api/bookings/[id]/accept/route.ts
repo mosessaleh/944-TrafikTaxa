@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
+import { sendPushToUser } from '@/lib/notification-service';
 
 const AcceptRideSchema = z.object({
   driverId: z.number().int().positive('Invalid driver ID'),
@@ -66,6 +67,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         rideAccepted: 1, // Accepted
         isBusy: true
       }
+    });
+
+    // Send push notification to user
+    await sendPushToUser(ride.userId, 'Ride Accepted', `Your ride #${rideId} has been accepted by a driver.`, {
+      bookingId: rideId,
     });
 
     return NextResponse.json({
