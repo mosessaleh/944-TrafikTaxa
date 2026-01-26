@@ -25,7 +25,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Update driver's push token
+    console.log('Updating push token for driverId:', decoded.driverId, 'token:', pushToken.substring(0, 20) + '...');
     await prisma.$executeRaw`UPDATE comDriver SET expoPushToken = ${pushToken} WHERE id = ${decoded.driverId}`;
+    console.log('Push token updated successfully for driverId:', decoded.driverId);
 
     return NextResponse.json({ success: true });
   } catch (error) {

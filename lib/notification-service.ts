@@ -183,17 +183,23 @@ export async function sendPushNotification(
     title,
     body,
     data: data || {},
-    channelId: 'default',
+    channelId: 'batch',
     priority: 'high',
   };
 
   console.log('Sending push notification with message:', message);
 
   try {
+    console.log('Sending push notification to Expo server...');
     const ticket = await expo.sendPushNotificationsAsync([message]);
-    console.log('Push notification sent, ticket:', ticket);
+    console.log('Push notification sent to Expo, ticket:', ticket);
+    if (ticket[0].status === 'ok') {
+      console.log('Push notification accepted by Expo');
+    } else {
+      console.log('Push notification rejected by Expo, details:', ticket[0]);
+    }
   } catch (error) {
-    console.error('Error sending push notification:', error);
+    console.error('Error sending push notification to Expo:', error);
   }
 }
 
@@ -219,7 +225,7 @@ export async function sendPushToDriver(
   body: string,
   data?: any
 ) {
-  console.log('sendPushToDriver called for driverId:', driverId, 'title:', title);
+  console.log('sendPushToDriver called for driverId:', driverId, 'title:', title, 'body:', body);
   const driver = await prismaAny.comDriver.findUnique({
     where: { id: driverId },
     select: { expoPushToken: true },
@@ -227,8 +233,10 @@ export async function sendPushToDriver(
 
   console.log('Driver found:', driver ? 'yes' : 'no', 'pushToken:', driver?.expoPushToken ? 'exists' : 'null');
   if (driver?.expoPushToken) {
+    console.log('Sending push notification to driverId:', driverId, 'with token:', driver.expoPushToken.substring(0, 20) + '...');
     await sendPushNotification(driver.expoPushToken, title, body, data);
+    console.log('Push notification sent successfully to driverId:', driverId);
   } else {
-    console.log('No push token for driverId:', driverId);
+    console.log('No push token for driverId:', driverId, '- cannot send notification');
   }
 }
