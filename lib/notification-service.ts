@@ -160,7 +160,10 @@ export async function notifyInvoiceReadyUnified(
 }
 
 // Push Notification Functions
-const expo = new Expo();
+const expo = new Expo({
+  accessToken: process.env.EXPO_ACCESS_TOKEN,
+});
+console.log('Expo client initialized with access token:', process.env.EXPO_ACCESS_TOKEN ? 'set' : 'not set');
 
 export async function sendPushNotification(
   pushToken: string,
@@ -180,7 +183,11 @@ export async function sendPushNotification(
     title,
     body,
     data: data || {},
+    channelId: 'default',
+    priority: 'high',
   };
+
+  console.log('Sending push notification with message:', message);
 
   try {
     const ticket = await expo.sendPushNotificationsAsync([message]);
