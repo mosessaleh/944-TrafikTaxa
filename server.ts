@@ -11,9 +11,8 @@ import { connectedDrivers } from './lib/connected-drivers.js';
 import realtimeService from './lib/realtime-service.js';
 // @ts-ignore
 import DriverStatusMonitor from './lib/driver-status-monitor.js';
-const { notifyDriver } = require('./lib/notification-service.js');
-// REMOVED: Expo import - Not using push notifications from server
-// const { Expo, ExpoPushMessage, ExpoPushToken } = require('expo-server-sdk');
+import { sendPushToDriver } from './lib/notification-service.js';
+import { Expo } from 'expo-server-sdk';
 
 declare global {
   var rejectedRides: Map<number, Set<number>>;
@@ -271,7 +270,7 @@ async function autoAssignRide(ride: any, vehicleInfo: any) {
             console.log(`Driver ${driver.driverId} is connected and should receive the offer`);
 
             // Send push notification to driver
-            await notifyDriver(driver.driverId, 'New Ride Available!', `Pickup: ${ride.pickupAddress} → Dropoff: ${ride.dropoffAddress}`, {
+            await sendPushToDriver(driver.driverId, 'New Ride Available!', `Pickup: ${ride.pickupAddress} → Dropoff: ${ride.dropoffAddress}`, {
               type: 'newRide',
               rideId: ride.id
             });

@@ -271,20 +271,39 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    const { distanceKm, durationMin } = await safeEstimateDistance(
-      {
-        address: validatedData.pickupAddress,
-        lat: validatedData.pickupLat || null,
-        lon: validatedData.pickupLon || null
-      },
-      {
-        address: validatedData.dropoffAddress,
-        lat: validatedData.dropoffLat || null,
-        lon: validatedData.dropoffLon || null
-      }
-    );
+    let distanceKm: number, durationMin: number;
+    try {
+      const result = await safeEstimateDistance(
+        {
+          address: validatedData.pickupAddress,
+          lat: validatedData.pickupLat || null,
+          lon: validatedData.pickupLon || null
+        },
+        {
+          address: validatedData.dropoffAddress,
+          lat: validatedData.dropoffLat || null,
+          lon: validatedData.dropoffLon || null
+        }
+      );
+      distanceKm = result.distanceKm;
+      durationMin = result.durationMin;
+    } catch (error: any) {
+      console.error('[API] Distance calculation failed:', error);
+      return NextResponse.json(
+        { ok: false, error: 'Unable to calculate route for the selected addresses. Please choose different pickup and dropoff locations.' },
+        { status: 400 }
+      );
+    }
 
     console.log('[DEBUG] Distance calculation result:', { distanceKm, durationMin });
+
+    // Check minimum distance
+    if (distanceKm < 0.1) {
+      return NextResponse.json(
+        { ok: false, error: 'Pickup and dropoff locations are too close. Please choose different addresses.' },
+        { status: 400 }
+      );
+    }
 
     // Calculate price
     const pickupTime = new Date(validatedData.pickupTime);
@@ -357,8 +376,8 @@ export async function POST(request: NextRequest) {
     });
     console.log(`[DEBUG] Booking ${booking.id} created with status PENDING`);
 
-    // Send booking confirmation notification
-    await notifyBookingConfirmedUnified(
+    // Send booking confirmation notification (fire-and-forget)
+    notifyBookingConfirmedUnified(
       { id: user.id, email: (user as any).email, firstName: (user as any).firstName },
       {
         id: booking.id,
@@ -369,31 +388,33 @@ export async function POST(request: NextRequest) {
         price: booking.price,
         vehicleTypeId: booking.vehicleTypeId
       }
-    );
+    ).catch((error) => {
+      console.error('[API] Failed to send booking confirmation notification:', error);
+    });
 
     // Vehicle assignment will be done after payment confirmation
     // No vehicle selection or driver assignment at booking creation
 
-    // Perform risk assessment
-    try {
-      const riskAssessment = await assessBookingRisk({
-        userId: user.id,
-        pickupAddress: validatedData.pickupAddress,
-        dropoffAddress: validatedData.dropoffAddress,
-        pickupTime,
-        price,
-        passengers: 1,
-        distanceKm: Number(distanceKm.toFixed(2))
-      });
-
-      // Update booking with risk assessment
-      await updateBookingRisk(booking.id, riskAssessment);
-
-      console.log(`Risk assessment completed for booking ${booking.id}: ${riskAssessment.level} (${riskAssessment.score})`);
-    } catch (riskError) {
+    // Perform risk assessment (fire-and-forget)
+    assessBookingRisk({
+      userId: user.id,
+      pickupAddress: validatedData.pickupAddress,
+      dropoffAddress: validatedData.dropoffAddress,
+      pickupTime,
+      price,
+      passengers: 1,
+      distanceKm: Number(distanceKm.toFixed(2))
+    }).then(async (riskAssessment) => {
+      try {
+        // Update booking with risk assessment
+        await updateBookingRisk(booking.id, riskAssessment);
+        console.log(`Risk assessment completed for booking ${booking.id}: ${riskAssessment.level} (${riskAssessment.score})`);
+      } catch (updateError) {
+        console.error('Error updating booking with risk assessment:', updateError);
+      }
+    }).catch((riskError) => {
       console.error('Error performing risk assessment:', riskError);
-      // Don't fail the booking if risk assessment fails
-    }
+    });
 
     // Authorize card payment if card payment method is selected
     if (paymentMethod === 'card' && selectedPaymentMethodId) {

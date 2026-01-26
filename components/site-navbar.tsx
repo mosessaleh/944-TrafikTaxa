@@ -141,6 +141,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                 window.location.reload();
               }}
               className={`px-2 py-1 text-xs font-medium rounded ${language === 'dk' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+              suppressHydrationWarning
             >
               DK
             </button>
@@ -176,6 +177,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                 window.location.reload();
               }}
               className={`px-2 py-1 text-xs font-medium rounded ${language === 'en' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+              suppressHydrationWarning
             >
               EN
             </button>
@@ -311,6 +313,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     window.location.reload();
                   }}
                   className={`px-3 py-1 text-sm font-medium rounded ${language === 'dk' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+                  suppressHydrationWarning
                 >
                   DK
                 </button>
@@ -346,6 +349,7 @@ export default function SiteNavbar({ me }: { me: NavUser }){
                     window.location.reload();
                   }}
                   className={`px-3 py-1 text-sm font-medium rounded ${language === 'en' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'}`}
+                  suppressHydrationWarning
                 >
                   EN
                 </button>

@@ -220,22 +220,29 @@ export async function POST(request: NextRequest) {
             id: true,
             regNumber: true,
             lastLat: true,
-            lastLon: true
+            lastLon: true,
+            vehicleType: true
           }
         });
 
+        // Map vehicle type strings to IDs
+        const vehicleTypeMap: { [key: string]: number } = {
+          'SEDAN5': 1,
+          'SEVEN_NO_BAG': 2,
+          'VAN': 3,
+          'LIMO': 4
+        };
+
         // Create availableDrivers from database data with same logic
-        // For simplicity, apply similar filtering
         availableDrivers = vehiclesWithLocation.map(vehicle => {
           const driver = onlineDriversFromDb.find(d => d.car === vehicle.regNumber);
           if (driver) {
-            // Need to get vehicle type from somewhere, assume from vehicle or driver
-            // For now, assume we can get it
+            const mappedVehicleTypeId = vehicleTypeMap[vehicle.vehicleType] || vehicleTypeId; // Fallback to requested type
             return {
               driverId: driver.id,
               location: { lat: vehicle.lastLat, lng: vehicle.lastLon },
               socketId: null,
-              vehicleTypeId: vehicleTypeId // Simplified
+              vehicleTypeId: mappedVehicleTypeId
             };
           }
           return null;

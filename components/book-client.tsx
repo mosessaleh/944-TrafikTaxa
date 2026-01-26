@@ -6,14 +6,8 @@ import useSWR, { mutate } from 'swr';
 if (typeof window !== 'undefined') {
   const existingScript = document.querySelector('script[src*="maps.googleapis.com"]');
   if (!existingScript) {
-    // Load Google Maps API with callback
-    (window as any).initGoogleMaps = () => {
-      // Google Maps loaded callback
-      console.log('Google Maps API loaded');
-    };
-
     const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places&language=da&callback=initGoogleMaps`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places&language=da`;
     script.async = true;
     script.defer = true;
     document.head.appendChild(script);
@@ -940,10 +934,19 @@ export default function BookClient(){
               const busyText = closestVehicle.isBusy ? " (currently busy, will finish current ride first)" : "";
               setArrivalMessage(`The closest car to you arrives in ${timeText}${busyText}`);
             } else {
-              setArrivalMessage("No cars available currently");
+              setArrivalMessage("No cars available within 45 minutes");
             }
           } else {
-            setArrivalMessage("No cars available currently");
+            // Provide more specific message based on available vehicles
+            if (vehicles.length === 0) {
+              setArrivalMessage("No cars found in your area");
+            } else if (availableVehicles.length === 0) {
+              setArrivalMessage("All cars in your area are currently busy");
+            } else if (filteredAvailableVehicles.length === 0) {
+              setArrivalMessage("No cars of selected type available. Try selecting a different vehicle type");
+            } else {
+              setArrivalMessage("No suitable cars available currently");
+            }
           }
       } catch (error) {
         console.error('Failed to calculate vehicle arrival:', error);
@@ -1456,7 +1459,12 @@ export default function BookClient(){
                         !vehicleId ||
                         bookingLoading ||
                         whenType === 'later' ||
-                        (longWaitWarning.show && !longWaitAccepted)
+                        (longWaitWarning.show && !longWaitAccepted) ||
+                        !pickupSel?.lat ||
+                        !pickupSel?.lon ||
+                        !dropoffSel?.lat ||
+                        !dropoffSel?.lon ||
+                        !riderName.trim()
                       }
                       className={`w-full px-5 py-3.5 rounded-2xl font-semibold text-sm sm:text-base transition-all duration-150 flex items-center justify-center gap-2 min-h-[48px] ${
                         !me ||
