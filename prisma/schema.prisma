@@ -566,6 +566,7 @@ model driversvagt {
   startKM   Int
   endKM     Int
   deffKM    Int
+  shiftWarningSentAt DateTime? // When the 11-hour warning was sent
 
   driver comDriver @relation(fields: [drId], references: [id])
 

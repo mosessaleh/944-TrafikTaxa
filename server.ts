@@ -12,6 +12,7 @@ import realtimeService from './lib/realtime-service.js';
 // @ts-ignore
 import DriverStatusMonitor from './lib/driver-status-monitor.js';
 import { sendPushToDriver } from './lib/notification-service.js';
+import { sendEmail } from './lib/email.js';
 import { Expo } from 'expo-server-sdk';
 
 declare global {
@@ -577,6 +578,178 @@ async function checkForNewRides() {
   }
 }
 
+// Function to check for shifts exceeding 11 hours and handle violations
+async function checkShiftViolations() {
+  try {
+    const now = new Date();
+    const elevenHoursAgo = new Date(now.getTime() - 11 * 60 * 60 * 1000);
+
+    // Find active shifts that started more than 11 hours ago
+    const violatingShifts = await prisma.driversvagt.findMany({
+      where: {
+        startVagt: {
+          not: null,
+          lt: elevenHoursAgo
+        },
+        endVagt: null, // Still active
+        shiftWarningSentAt: null // No warning sent yet
+      },
+      include: {
+        driver: {
+          include: {
+            company: true
+          }
+        }
+      }
+    });
+
+    for (const shift of violatingShifts) {
+      console.log(`Shift violation detected for driver ${shift.driver.id} - started at ${shift.startVagt}`);
+
+      // Send push notification to driver
+      await sendPushToDriver(shift.driver.id, 'Shift Duration Warning', 'Your shift has exceeded 11 hours. Please end your shift immediately as this violates safety regulations. You have 1 hour to comply or face suspension.', {
+        type: 'shift_warning',
+        shiftId: shift.id
+      });
+
+      // Send socket notification to driver
+      const driverSocket = connectedDrivers.get(shift.driver.id);
+      if (driverSocket && driverSocket.socketId) {
+        io.to(`driver_${shift.driver.id}`).emit('shiftWarning', {
+          message: 'Your shift has exceeded 11 hours. Please end your shift immediately.',
+          shiftId: shift.id,
+          timestamp: now.toISOString()
+        });
+      }
+
+      // Send email to driver
+      const driverEmailBody = `
+        <p>Dear ${shift.driver.drFname} ${shift.driver.drLname},</p>
+        <p>Your current shift has exceeded 11 hours, which violates Danish traffic safety regulations.</p>
+        <p>You must end your shift immediately. Failure to do so within 1 hour will result in a 3-day suspension from the platform.</p>
+        <p>Please log into the driver app and end your shift now.</p>
+        <p>Best regards,<br>944 Trafik Management</p>
+      `;
+
+      if (shift.driver.drEmail) {
+        await sendEmail(shift.driver.drEmail, 'Shift Duration Violation Warning', driverEmailBody);
+      }
+
+      // Send email to company owner
+      const companyEmailBody = `
+        <p>Dear ${shift.driver.company.comName} Management,</p>
+        <p>Driver ${shift.driver.drFname} ${shift.driver.drLname} (ID: ${shift.driver.id}) has exceeded 11 hours on their current shift.</p>
+        <p>This violates Danish traffic safety regulations. The driver has been notified and must end their shift within 1 hour.</p>
+        <p>If the shift is not ended within 1 hour, the driver will be automatically suspended for 3 days.</p>
+        <p>Please ensure your driver complies with regulations.</p>
+        <p>Best regards,<br>944 Trafik Management</p>
+      `;
+
+      if (shift.driver.company.comEmail) {
+        await sendEmail(shift.driver.company.comEmail, 'Driver Shift Violation Alert', companyEmailBody);
+      }
+
+      // Mark warning as sent
+      await prisma.driversvagt.update({
+        where: { id: shift.id },
+        data: { shiftWarningSentAt: now }
+      });
+
+      console.log(`Warning sent to driver ${shift.driver.id} and company ${shift.driver.company.comName}`);
+    }
+
+    // Check for shifts that were warned 1 hour ago and still active
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const expiredWarnings = await prisma.driversvagt.findMany({
+      where: {
+        shiftWarningSentAt: {
+          not: null,
+          lt: oneHourAgo
+        },
+        endVagt: null // Still active
+      },
+      include: {
+        driver: {
+          include: {
+            company: true
+          }
+        }
+      }
+    });
+
+    for (const shift of expiredWarnings) {
+      console.log(`Shift violation enforcement for driver ${shift.driver.id} - warning expired`);
+
+      // Check if driver has active rides
+      const hasActiveRide = await prisma.comDriver.findUnique({
+        where: { id: shift.driver.id },
+        select: { currentRideId: true }
+      });
+
+      if (hasActiveRide?.currentRideId) {
+        console.log(`Driver ${shift.driver.id} has active ride ${hasActiveRide.currentRideId} - cannot end shift yet`);
+        continue; // Skip if has active ride
+      }
+
+      // End the shift
+      const endTime = now;
+      const workTimeHours = shift.startVagt ? (endTime.getTime() - shift.startVagt.getTime()) / (1000 * 60 * 60) : 0;
+
+      await prisma.driversvagt.update({
+        where: { id: shift.id },
+        data: {
+          endVagt: endTime,
+          workTime: workTimeHours
+        }
+      });
+
+      // Ban driver for 3 days
+      const bannedUntil = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      await prisma.comDriver.update({
+        where: { id: shift.driver.id },
+        data: {
+          bannedUntil,
+          isOnline: false,
+          isBusy: false,
+          currentRideId: null
+        }
+      });
+
+      // Send notification emails
+      const driverBanEmail = `
+        <p>Dear ${shift.driver.drFname} ${shift.driver.drLname},</p>
+        <p>Your shift has been automatically ended due to exceeding the 11-hour limit without compliance.</p>
+        <p>You are now suspended from the platform for 3 days as per safety regulations.</p>
+        <p>Suspension ends: ${bannedUntil.toLocaleString()}</p>
+        <p>Please contact support if you believe this is an error.</p>
+        <p>Best regards,<br>944 Trafik Management</p>
+      `;
+
+      if (shift.driver.drEmail) {
+        await sendEmail(shift.driver.drEmail, 'Account Suspended - Shift Violation', driverBanEmail);
+      }
+
+      const companyBanEmail = `
+        <p>Dear ${shift.driver.company.comName} Management,</p>
+        <p>Driver ${shift.driver.drFname} ${shift.driver.drLname} (ID: ${shift.driver.id}) has been suspended for 3 days due to shift violation.</p>
+        <p>The driver exceeded 11 hours without ending their shift after receiving warnings.</p>
+        <p>Suspension ends: ${bannedUntil.toLocaleString()}</p>
+        <p>Please ensure your drivers comply with regulations in the future.</p>
+        <p>Best regards,<br>944 Trafik Management</p>
+      `;
+
+      if (shift.driver.company.comEmail) {
+        await sendEmail(shift.driver.company.comEmail, 'Driver Suspension Notice', companyBanEmail);
+      }
+
+      console.log(`Driver ${shift.driver.id} suspended until ${bannedUntil}`);
+    }
+
+  } catch (error) {
+    console.error('Error in checkShiftViolations:', error);
+  }
+}
+
 // Make function globally available
 global.checkForNewRides = checkForNewRides;
 
@@ -1092,5 +1265,10 @@ app.prepare().then(() => {
         global.checkForNewRides();
       }
     }, 12000);
+
+    // Check for shift violations every hour (3600000 ms)
+    setInterval(() => {
+      checkShiftViolations();
+    }, 3600000);
   });
 });
