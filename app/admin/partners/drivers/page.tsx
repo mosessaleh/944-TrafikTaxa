@@ -49,6 +49,7 @@ export default async function AdminDrivers() {
       isOnline: d.isOnline,
       isActive: d.isActive,
       isBusy: d.isBusy,
+      bannedUntil: d.bannedUntil ? d.bannedUntil.toISOString() : null,
       car: d.car,
       currentRideId: d.currentRideId,
       drUsername: d.drUsername,

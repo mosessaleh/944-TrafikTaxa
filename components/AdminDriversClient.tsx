@@ -12,6 +12,8 @@ import {
   Save,
   AlertTriangle,
   FileText,
+  Shield,
+  ShieldOff,
 } from 'lucide-react';
 
 // Import CPR masking function
@@ -38,6 +40,7 @@ export type Driver = {
   isOnline: boolean;
   isActive: boolean;
   isBusy: boolean;
+  bannedUntil?: string | null;
   car?: string | null;
   currentRideId?: number | null;
   drUsername: string;
@@ -62,6 +65,7 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
   const [searchTerm, setSearchTerm] = useState("");
 
   const [editDriver, setEditDriver] = useState<Driver | null>(null);
+  const [banDriver, setBanDriver] = useState<Driver | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<ActionMessage>(null);
 
@@ -201,6 +205,46 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
     }
   }
 
+  function handleToggleBan(driver: Driver) {
+    setActionMessage(null);
+    setBanDriver(driver);
+  }
+
+  function closeBanModal() {
+    setBanDriver(null);
+  }
+
+  async function handleBanDriver(banData: { duration?: number; unit?: 'hours' | 'days' | 'weeks' }) {
+    if (!banDriver) return;
+    setLoading(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/admin/drivers/${banDriver.id}/ban`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(banData),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to ban/unban driver");
+      }
+
+      setDrivers((prev) =>
+        prev.map((d) => (d.id === banDriver.id ? { ...d, bannedUntil: data.bannedUntil } : d))
+      );
+      setActionMessage({ type: "success", text: `Driver ${banData.duration ? 'banned' : 'unbanned'} successfully.` });
+      closeBanModal();
+    } catch (e: any) {
+      setActionMessage({
+        type: "error",
+        text: e?.message || "Failed to ban/unban driver",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -253,6 +297,7 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                 <th className="px-4 py-3">API Key</th>
                 <th className="px-4 py-3">Active</th>
                 <th className="px-4 py-3">Busy</th>
+                <th className="px-4 py-3">Banned</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -308,8 +353,28 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                       {d.isBusy ? 'Busy' : 'Available'}
                     </button>
                   </td>
+                  <td className="px-4 py-3">
+                    {d.bannedUntil ? (
+                      <span className="text-xs px-2 py-1 rounded-full bg-red-100 text-red-800">
+                        Banned until {new Date(d.bannedUntil).toLocaleDateString()}
+                      </span>
+                    ) : (
+                      <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
+                        Not Banned
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => handleToggleBan(d)}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                          d.bannedUntil ? 'text-red-500 hover:text-red-600 hover:bg-red-50' : 'text-gray-500 hover:text-green-600 hover:bg-green-50'
+                        }`}
+                        title={d.bannedUntil ? 'Unban Driver' : 'Ban Driver'}
+                      >
+                        {d.bannedUntil ? <ShieldOff size={16} /> : <Shield size={16} />}
+                      </button>
                       <button
                         onClick={() => openEdit(d)}
                         className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -361,6 +426,129 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
           companies={companies}
         />
       )}
+
+      {/* Ban Driver Modal */}
+      {banDriver && (
+        <BanDriverModal
+          driver={banDriver}
+          onClose={closeBanModal}
+          onSave={handleBanDriver}
+          loading={loading}
+        />
+      )}
+    </div>
+  );
+}
+
+type BanModalProps = {
+  driver: Driver;
+  onClose: () => void;
+  onSave: (data: { duration?: number; unit?: 'hours' | 'days' | 'weeks' }) => void;
+  loading: boolean;
+};
+
+function BanDriverModal({ driver, onClose, onSave, loading }: BanModalProps) {
+  const [duration, setDuration] = useState<number>(1);
+  const [unit, setUnit] = useState<'hours' | 'days' | 'weeks'>('hours');
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (driver.bannedUntil) {
+      // Unban
+      onSave({});
+    } else {
+      // Ban
+      onSave({ duration, unit });
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+          <h2 className="text-lg font-semibold text-gray-900">
+            {driver.bannedUntil ? 'Unban Driver' : 'Ban Driver'}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="text-center">
+            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <User size={24} className="text-gray-600" />
+            </div>
+            <p className="text-sm text-gray-600">
+              {driver.drFname} {driver.drLname} ({driver.drCard})
+            </p>
+          </div>
+
+          {driver.bannedUntil ? (
+            <div className="text-center">
+              <p className="text-sm text-gray-700 mb-4">
+                This driver is currently banned until {new Date(driver.bannedUntil).toLocaleString()}.
+                Are you sure you want to unban them?
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Ban Duration
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    value={duration}
+                    onChange={(e) => setDuration(parseInt(e.target.value) || 1)}
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <select
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value as 'hours' | 'days' | 'weeks')}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                    <option value="weeks">Weeks</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+        </form>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-all"
+            disabled={loading}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            onClick={handleSubmit}
+            className={`px-4 py-2 text-sm font-medium text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2 ${
+              driver.bannedUntil ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500' : 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
+            }`}
+            disabled={loading}
+          >
+            {loading ? "Processing..." : (
+              <>
+                {driver.bannedUntil ? 'Unban Driver' : 'Ban Driver'}
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
