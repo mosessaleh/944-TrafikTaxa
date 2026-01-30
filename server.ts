@@ -20,6 +20,7 @@ declare global {
   var activeOffers: Map<number, number>;
   var io: any;
   var checkForNewRides: () => void;
+  var checkOngoingRidesDistances: () => Promise<void>;
 }
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -750,8 +751,61 @@ async function checkShiftViolations() {
   }
 }
 
-// Make function globally available
+// Function to check ongoing rides distances
+async function checkOngoingRidesDistances() {
+  try {
+    const ongoingRides = await prisma.ride.findMany({
+      where: {
+        status: 'ONGOING',
+        driverId: { not: null }
+      },
+      select: {
+        id: true,
+        driverId: true,
+        startLatLon: true
+      }
+    });
+
+    for (const ride of ongoingRides) {
+      const driverId = ride.driverId;
+      const rideId = ride.id;
+      const startLatLon = ride.startLatLon as any;
+
+      if (!driverId || !startLatLon) continue;
+
+      // Get driver location
+      let driverLocation = null;
+      const connectedDriver = connectedDrivers?.get(driverId);
+      if (connectedDriver && connectedDriver.location) {
+        driverLocation = connectedDriver.location;
+      } else {
+        // Get from database
+        const driver = await prisma.comDriver.findUnique({
+          where: { id: driverId },
+          select: { lastLocation: true }
+        });
+
+        if (driver && driver.lastLocation && Array.isArray(driver.lastLocation)) {
+          driverLocation = { lat: driver.lastLocation[0], lng: driver.lastLocation[1] };
+        }
+      }
+
+      if (driverLocation) {
+        // Calculate distance in minutes
+        const eta = await calculateETA(driverLocation, startLatLon.lat, startLatLon.lon);
+        if (eta) {
+          console.log(`Driver ${driverId} has a distance of ${eta.timeMinutes} minutes to the pickup location of ride ${rideId}`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error in checkOngoingRidesDistances:', error);
+  }
+}
+
+// Make functions globally available
 global.checkForNewRides = checkForNewRides;
+global.checkOngoingRidesDistances = checkOngoingRidesDistances;
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
@@ -1265,6 +1319,13 @@ app.prepare().then(() => {
         global.checkForNewRides();
       }
     }, 12000);
+
+    // Check ongoing rides distances every 30 seconds
+    setInterval(() => {
+      if (global.checkOngoingRidesDistances) {
+        global.checkOngoingRidesDistances();
+      }
+    }, 30000);
 
     // Check for shift violations every hour (3600000 ms)
     setInterval(() => {

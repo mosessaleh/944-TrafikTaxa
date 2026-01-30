@@ -556,8 +556,71 @@ async function checkForNewRides() {
   }
 }
 
-// Make function globally available
+// Function to check ongoing rides distances
+async function checkOngoingRidesDistances() {
+  try {
+    const ongoingRides = await prisma.ride.findMany({
+      where: {
+        status: 'ONGOING',
+        driverId: { not: null }
+      },
+      select: {
+        id: true,
+        driverId: true,
+        startLatLon: true
+      }
+    });
+
+    for (const ride of ongoingRides) {
+      const driverId = ride.driverId;
+      const rideId = ride.id;
+      const startLatLon = ride.startLatLon;
+
+      if (!driverId || !startLatLon) continue;
+
+      // Get driver location
+      let driverLocation = null;
+      const connectedDriver = connectedDrivers?.get(driverId);
+      if (connectedDriver && connectedDriver.location) {
+        driverLocation = connectedDriver.location;
+      } else {
+        // Get from database
+        const driver = await prisma.comDriver.findUnique({
+          where: { id: driverId },
+          select: { lastLocation: true }
+        });
+
+        if (driver && driver.lastLocation && Array.isArray(driver.lastLocation)) {
+          driverLocation = { lat: driver.lastLocation[0], lng: driver.lastLocation[1] };
+        }
+      }
+
+      if (driverLocation) {
+        // Calculate distance in meters
+        const eta = await calculateETA(driverLocation, startLatLon.lat, startLatLon.lon);
+        if (eta) {
+          const distanceMeters = Math.round(eta.distanceKm * 1000);
+          console.log(`Driver ${driverId} has a distance of ${distanceMeters} meters to the pickup location of ride ${rideId}`);
+
+          // Send proximity notification if within 30 meters
+          if (distanceMeters < 30) {
+            const io = global.io;
+            if (io) {
+              io.to(`driver_${driverId}`).emit('pickupProximity', { rideId, distanceMeters });
+              console.log(`Sent pickupProximity to driver ${driverId} for ride ${rideId}: ${distanceMeters} meters`);
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error in checkOngoingRidesDistances:', error);
+  }
+}
+
+// Make functions globally available
 global.checkForNewRides = checkForNewRides;
+global.checkOngoingRidesDistances = checkOngoingRidesDistances;
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
@@ -1028,5 +1091,12 @@ app.prepare().then(() => {
         global.checkForNewRides();
       }
     }, 12000);
+
+    // Check ongoing rides distances every 30 seconds
+    setInterval(() => {
+      if (global.checkOngoingRidesDistances) {
+        global.checkOngoingRidesDistances();
+      }
+    }, 30000);
   });
 });
