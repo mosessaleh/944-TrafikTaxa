@@ -191,6 +191,10 @@ model Ride {
   paymentMethod  String?
   savedPaymentMethodId Int?
 
+  // Cancellation fields
+  cancellationReason String?
+  canceledBy         String? // 'driver' or 'user'
+
   // Payment reference for external payment processors (Stripe Payment Intent ID, etc.)
   paymentRef     String?
 
