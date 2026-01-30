@@ -111,32 +111,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Calculate days difference
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const lastShiftDate = new Date(lastShift.date);
-      lastShiftDate.setHours(0, 0, 0, 0);
-
-      const daysDifference = Math.ceil((today.getTime() - lastShiftDate.getTime()) / (1000 * 60 * 60 * 24));
-      const maxAllowedKm = lastShift.endKM + (daysDifference * 750);
-      console.log('Days difference:', daysDifference, 'maxAllowedKm:', maxAllowedKm, 'startKM:', startKM);
-
-      if (startKM > maxAllowedKm) {
-        return NextResponse.json(
-          {
-            error: 'Odometer reading is invalid - significant difference compared to last login',
-            message: 'Invalid odometer reading - significant difference compared to last login'
-          },
-          {
-            status: 400,
-            headers: {
-              'Access-Control-Allow-Origin': '*',
-              'Access-Control-Allow-Methods': 'POST, OPTIONS',
-              'Access-Control-Allow-Headers': 'Content-Type',
-            },
-          }
-        );
-      }
     }
 
     // Check if driver has an active shift (not ended)
