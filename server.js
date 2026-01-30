@@ -254,6 +254,13 @@ async function autoAssignRide(ride, vehicleInfo) {
             console.log(`Ride ${ride.id} assigned to driver ${driver.driverId} (${driver.timeMinutes} minutes away)`);
             console.log('Sent rideOffer data:', rideOfferData);
             console.log(`Driver ${driver.driverId} is connected and should receive the offer`);
+
+            // Send push notification to driver
+            await sendPushToDriver(driver.driverId, 'New Ride Available!', `Pickup: ${ride.pickupAddress} → Dropoff: ${ride.dropoffAddress}`, {
+              type: 'newRide',
+              rideId: ride.id
+            });
+
             // Mark as active offer
             global.activeOffers.set(ride.id, driver.driverId);
             return; // Successfully assigned
@@ -365,41 +372,41 @@ async function calculateETA(driverLocation, pickupLat, pickupLon) {
   };
 }
 
-// Function to send push notification to driver
-async function sendPushNotification(driverId, rideData) {
-  try {
-    const driver = await prisma.comDriver.findUnique({
-      where: { id: driverId },
-      select: { expoPushToken: true }
-    });
+// REMOVED: sendPushNotification function - Using only local notifications
+// async function sendPushNotification(driverId, rideData) {
+//   try {
+//     const driver = await prisma.comDriver.findUnique({
+//       where: { id: driverId },
+//       select: { expoPushToken: true }
+//     });
 
-    if (!driver || !driver.expoPushToken) {
-      console.log(`No push token for driver ${driverId}`);
-      return;
-    }
+//     if (!driver || !driver.expoPushToken) {
+//       console.log(`No push token for driver ${driverId}`);
+//       return;
+//     }
 
-    // Check if token is valid Expo push token
-    if (!Expo.isExpoPushToken(driver.expoPushToken)) {
-      console.log(`Invalid push token for driver ${driverId}: ${driver.expoPushToken}`);
-      return;
-    }
+//     // Check if token is valid Expo push token
+//     if (!Expo.isExpoPushToken(driver.expoPushToken)) {
+//       console.log(`Invalid push token for driver ${driverId}: ${driver.expoPushToken}`);
+//       return;
+//     }
 
-    const expo = new Expo();
-    const message = {
-      to: driver.expoPushToken,
-      sound: 'default',
-      title: 'New Ride Available!',
-      body: `Pickup: ${rideData.pickupAddress} → Dropoff: ${rideData.dropoffAddress}`,
-      data: { type: 'newRide', rideId: rideData.id },
-      priority: 'high',
-    };
+//     const expo = new Expo();
+//     const message = {
+//       to: driver.expoPushToken,
+//       sound: 'default',
+//       title: 'New Ride Available!',
+//       body: `Pickup: ${rideData.pickupAddress} → Dropoff: ${rideData.dropoffAddress}`,
+//       data: { type: 'newRide', rideId: rideData.id },
+//       priority: 'high',
+//     };
 
-    const ticket = await expo.sendPushNotificationsAsync([message]);
-    console.log(`Push notification sent to driver ${driverId}:`, ticket);
-  } catch (error) {
-    console.error(`Error sending push notification to driver ${driverId}:`, error);
-  }
-}
+//     const ticket = await expo.sendPushNotificationsAsync([message]);
+//     console.log(`Push notification sent to driver ${driverId}:`, ticket);
+//   } catch (error) {
+//     console.error(`Error sending push notification to driver ${driverId}:`, error);
+//   }
+// }
 
 // Function to cleanup stale currentRideId assignments
 async function cleanupStaleRideAssignments() {
@@ -702,7 +709,7 @@ app.prepare().then(() => {
 
           if (driver && driver.car) {
             const vehicle = await prisma.comVehicles.findFirst({
-              where: { regNumber: driver.car.regNumber }
+              where: { regNumber: driver.car }
             });
 
             if (vehicle) {
