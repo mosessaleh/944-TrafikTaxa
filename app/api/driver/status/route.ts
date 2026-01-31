@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
 
     const driver = await (prisma as any).comDriver.findUnique({
       where: { id: decoded.driverId },
-      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true, bannedUntil: true },
+      select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true, bannedUntil: true, rating: true },
     });
 
     if (!driver) {
@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
       bannedUntil: driver.bannedUntil ? driver.bannedUntil.toISOString() : null,
       hasActiveShift: !!activeShift,
       shiftStartTime: activeShift && activeShift.startVagt ? activeShift.startVagt.toISOString() : null,
+      rating: driver.rating ? parseFloat(driver.rating.toString()) : 5.0,
     };
 
     return NextResponse.json(response);

@@ -157,6 +157,7 @@ export async function POST(request: NextRequest) {
         id: driver.id,
         name: `${driver.drFname} ${driver.drLname}`,
         car: driver.car,
+        rating: driver.rating ? parseFloat(driver.rating.toString()) : 5.0,
       },
       shiftId: shift.id,
       shiftStartTime: shift.startVagt ? shift.startVagt.toISOString() : null,
