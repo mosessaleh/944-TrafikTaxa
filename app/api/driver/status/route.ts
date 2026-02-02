@@ -37,6 +37,38 @@ export async function GET(request: NextRequest) {
     // Driver is considered online if they have an active shift and isOnline flag is true
     const isOnline = driver.isOnline && !!activeShift;
 
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const todayStats = await prisma.ride.aggregate({
+      where: {
+        driverId: decoded.driverId,
+        status: 'COMPLETED',
+        OR: [
+          {
+            droppedAt: {
+              gte: todayStart,
+              lte: todayEnd,
+            },
+          },
+          {
+            droppedAt: null,
+            createdAt: {
+              gte: todayStart,
+              lte: todayEnd,
+            },
+          },
+        ],
+      },
+      _count: { _all: true },
+      _sum: { price: true },
+    });
+
+    const totalRidesToday = todayStats._count?._all ?? 0;
+    const earningsToday = todayStats._sum?.price ?? 0;
+
     const response = {
       isOnline: isOnline,
       isBusy: driver.isBusy,
@@ -45,6 +77,8 @@ export async function GET(request: NextRequest) {
       bannedUntil: driver.bannedUntil ? driver.bannedUntil.toISOString() : null,
       hasActiveShift: !!activeShift,
       shiftStartTime: activeShift && activeShift.startVagt ? activeShift.startVagt.toISOString() : null,
+      totalRidesToday,
+      earningsToday,
       rating: driver.rating ? parseFloat(driver.rating.toString()) : 5.0,
     };
 
