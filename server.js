@@ -7,6 +7,7 @@ const { setSocketServer } = require('./lib/socket-server');
 const { connectedDrivers } = require('./lib/connected-drivers');
 const realtimeService = require('./lib/realtime-service');
 const DriverStatusMonitor = require('./lib/driver-status-monitor');
+const { sendPushToDriver } = require('./lib/notification-service');
 const { Expo, ExpoPushMessage, ExpoPushToken } = require('expo-server-sdk');
 
 const dev = process.env.NODE_ENV !== 'production';
