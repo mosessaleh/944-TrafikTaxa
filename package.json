@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "ts-node server.js",
+    "dev": "ts-node -O \"{\\\"module\\\":\\\"commonjs\\\"}\" server.js",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

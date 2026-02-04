@@ -1,9 +1,9 @@
-import { prisma } from '@/lib/db';
+import { prisma } from './db';
 import {
   notifyUserBookingConfirmation,
   notifyUserPaymentReceived,
   notifyUserInvoiceReady,
-} from '@/lib/notify';
+} from './notify';
 import { Expo, ExpoPushMessage, ExpoPushToken } from 'expo-server-sdk';
 
 const prismaAny = prisma as any;

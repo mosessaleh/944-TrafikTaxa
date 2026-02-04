@@ -4,15 +4,15 @@ import next from 'next';
 import { Server } from 'socket.io';
 import { PrismaClient } from '@prisma/client';
 import * as jwt from 'jsonwebtoken';
-import { setSocketServer } from './lib/socket-server.js';
+import { setSocketServer } from './lib/socket-server';
 // @ts-ignore
-import { connectedDrivers } from './lib/connected-drivers.js';
+import { connectedDrivers } from './lib/connected-drivers';
 // @ts-ignore
-import realtimeService from './lib/realtime-service.js';
+import realtimeService from './lib/realtime-service';
 // @ts-ignore
-import DriverStatusMonitor from './lib/driver-status-monitor.js';
-import { sendPushToDriver } from './lib/notification-service.js';
-import { sendEmail } from './lib/email.js';
+import DriverStatusMonitor from './lib/driver-status-monitor';
+import { sendPushToDriver } from './lib/notification-service';
+import { sendEmail } from './lib/email';
 import { Expo } from 'expo-server-sdk';
 
 declare global {
