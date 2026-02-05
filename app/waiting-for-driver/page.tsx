@@ -31,9 +31,11 @@ interface Booking {
   status: string;
   pickupAddress: string;
   dropoffAddress: string;
+  stopAddress?: string | null;
   pickupTime: string;
   price: number;
   startLatLon?: [number, number] | { lat: number; lng: number };
+  stopLatLon?: [number, number] | { lat: number; lng: number };
   driver?: Driver;
 }
 
@@ -250,28 +252,42 @@ export default function WaitingForDriverPage() {
             driverMarkerRef.current.setPosition(newLocation);
 
             // Update route if passenger location available
-            if (bookingDetails?.startLatLon) {
-              const passengerLatLng = Array.isArray(bookingDetails.startLatLon)
-                ? { lat: bookingDetails.startLatLon[0], lng: bookingDetails.startLatLon[1] }
-                : { lat: bookingDetails.startLatLon.lat, lng: bookingDetails.startLatLon.lng };
+    if (bookingDetails?.startLatLon) {
+      const passengerLatLng = Array.isArray(bookingDetails.startLatLon)
+        ? { lat: bookingDetails.startLatLon[0], lng: bookingDetails.startLatLon[1] }
+        : { lat: bookingDetails.startLatLon.lat, lng: bookingDetails.startLatLon.lng };
 
-              const google = (window as any).google;
-              if (google && google.maps) {
-                const directionsService = new google.maps.DirectionsService();
-                const routeRenderer = routeRendererRef.current;
-                if (routeRenderer) {
-                  directionsService.route({
-                    origin: newLocation,
-                    destination: passengerLatLng,
-                    travelMode: google.maps.TravelMode.DRIVING
-                  }, (result: any, status: any) => {
-                    if (status === google.maps.DirectionsStatus.OK) {
-                      routeRenderer.setDirections(result);
-                    }
-                  });
-                }
-              }
+      const stopLatLng = bookingDetails.stopLatLon
+        ? Array.isArray(bookingDetails.stopLatLon)
+          ? { lat: bookingDetails.stopLatLon[0], lng: bookingDetails.stopLatLon[1] }
+          : { lat: bookingDetails.stopLatLon.lat, lng: bookingDetails.stopLatLon.lng }
+        : null;
+
+      const google = (window as any).google;
+      if (google && google.maps) {
+        const directionsService = new google.maps.DirectionsService();
+        const routeRenderer = routeRendererRef.current;
+        if (routeRenderer) {
+          const request: any = {
+            origin: newLocation,
+            destination: passengerLatLng,
+            travelMode: google.maps.TravelMode.DRIVING
+          };
+
+          if (stopLatLng) {
+            request.waypoints = [
+              { location: stopLatLng, stopover: true }
+            ];
+          }
+
+          directionsService.route(request, (result: any, status: any) => {
+            if (status === google.maps.DirectionsStatus.OK) {
+              routeRenderer.setDirections(result);
             }
+          });
+        }
+      }
+    }
           }
         });
 
@@ -499,6 +515,13 @@ export default function WaitingForDriverPage() {
         : { lat: passengerLatLngRaw.lat, lng: passengerLatLngRaw.lng }
       : null;
 
+    const stopLatLngRaw = booking.stopLatLon;
+    const stopLatLng: { lat: number; lng: number } | null = stopLatLngRaw
+      ? Array.isArray(stopLatLngRaw)
+        ? { lat: stopLatLngRaw[0], lng: stopLatLngRaw[1] }
+        : { lat: stopLatLngRaw.lat, lng: stopLatLngRaw.lng }
+      : null;
+
     if (!passengerLatLng || isNaN(passengerLatLng.lat) || isNaN(passengerLatLng.lng)) {
       console.warn('Passenger location not available');
       return;
@@ -549,6 +572,25 @@ export default function WaitingForDriverPage() {
       title: 'Pickup Location'
     });
 
+    // Add stop marker if available
+    if (stopLatLng) {
+      new google.maps.Marker({
+        position: stopLatLng,
+        map: mapRef.current,
+        icon: {
+          url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+            <svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="14" cy="14" r="13" fill="white" stroke="black" stroke-width="2"/>
+              <circle cx="14" cy="14" r="5" fill="#f59e0b"/>
+            </svg>
+          `),
+          scaledSize: new google.maps.Size(28, 28),
+          anchor: new google.maps.Point(14, 14)
+        },
+        title: 'Stop Location'
+      });
+    }
+
     // Draw route
     const directionsService = new google.maps.DirectionsService();
     routeRendererRef.current = new google.maps.DirectionsRenderer({
@@ -557,11 +599,19 @@ export default function WaitingForDriverPage() {
       polylineOptions: { strokeColor: '#3b82f6', strokeWeight: 4 }
     });
 
-    directionsService.route({
+    const baseRequest: any = {
       origin: { lat: driverLocation.lat, lng: driverLocation.lng },
       destination: passengerLatLng,
       travelMode: google.maps.TravelMode.DRIVING
-    }, (result: any, status: any) => {
+    };
+
+    if (stopLatLng) {
+      baseRequest.waypoints = [
+        { location: stopLatLng, stopover: true }
+      ];
+    }
+
+    directionsService.route(baseRequest, (result: any, status: any) => {
       if (status === google.maps.DirectionsStatus.OK && routeRendererRef.current) {
         routeRendererRef.current.setDirections(result);
       } else {
@@ -573,6 +623,9 @@ export default function WaitingForDriverPage() {
     const bounds = new google.maps.LatLngBounds();
     bounds.extend({ lat: driverLocation.lat, lng: driverLocation.lng });
     bounds.extend(passengerLatLng);
+    if (stopLatLng) {
+      bounds.extend(stopLatLng);
+    }
     mapRef.current.fitBounds(bounds);
 
     // Start updating driver location
@@ -592,11 +645,19 @@ export default function WaitingForDriverPage() {
 
             // Update route if needed
             if (routeRendererRef.current && passengerLatLng) {
-              directionsService.route({
+              const refreshRequest: any = {
                 origin: { lat: newLocation.lat, lng: newLocation.lng },
                 destination: passengerLatLng,
                 travelMode: google.maps.TravelMode.DRIVING
-              }, (result: any, status: any) => {
+              };
+
+              if (stopLatLng) {
+                refreshRequest.waypoints = [
+                  { location: stopLatLng, stopover: true }
+                ];
+              }
+
+              directionsService.route(refreshRequest, (result: any, status: any) => {
                 if (status === google.maps.DirectionsStatus.OK && routeRendererRef.current) {
                   routeRendererRef.current.setDirections(result);
                 }
@@ -720,6 +781,12 @@ export default function WaitingForDriverPage() {
               <span>From:</span>
               <span className="font-medium">{bookingDetails.pickupAddress}</span>
             </div>
+            {bookingDetails.stopAddress && (
+              <div className="flex justify-between">
+                <span>Stop:</span>
+                <span className="font-medium">{bookingDetails.stopAddress}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span>To:</span>
               <span className="font-medium">{bookingDetails.dropoffAddress}</span>

@@ -172,6 +172,7 @@ export async function GET(
       customerAddress: booking.user.address || booking.pickupAddress,
       vehicleType: booking.vehicleType.title,
       pickupAddress: booking.pickupAddress,
+      stopAddress: booking.stopAddress || null,
       dropoffAddress: booking.dropoffAddress,
       price: booking.price,
       bookingId: booking.id
@@ -403,6 +404,7 @@ export async function GET(
                         Bestilling nr: #${invoiceData.bookingId} - ${invoiceData.vehicleType}
                         <small>
                             Fra: ${invoiceData.pickupAddress}<br>
+                            ${invoiceData.stopAddress ? `Stop: ${invoiceData.stopAddress}<br>` : ''}
                             Til: ${invoiceData.dropoffAddress}
                         </small>
                     </td>

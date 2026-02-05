@@ -354,6 +354,12 @@ function InvoiceClientComponent({ invoiceId }: { invoiceId: string }) {
                     <p className="text-[11px] text-gray-500 mb-1">Drop-off Address</p>
                     <p className="text-sm text-gray-800">{invoice.ride.dropoffAddress}</p>
                   </div>
+                  {invoice.ride.stopAddress && (
+                    <div>
+                      <p className="text-[11px] text-gray-500 mb-1">Stop Address</p>
+                      <p className="text-sm text-gray-800">{invoice.ride.stopAddress}</p>
+                    </div>
+                  )}
                 </div>
                 <div className="grid sm:grid-cols-3 gap-4 p-4">
                   <div>

@@ -80,6 +80,7 @@ interface Ride {
   passengers: number;
   pickupAddress: string;
   dropoffAddress: string;
+  stopAddress?: string | null;
   scheduled: boolean;
   pickupTime: string;
   distanceKm: number;
@@ -988,7 +989,13 @@ export default function AccountClient() {
                                     <div className="flex items-start gap-3">
                                       <div className="flex flex-col items-center">
                                         <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                                        <div className="w-0.5 h-8 bg-slate-300"></div>
+                                        <div className="w-0.5 h-6 bg-slate-300"></div>
+                                        {ride.stopAddress && (
+                                          <>
+                                            <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
+                                            <div className="w-0.5 h-6 bg-slate-300"></div>
+                                          </>
+                                        )}
                                         <div className="w-3 h-3 bg-red-500 rounded-full"></div>
                                       </div>
                                       <div className="flex-1 space-y-2">
@@ -996,6 +1003,12 @@ export default function AccountClient() {
                                           <p className="text-xs font-medium text-slate-700">{t('account.history.from')}</p>
                                           <p className="text-sm text-slate-600">{ride.pickupAddress}</p>
                                         </div>
+                                        {ride.stopAddress && (
+                                          <div>
+                                            <p className="text-xs font-medium text-slate-700">{t('account.history.stop')}</p>
+                                            <p className="text-sm text-slate-600">{ride.stopAddress}</p>
+                                          </div>
+                                        )}
                                         <div>
                                           <p className="text-xs font-medium text-slate-700">{t('account.history.to')}</p>
                                           <p className="text-sm text-slate-600">{ride.dropoffAddress}</p>

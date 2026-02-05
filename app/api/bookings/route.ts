@@ -22,8 +22,15 @@ const createBookingSchema = z.object({
   dropoffAddress: z.string()
     .min(3, "Dropoff address must be at least 3 characters")
     .max(500, "Dropoff address is too long"),
+  stopAddress: z.string()
+    .min(3, "Stop address must be at least 3 characters")
+    .max(500, "Stop address is too long")
+    .optional()
+    .nullable(),
   pickupLat: z.number().min(-90).max(90).optional().nullable(),
   pickupLon: z.number().min(-180).max(180).optional().nullable(),
+  stopLat: z.number().min(-90).max(90).optional().nullable(),
+  stopLon: z.number().min(-180).max(180).optional().nullable(),
   dropoffLat: z.number().min(-90).max(90).optional().nullable(),
   dropoffLon: z.number().min(-180).max(180).optional().nullable(),
   vehicleTypeId: z.number().int().positive("Invalid vehicle type"),
@@ -33,6 +40,18 @@ const createBookingSchema = z.object({
   const now = new Date();
   const maxFuture = new Date();
   maxFuture.setDate(now.getDate() + 90);
+
+  const hasStopAddress = Boolean(data.stopAddress && data.stopAddress.trim());
+  const hasStopCoords = data.stopLat !== null && data.stopLat !== undefined
+    || data.stopLon !== null && data.stopLon !== undefined;
+
+  if (hasStopCoords && !hasStopAddress) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['stopAddress'],
+      message: 'Stop address is required when stop coordinates are provided'
+    });
+  }
 
   const addPickupError = (message: string) => {
     ctx.addIssue({
@@ -103,6 +122,7 @@ export async function GET(request: NextRequest) {
         passengers: true,
         pickupAddress: true,
         dropoffAddress: true,
+        stopAddress: true,
         scheduled: true,
         pickupTime: true,
         distanceKm: true,
@@ -159,6 +179,7 @@ export async function GET(request: NextRequest) {
          passengers: booking.passengers,
          pickupAddress: booking.pickupAddress,
          dropoffAddress: booking.dropoffAddress,
+         stopAddress: booking.stopAddress,
          pickupTime: booking.pickupTime.toISOString(),
          distanceKm: booking.distanceKm,
          durationMin: booking.durationMin,
@@ -224,12 +245,19 @@ export async function POST(request: NextRequest) {
     const rawData = await request.json();
 
     // Sanitize inputs before validation
+    const sanitizedStopAddress = typeof rawData.stopAddress === 'string'
+      ? sanitizeInput(rawData.stopAddress, 'address')
+      : '';
+
     const sanitizedData = {
       riderName: sanitizeInput(rawData.riderName, 'text'),
       pickupAddress: sanitizeInput(rawData.pickupAddress, 'address'),
       dropoffAddress: sanitizeInput(rawData.dropoffAddress, 'address'),
+      stopAddress: sanitizedStopAddress ? sanitizedStopAddress : null,
       pickupLat: rawData.pickupLat ? parseFloat(rawData.pickupLat) : null,
       pickupLon: rawData.pickupLon ? parseFloat(rawData.pickupLon) : null,
+      stopLat: rawData.stopLat ? parseFloat(rawData.stopLat) : null,
+      stopLon: rawData.stopLon ? parseFloat(rawData.stopLon) : null,
       dropoffLat: rawData.dropoffLat ? parseFloat(rawData.dropoffLat) : null,
       dropoffLon: rawData.dropoffLon ? parseFloat(rawData.dropoffLon) : null,
       vehicleTypeId: parseInt(rawData.vehicleTypeId),
@@ -264,6 +292,11 @@ export async function POST(request: NextRequest) {
         lat: validatedData.pickupLat,
         lon: validatedData.pickupLon
       },
+      stop: validatedData.stopAddress ? {
+        address: validatedData.stopAddress,
+        lat: validatedData.stopLat,
+        lon: validatedData.stopLon
+      } : null,
       dropoff: {
         address: validatedData.dropoffAddress,
         lat: validatedData.dropoffLat,
@@ -273,20 +306,49 @@ export async function POST(request: NextRequest) {
 
     let distanceKm: number, durationMin: number;
     try {
-      const result = await safeEstimateDistance(
-        {
-          address: validatedData.pickupAddress,
-          lat: validatedData.pickupLat || null,
-          lon: validatedData.pickupLon || null
-        },
-        {
-          address: validatedData.dropoffAddress,
-          lat: validatedData.dropoffLat || null,
-          lon: validatedData.dropoffLon || null
-        }
-      );
-      distanceKm = result.distanceKm;
-      durationMin = result.durationMin;
+      if (validatedData.stopAddress) {
+        const firstLeg = await safeEstimateDistance(
+          {
+            address: validatedData.pickupAddress,
+            lat: validatedData.pickupLat || null,
+            lon: validatedData.pickupLon || null
+          },
+          {
+            address: validatedData.stopAddress,
+            lat: validatedData.stopLat || null,
+            lon: validatedData.stopLon || null
+          }
+        );
+        const secondLeg = await safeEstimateDistance(
+          {
+            address: validatedData.stopAddress,
+            lat: validatedData.stopLat || null,
+            lon: validatedData.stopLon || null
+          },
+          {
+            address: validatedData.dropoffAddress,
+            lat: validatedData.dropoffLat || null,
+            lon: validatedData.dropoffLon || null
+          }
+        );
+        distanceKm = firstLeg.distanceKm + secondLeg.distanceKm;
+        durationMin = firstLeg.durationMin + secondLeg.durationMin;
+      } else {
+        const result = await safeEstimateDistance(
+          {
+            address: validatedData.pickupAddress,
+            lat: validatedData.pickupLat || null,
+            lon: validatedData.pickupLon || null
+          },
+          {
+            address: validatedData.dropoffAddress,
+            lat: validatedData.dropoffLat || null,
+            lon: validatedData.dropoffLon || null
+          }
+        );
+        distanceKm = result.distanceKm;
+        durationMin = result.durationMin;
+      }
     } catch (error: any) {
       console.error('[API] Distance calculation failed:', error);
       return NextResponse.json(
@@ -351,7 +413,9 @@ export async function POST(request: NextRequest) {
         passengers: 1,
         pickupAddress: validatedData.pickupAddress,
         dropoffAddress: validatedData.dropoffAddress,
+        stopAddress: validatedData.stopAddress || null,
         startLatLon: validatedData.pickupLat && validatedData.pickupLon ? { lat: validatedData.pickupLat, lon: validatedData.pickupLon } : null,
+        stopLatLon: validatedData.stopLat && validatedData.stopLon ? { lat: validatedData.stopLat, lon: validatedData.stopLon } : null,
         endLatLon: validatedData.dropoffLat && validatedData.dropoffLon ? { lat: validatedData.dropoffLat, lon: validatedData.dropoffLon } : null,
         scheduled: validatedData.scheduled,
         pickupTime,
@@ -515,6 +579,7 @@ export async function POST(request: NextRequest) {
             <li><strong>Rider:</strong> ${booking.riderName}</li>
             <li><strong>Vehicle:</strong> ${(booking as any).vehicleType?.title || 'Standard'}</li>
             <li><strong>Pickup:</strong> ${booking.pickupAddress}</li>
+            ${booking.stopAddress ? `<li><strong>Stop:</strong> ${booking.stopAddress}</li>` : ''}
             <li><strong>Dropoff:</strong> ${booking.dropoffAddress}</li>
             <li><strong>Time:</strong> ${booking.pickupTime.toISOString()}</li>
             <li><strong>Distance:</strong> ${booking.distanceKm} km</li>
@@ -548,6 +613,7 @@ export async function POST(request: NextRequest) {
         riderName: booking.riderName,
         pickupAddress: booking.pickupAddress,
         dropoffAddress: booking.dropoffAddress,
+        stopAddress: booking.stopAddress || null,
         pickupTime: booking.pickupTime.toISOString(),
         price: booking.price,
         status: updatedBooking?.status || booking.status,

@@ -254,11 +254,13 @@ async function autoAssignRide(ride: any, vehicleInfo: any) {
               rideData: {
                 id: ride.id,
                 pickupAddress: ride.pickupAddress,
+                stopAddress: (ride as any).stopAddress || null,
                 dropoffAddress: ride.dropoffAddress,
                 price: ride.price,
                 distanceKm: ride.distanceKm,
                 riderName: ride.riderName,
                 startLatLon: ride.startLatLon,
+                stopLatLon: (ride as any).stopLatLon || null,
                 endLatLon: ride.endLatLon,
                 vehicleTypeId: ride.vehicleTypeId
               },

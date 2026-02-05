@@ -171,7 +171,9 @@ model Ride {
   passengers     Int        @default(1)
   pickupAddress  String
   dropoffAddress String
+  stopAddress    String?    // optional extra stop address
   startLatLon    Json?      // [lat, lon] for pickup coordinates
+  stopLatLon     Json?      // [lat, lon] for stop coordinates
   endLatLon      Json?      // [lat, lon] for dropoff coordinates
   droppedOnLocation Json?   // [lat, lon] for actual dropoff location
   scheduled      Boolean    @default(false)

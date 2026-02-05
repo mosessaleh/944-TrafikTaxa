@@ -67,7 +67,8 @@ export default function AdminBookings(){
         ride.user?.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ride.user?.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         ride.pickupAddress?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        ride.dropoffAddress?.toLowerCase().includes(searchTerm.toLowerCase());
+        ride.dropoffAddress?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        ride.stopAddress?.toLowerCase().includes(searchTerm.toLowerCase());
 
       // Date filter
       const rideDate = new Date(ride.createdAt);
@@ -103,11 +104,12 @@ export default function AdminBookings(){
 
   // Export to CSV function
   const exportToCSV = () => {
-    const headers = ['ID', 'User', 'Pickup Address', 'Dropoff Address', 'Time', 'Price', 'Status', 'Payment Status', 'Payment Method', 'Explanation'];
+    const headers = ['ID', 'User', 'Pickup Address', 'Stop Address', 'Dropoff Address', 'Time', 'Price', 'Status', 'Payment Status', 'Payment Method', 'Explanation'];
     const csvData = filteredList.map(ride => [
       ride.id,
       `${ride.user?.firstName} ${ride.user?.lastName}`,
       ride.pickupAddress,
+      ride.stopAddress || '',
       ride.dropoffAddress,
       new Date(ride.pickupTime).toLocaleString(),
       ride.price,
@@ -344,18 +346,24 @@ export default function AdminBookings(){
                             </div>
                         </div>
                    </td>
-                   <td className="px-4 py-3 max-w-xs">
-                     <div className="flex flex-col gap-1">
-                        <div className="flex items-start gap-1.5 text-xs">
-                            <MapPin size={14} className="text-green-500 mt-0.5 shrink-0" />
-                            <span className="text-gray-600 truncate" title={r.pickupAddress}>{r.pickupAddress}</span>
-                        </div>
-                        <div className="flex items-start gap-1.5 text-xs">
-                            <MapPin size={14} className="text-red-500 mt-0.5 shrink-0" />
-                            <span className="text-gray-600 truncate" title={r.dropoffAddress}>{r.dropoffAddress}</span>
-                        </div>
-                     </div>
-                   </td>
+                    <td className="px-4 py-3 max-w-xs">
+                      <div className="flex flex-col gap-1">
+                         <div className="flex items-start gap-1.5 text-xs">
+                             <MapPin size={14} className="text-green-500 mt-0.5 shrink-0" />
+                             <span className="text-gray-600 truncate" title={r.pickupAddress}>{r.pickupAddress}</span>
+                         </div>
+                         {r.stopAddress && (
+                           <div className="flex items-start gap-1.5 text-xs">
+                               <MapPin size={14} className="text-amber-500 mt-0.5 shrink-0" />
+                               <span className="text-gray-600 truncate" title={r.stopAddress}>{r.stopAddress}</span>
+                           </div>
+                         )}
+                         <div className="flex items-start gap-1.5 text-xs">
+                             <MapPin size={14} className="text-red-500 mt-0.5 shrink-0" />
+                             <span className="text-gray-600 truncate" title={r.dropoffAddress}>{r.dropoffAddress}</span>
+                         </div>
+                      </div>
+                    </td>
                    <td className="px-4 py-3">
                      <div className="text-gray-900 font-medium">{new Date(r.pickupTime).toLocaleDateString()}</div>
                      <div className="text-xs text-gray-500">{new Date(r.pickupTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>

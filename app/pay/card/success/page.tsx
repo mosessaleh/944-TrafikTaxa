@@ -238,6 +238,9 @@ function PaymentSuccessContent() {
               <h3 className="font-semibold text-blue-800 mb-2">📋 Booking Details</h3>
               <div className="text-sm text-blue-700 space-y-1">
                 <p><strong>From:</strong> {bookingDetails.pickupAddress}</p>
+                {bookingDetails.stopAddress && (
+                  <p><strong>Stop:</strong> {bookingDetails.stopAddress}</p>
+                )}
                 <p><strong>To:</strong> {bookingDetails.dropoffAddress}</p>
                 <p><strong>Time:</strong> {new Date(bookingDetails.pickupTime).toLocaleString()}</p>
                 <p><strong>Status:</strong> <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">{bookingDetails.status}</span></p>

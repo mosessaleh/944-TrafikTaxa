@@ -34,7 +34,7 @@ function formatDKK(n:number){
 }
 
 type Vehicle = { id:number; key:string; title:string; capacity:number; multiplier:number };
-enum FavApply { Pickup='pickup', Dropoff='dropoff' }
+enum FavApply { Pickup='pickup', Dropoff='dropoff', Stop='stop' }
 type FavItem = { id:number; label:string; address:string; lat:number|null; lon:number|null };
 type Me = { id:number; firstName:string; lastName:string; email?:string; role?:string } | null;
 
@@ -72,6 +72,9 @@ export default function BookClient(){
   const [dropoff, setDropoff] = useState('');
   const [pickupSel, setPickupSel] = useState<Suggestion|null>(null);
   const [dropoffSel, setDropoffSel] = useState<Suggestion|null>(null);
+  const [showStop, setShowStop] = useState(false);
+  const [stop, setStop] = useState('');
+  const [stopSel, setStopSel] = useState<Suggestion|null>(null);
   const [riderName, setRiderName] = useState('');
   const [vehicleId, setVehicleId] = useState<number|null>(null);
 
@@ -198,7 +201,7 @@ export default function BookClient(){
     };
 
     loadVehicles();
-  }, [pickupSel?.lat, pickupSel?.lon, dropoffSel?.lat, dropoffSel?.lon, vehicleId]);
+  }, [pickupSel?.lat, pickupSel?.lon, dropoffSel?.lat, dropoffSel?.lon, stopSel?.lat, stopSel?.lon, vehicleId]);
 
   const { data: vehicleData } = useSWR('/api/vehicle-types', (url) =>
     fetch(url).then(r => r.json()).then(j => j?.ok ? j.items || [] : [])
@@ -214,18 +217,21 @@ export default function BookClient(){
   const favorites = favoritesData || [];
 
 
-  const bothSelected = !!(pickupSel && dropoffSel);
+  const bothSelected = !!(pickupSel && dropoffSel) && (!showStop || !!stopSel);
   const quotePayload = useMemo(() => ({
     pickupAddress: pickupSel?.text || '',
     dropoffAddress: dropoffSel?.text || '',
+    stopAddress: showStop && stopSel ? stopSel.text : null,
     pickupLat: pickupSel?.lat ?? null,
     pickupLon: pickupSel?.lon ?? null,
+    stopLat: showStop && stopSel ? stopSel.lat ?? null : null,
+    stopLon: showStop && stopSel ? stopSel.lon ?? null : null,
     dropoffLat: dropoffSel?.lat ?? null,
     dropoffLon: dropoffSel?.lon ?? null,
     when: whenType === 'now' ? new Date().toISOString() : new Date(when).toISOString(),
     passengers: 1,
     vehicleTypeId: vehicleId || undefined
-  }), [pickupSel, dropoffSel, whenType, when, vehicleId]);
+  }), [pickupSel, dropoffSel, stopSel, showStop, whenType, when, vehicleId]);
 
     // Initialize Google Maps
     const initializeMap = async () => {
@@ -309,6 +315,9 @@ export default function BookClient(){
             if (!pickupSel) {
               setPickupSel(suggestion);
               setPickup(address);
+            } else if (showStop && !stopSel) {
+              setStopSel(suggestion);
+              setStop(address);
             } else if (!dropoffSel) {
               setDropoffSel(suggestion);
               setDropoff(address);
@@ -364,6 +373,7 @@ export default function BookClient(){
 
       const hasPickup = !!(pickupSel && pickupSel.lat && pickupSel.lon);
       const hasDropoff = !!(dropoffSel && dropoffSel.lat && dropoffSel.lon);
+      const hasStop = !!(stopSel && stopSel.lat && stopSel.lon);
 
       // Clear existing markers and polylines
       // Note: Google Maps handles this automatically when we recreate them
@@ -413,6 +423,28 @@ export default function BookClient(){
         pickupMarker.addListener('click', () => infoWindow.open(map, pickupMarker));
         markers.push(pickupMarker);
         bounds.extend(pickupMarker.getPosition());
+      }
+
+      // Add stop marker (amber) if available
+      if (hasStop && stopSel) {
+        const stopMarker = new (google as any).maps.Marker({
+          position: { lat: stopSel.lat, lng: stopSel.lon },
+          map,
+          icon: {
+            path: (google as any).maps.SymbolPath.CIRCLE,
+            scale: 6,
+            fillColor: '#f59e0b',
+            fillOpacity: 1,
+            strokeColor: '#ffffff',
+            strokeWeight: 2
+          }
+        });
+        const infoWindow = new (google as any).maps.InfoWindow({
+          content: `<strong>Stop:</strong><br>${stopSel.text}`
+        });
+        stopMarker.addListener('click', () => infoWindow.open(map, stopMarker));
+        markers.push(stopMarker);
+        bounds.extend(stopMarker.getPosition());
       }
 
       // Add dropoff marker (red) if available
@@ -495,11 +527,17 @@ export default function BookClient(){
           }
         });
 
-        const request = {
+        const request: any = {
           origin: { lat: pickupSel.lat, lng: pickupSel.lon },
           destination: { lat: dropoffSel.lat, lng: dropoffSel.lon },
           travelMode: (google as any).maps.TravelMode.DRIVING
         };
+
+        if (hasStop && stopSel) {
+          request.waypoints = [
+            { location: { lat: stopSel.lat, lng: stopSel.lon }, stopover: true }
+          ];
+        }
 
         directionsService.route(request, (result: any, status: any) => {
           if (status === (google as any).maps.DirectionsStatus.OK) {
@@ -508,10 +546,16 @@ export default function BookClient(){
             console.warn('Directions request failed:', status);
             // Fallback to straight line
             const polyline = new (google as any).maps.Polyline({
-              path: [
-                { lat: pickupSel.lat, lng: pickupSel.lon },
-                { lat: dropoffSel.lat, lng: dropoffSel.lon }
-              ],
+              path: hasStop && stopSel
+                ? [
+                    { lat: pickupSel.lat, lng: pickupSel.lon },
+                    { lat: stopSel.lat, lng: stopSel.lon },
+                    { lat: dropoffSel.lat, lng: dropoffSel.lon }
+                  ]
+                : [
+                    { lat: pickupSel.lat, lng: pickupSel.lon },
+                    { lat: dropoffSel.lat, lng: dropoffSel.lon }
+                  ],
               strokeColor: '#3b82f6',
               strokeWeight: 4,
               strokeOpacity: 0.8,
@@ -528,7 +572,7 @@ export default function BookClient(){
   // Update map when locations are selected or vehicles are loaded
   useEffect(() => {
     updateMapWithLocations();
-  }, [pickupSel, dropoffSel, availableVehicles, currentLocation]);
+  }, [pickupSel, dropoffSel, stopSel, availableVehicles, currentLocation]);
 
   // Check location permission on mount
   useEffect(() => {
@@ -975,8 +1019,11 @@ export default function BookClient(){
         passengers: 1,
         pickupAddress: quotePayload.pickupAddress,
         dropoffAddress: quotePayload.dropoffAddress,
+        stopAddress: showStop && stopSel ? stopSel.text : null,
         pickupLat: quotePayload.pickupLat,
         pickupLon: quotePayload.pickupLon,
+        stopLat: showStop && stopSel ? stopSel.lat ?? null : null,
+        stopLon: showStop && stopSel ? stopSel.lon ?? null : null,
         dropoffLat: quotePayload.dropoffLat,
         dropoffLon: quotePayload.dropoffLon,
         vehicleTypeId: vehicleId!,
@@ -1015,6 +1062,12 @@ export default function BookClient(){
       if(!saveModal.target) return;
       const addr = saveModal.address?.trim();
       if(!addr) return;
+      const targetSelection =
+        saveModal.target === FavApply.Pickup
+          ? pickupSel
+          : saveModal.target === FavApply.Dropoff
+            ? dropoffSel
+            : stopSel;
       const r = await fetch('/api/favorites',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -1022,8 +1075,8 @@ export default function BookClient(){
         body: JSON.stringify({
           label: saveModal.name||'Favorite',
           address: addr,
-          lat: (saveModal.target===FavApply.Pickup? pickupSel?.lat: dropoffSel?.lat)??null,
-          lon: (saveModal.target===FavApply.Pickup? pickupSel?.lon: dropoffSel?.lon)??null
+          lat: targetSelection?.lat ?? null,
+          lon: targetSelection?.lon ?? null
         })
       });
       const j = await r.json();
@@ -1045,9 +1098,13 @@ export default function BookClient(){
     if(to===FavApply.Pickup){
       setPickupSel(s);
       setPickup(s.text);
-    } else {
+    } else if(to===FavApply.Dropoff) {
       setDropoffSel(s);
       setDropoff(s.text);
+    } else {
+      setShowStop(true);
+      setStopSel(s);
+      setStop(s.text);
     }
     setPickModal({ open:false, target:null });
   }
@@ -1258,6 +1315,79 @@ export default function BookClient(){
                   )}
                 </div>
 
+                {/* Optional Stop */}
+                <div className="space-y-2">
+                  {!showStop ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowStop(true)}
+                      className="text-xs text-cyan-600 hover:text-cyan-700 font-medium inline-flex items-center gap-1"
+                    >
+                      <span>➕</span>
+                      {t('book.add_stop')}
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-2">
+                          <span className="text-amber-600">🛑</span>
+                          {t('book.stop_address')}
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setPickModal({ open: true, target: FavApply.Stop })}
+                            className="text-xs text-cyan-600 hover:text-cyan-700 font-medium inline-flex items-center gap-1"
+                          >
+                            <span>⭐</span>
+                            {t('book.favorites')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowStop(false);
+                              setStop('');
+                              setStopSel(null);
+                            }}
+                            className="text-xs text-slate-500 hover:text-slate-700 font-medium inline-flex items-center gap-1"
+                          >
+                            ✕ {t('book.remove_stop')}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <div className="flex-1">
+                          <AddressAutocomplete
+                            label=""
+                            name="stop"
+                            value={stop}
+                            onChange={v => {
+                              setStop(v);
+                              setStopSel(null);
+                            }}
+                            onSelect={s => {
+                              setStopSel(s);
+                              setStop(s.text);
+                            }}
+                          />
+                        </div>
+                        {stopSel && (
+                          <Star
+                            onClick={() =>
+                              setSaveModal({
+                                open: true,
+                                target: FavApply.Stop,
+                                name: '',
+                                address: stopSel?.text || ''
+                              })
+                            }
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Dropoff Address */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-3">
@@ -1464,6 +1594,7 @@ export default function BookClient(){
                         !pickupSel?.lon ||
                         !dropoffSel?.lat ||
                         !dropoffSel?.lon ||
+                        (showStop && (!stopSel?.lat || !stopSel?.lon)) ||
                         !riderName.trim()
                       }
                       className={`w-full px-5 py-3.5 rounded-2xl font-semibold text-sm sm:text-base transition-all duration-150 flex items-center justify-center gap-2 min-h-[48px] ${
