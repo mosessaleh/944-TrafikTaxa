@@ -3,6 +3,10 @@ import { prisma } from '@/lib/db';
 import { requireDriverByJWT } from '@/lib/auth';
 import { validateDriverApiOrigin } from '@/lib/security-headers';
 import { getSocketServer } from '@/lib/socket-server';
+import { chargeSavedPaymentMethod } from '@/lib/payment-processor';
+import { calculateDistance } from '@/lib/distance';
+
+const PICKUP_COUNTDOWN_DURATION_SEC = 300;
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   // Validate request origin for driver API
@@ -37,7 +41,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       where: { id: rideId },
       include: {
         user: true,
-        vehicleType: true
+        vehicleType: true,
+        savedPaymentMethod: true
       }
     });
 
@@ -65,11 +70,45 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const timeDiffMs = now.getTime() - acceptedAt.getTime();
     const timeDiffMin = Math.floor(timeDiffMs / (1000 * 60));
 
-    // For distance, we need driver's location history or approximate
-    // For simplicity, use a fixed distance or calculate based on time (assuming average speed)
-    // In real implementation, you'd track actual distance traveled
-    const averageSpeedKmh = 30; // Assume 30 km/h average
-    const distanceKm = (timeDiffMin / 60) * averageSpeedKmh;
+    // Enforce 5-minute pickup countdown based on proximity trigger
+    const proximityMap = (global as any).pickupProximitySent as Map<string, any> | undefined;
+    const proximityKey = `${rideId}_${driver.id}`;
+    const proximityData = proximityMap?.get?.(proximityKey);
+    if (!proximityData || !proximityData.countdownStart) {
+      return NextResponse.json({ ok: false, error: 'Pickup countdown has not started yet' }, { status: 400 });
+    }
+
+    const countdownDuration = proximityData.countdownDuration || PICKUP_COUNTDOWN_DURATION_SEC;
+    const elapsedFromCountdown = proximityData.expiredAt
+      ? countdownDuration
+      : Math.floor((Date.now() - proximityData.countdownStart) / 1000);
+
+    if (elapsedFromCountdown < countdownDuration) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Pickup countdown has not expired yet',
+        data: {
+          remainingSec: Math.max(0, countdownDuration - elapsedFromCountdown)
+        }
+      }, { status: 400 });
+    }
+
+    // Estimate distance traveled using location at proximity start vs latest known driver location
+    let distanceKm = 0;
+    const startLocation = proximityData.startLocation;
+    if (startLocation && typeof startLocation.lat === 'number' && typeof startLocation.lng === 'number') {
+      let currentLocation: { lat: number; lng: number } | null = null;
+      if (Array.isArray(driver.lastLocation) && driver.lastLocation.length >= 2) {
+        const lastLat = Number(driver.lastLocation[0]);
+        const lastLng = Number(driver.lastLocation[1]);
+        if (!Number.isNaN(lastLat) && !Number.isNaN(lastLng)) {
+          currentLocation = { lat: lastLat, lng: lastLng };
+        }
+      }
+      if (currentLocation) {
+        distanceKm = calculateDistance(startLocation.lat, startLocation.lng, currentLocation.lat, currentLocation.lng);
+      }
+    }
 
     // Calculate cost based on settings
     const settings = await prisma.settings.findFirst();
@@ -94,28 +133,69 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // This would integrate with payment processor to deduct from driver's account
     // For now, we'll just record it
 
-    // Update ride
-    await prisma.ride.update({
-      where: { id: rideId },
-      data: {
-        status: 'CANCELED',
-        cancellationReason: reason,
-        canceledBy: canceledBy,
-        distanceKm: distanceKm,
-        durationMin: timeDiffMin,
-        price: Math.round(cost), // Update price to the calculated cost
-      } as any
+    const roundedCost = Math.round(cost);
+    const paymentResult = ride.savedPaymentMethodId
+      ? await chargeSavedPaymentMethod({
+          ...ride,
+          savedPaymentMethod: ride.savedPaymentMethod,
+          price: roundedCost
+        })
+      : null;
+
+    await prisma.$transaction(async (tx) => {
+      // Update ride
+      await tx.ride.update({
+        where: { id: rideId },
+        data: {
+          status: 'CANCELED',
+          cancellationReason: reason,
+          canceledBy: canceledBy,
+          distanceKm: distanceKm,
+          durationMin: timeDiffMin,
+          price: roundedCost,
+          paymentStatus: paymentResult?.success ? 'PAID' : ride.paymentStatus,
+          paymentRef: paymentResult?.transactionId || ride.paymentRef,
+          explanation: paymentResult?.success
+            ? `Cancellation fee paid - Transaction: ${paymentResult.transactionId}`
+            : ride.explanation
+        } as any
+      });
+
+      // Update driver status to online and available
+      await tx.comDriver.update({
+        where: { id: driver.id },
+        data: {
+          isOnline: true,
+          isBusy: false,
+          currentRideId: null
+        }
+      });
+
+      // Create invoice for the cancellation fee
+      const invoiceNumber = `CANCEL-${rideId}-${Date.now()}`;
+      await tx.invoice.create({
+        data: {
+          invoiceNumber: invoiceNumber,
+          userId: ride.userId,
+          rideId: rideId,
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          paymentStatus: paymentResult?.success ? 'PAID' : 'UNPAID',
+          status: 1,
+          paymentMethod: ride.paymentMethod,
+          paymentRef: paymentResult?.transactionId || `cancel-${rideId}`,
+          paymentDate: paymentResult?.success ? new Date() : null,
+          paymentAmount: roundedCost,
+          confirmedBy: null,
+          confirmedAt: paymentResult?.success ? new Date() : null,
+          receiptNumber: invoiceNumber
+        }
+      });
     });
 
-    // Update driver status to online and available
-    await prisma.comDriver.update({
-      where: { id: driver.id },
-      data: {
-        isOnline: true,
-        isBusy: false,
-        currentRideId: null
-      }
-    });
+    // Clean up pickup proximity state
+    if (proximityMap?.delete) {
+      proximityMap.delete(proximityKey);
+    }
 
     // Get socket server
     const io = getSocketServer();
@@ -147,34 +227,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       });
     }
 
-    // Create invoice for the cancellation fee
-    const invoiceNumber = `CANCEL-${rideId}-${Date.now()}`;
-    await prisma.invoice.create({
-      data: {
-        invoiceNumber: invoiceNumber,
-        userId: ride.userId,
-        rideId: rideId,
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-        paymentStatus: 'PAID', // Since payment is deducted immediately
-        status: 1,
-        paymentMethod: ride.paymentMethod,
-        paymentRef: `cancel-${rideId}`,
-        paymentDate: new Date(),
-        paymentAmount: Math.round(cost),
-        confirmedBy: null, // System confirmed
-        confirmedAt: new Date(),
-        receiptNumber: invoiceNumber
-      }
-    });
-
     return NextResponse.json({
       ok: true,
       data: {
         message: 'Ride canceled successfully',
-        cost: Math.round(cost),
+        cost: roundedCost,
         distanceKm: distanceKm,
         timeMin: timeDiffMin,
-        invoiceNumber: invoiceNumber
+        paymentStatus: paymentResult?.success ? 'PAID' : ride.paymentStatus,
+        paymentRef: paymentResult?.transactionId || ride.paymentRef
       }
     });
 

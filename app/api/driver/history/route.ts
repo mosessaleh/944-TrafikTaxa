@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     const rides = await prisma.ride.findMany({
       where: {
         driverId: driver.id,
-        status: 'COMPLETED',
+        status: { in: ['COMPLETED', 'CANCELED'] },
         createdAt: {
           gte: start,
           lte: end,

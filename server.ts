@@ -18,6 +18,7 @@ import { Expo } from 'expo-server-sdk';
 declare global {
   var rejectedRides: Map<number, Set<number>>;
   var activeOffers: Map<number, number>;
+  var pickupProximitySent: Map<string, any>;
   var io: any;
   var checkForNewRides: () => void;
   var checkOngoingRidesDistances: () => Promise<void>;
@@ -35,6 +36,13 @@ global.rejectedRides = rejectedRides;
 // In-memory storage for active ride offers
 const activeOffers = new Map(); // rideId -> driverId currently being offered
 global.activeOffers = activeOffers;
+
+// In-memory storage for pickup proximity notifications sent
+const pickupProximitySent = new Map(); // rideId_driverId -> { driverId, sentAt, countdownStart, countdownDuration, distanceMeters }
+global.pickupProximitySent = pickupProximitySent;
+
+const PICKUP_PROXIMITY_THRESHOLD_METERS = 30;
+const PICKUP_COUNTDOWN_DURATION_SEC = 300;
 
 // Function to get available vehicles for a ride
 async function getAvailableVehiclesForRide(ride: any) {
@@ -380,14 +388,86 @@ async function calculateETA(driverLocation: any, pickupLat: any, pickupLon: any)
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const distanceKm = R * c;
-  const timeMinutes = Math.ceil(distanceKm * 2); // Assuming 30 km/h average speed
+  const distanceKmRaw = R * c;
+  const timeMinutes = Math.ceil(distanceKmRaw * 2); // Assuming 30 km/h average speed
 
   return {
-    distanceKm: Number(distanceKm.toFixed(1)),
+    distanceKm: Number(distanceKmRaw.toFixed(3)),
+    distanceKmRaw,
     timeMinutes: timeMinutes,
     timeText: timeMinutes <= 1 ? 'Arriving now' : `${timeMinutes} min`
   };
+}
+
+async function maybeSendPickupProximity(rideId: any, driverId: any, driverLocation: any, startLatLon: any) {
+  if (!rideId || !driverId || !driverLocation || !startLatLon) return;
+
+  const eta = await calculateETA(driverLocation, startLatLon.lat, startLatLon.lon);
+  if (!eta) return;
+
+  const distanceMeters = Math.round((eta.distanceKmRaw ?? eta.distanceKm) * 1000);
+  console.log(`Driver ${driverId} has a distance of ${distanceMeters} meters to the pickup location of ride ${rideId}`);
+
+  if (distanceMeters < PICKUP_PROXIMITY_THRESHOLD_METERS) {
+    const proximityKey = `${rideId}_${driverId}`;
+    const io = global.io;
+
+    if (!global.pickupProximitySent.has(proximityKey)) {
+      const countdownStart = Date.now();
+      if (io) {
+        io.to(`driver_${driverId}`).emit('pickupProximity', {
+          rideId,
+          distanceMeters,
+          countdownStart,
+          countdownDuration: PICKUP_COUNTDOWN_DURATION_SEC
+        });
+        console.log(`Sent pickupProximity to driver ${driverId} for ride ${rideId}: ${distanceMeters} meters, countdown start: ${new Date(countdownStart).toISOString()}`);
+      }
+      global.pickupProximitySent.set(proximityKey, {
+        driverId,
+        sentAt: Date.now(),
+        countdownStart,
+        countdownDuration: PICKUP_COUNTDOWN_DURATION_SEC,
+        distanceMeters,
+        startLocation: {
+          lat: startLatLon.lat,
+          lng: startLatLon.lon
+        },
+        expiredAt: null
+      });
+
+      setTimeout(() => {
+        const driverSocket = connectedDrivers?.get(driverId);
+        const activeIo = global.io;
+        const existing = global.pickupProximitySent.get(proximityKey);
+        if (!existing || existing.expiredAt) return;
+        if (driverSocket && driverSocket.socketId && activeIo) {
+          activeIo.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
+          console.log(`Sent pickupCountdownExpired to driver ${driverId} for ride ${rideId}`);
+        }
+        global.pickupProximitySent.set(proximityKey, {
+          ...existing,
+          expiredAt: Date.now()
+        });
+      }, PICKUP_COUNTDOWN_DURATION_SEC * 1000);
+    } else {
+      const proximityData = global.pickupProximitySent.get(proximityKey);
+      if (proximityData && proximityData.countdownStart) {
+        const duration = proximityData.countdownDuration || PICKUP_COUNTDOWN_DURATION_SEC;
+        const elapsed = Math.floor((Date.now() - proximityData.countdownStart) / 1000);
+        if (elapsed >= duration && !proximityData.expiredAt) {
+          if (io) {
+            io.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
+            console.log(`Sent pickupCountdownExpired (on proximity re-check) to driver ${driverId} for ride ${rideId}`);
+          }
+          global.pickupProximitySent.set(proximityKey, {
+            ...proximityData,
+            expiredAt: Date.now()
+          });
+        }
+      }
+    }
+  }
 }
 
 // REMOVED: sendPushNotification function - Using only local notifications
@@ -464,6 +544,13 @@ async function cleanupStaleRideAssignments() {
               rideAccepted: 0
             }
           });
+
+          // Clean up pickup proximity sent
+          const proximityKey = `${driver.currentRideId}_${driver.id}`;
+          if (global.pickupProximitySent.has(proximityKey)) {
+            global.pickupProximitySent.delete(proximityKey);
+            console.log(`Cleaned up pickup proximity for ride ${driver.currentRideId}, driver ${driver.id}`);
+          }
         }
       }
     }
@@ -793,11 +880,7 @@ async function checkOngoingRidesDistances() {
       }
 
       if (driverLocation) {
-        // Calculate distance in minutes
-        const eta = await calculateETA(driverLocation, startLatLon.lat, startLatLon.lon);
-        if (eta) {
-          console.log(`Driver ${driverId} has a distance of ${eta.timeMinutes} minutes to the pickup location of ride ${rideId}`);
-        }
+        await maybeSendPickupProximity(rideId, driverId, driverLocation, startLatLon);
       }
     }
   } catch (error) {
@@ -870,6 +953,46 @@ app.prepare().then(() => {
         } catch (error) {
           console.error('Error updating driver status:', error);
         }
+
+        // Check if driver has an ongoing ride with expired pickup countdown
+        try {
+          const driver = await prisma.comDriver.findUnique({
+            where: { id: data.driverId },
+            select: { currentRideId: true }
+          });
+
+          if (driver && driver.currentRideId) {
+            const ride = await prisma.ride.findUnique({
+              where: { id: driver.currentRideId },
+              select: { id: true, status: true, driverId: true }
+            });
+
+            if (ride && (ride.status === 'ONGOING' || ride.status === 'DISPATCHED')) {
+              const proximityKey = `${ride.id}_${data.driverId}`;
+              if (global.pickupProximitySent.has(proximityKey)) {
+                const proximityData = global.pickupProximitySent.get(proximityKey);
+                if (proximityData && proximityData.countdownStart) {
+                  const duration = proximityData.countdownDuration || PICKUP_COUNTDOWN_DURATION_SEC;
+                  const elapsed = Math.floor((Date.now() - proximityData.countdownStart) / 1000);
+                  if (elapsed >= duration) {
+                    socket.emit('pickupCountdownExpired', { rideId: ride.id });
+                    console.log(`Sent pickupCountdownExpired on reconnect to driver ${data.driverId} for ride ${ride.id}`);
+                  } else {
+                    socket.emit('pickupProximity', {
+                      rideId: ride.id,
+                      distanceMeters: proximityData.distanceMeters ?? 0,
+                      countdownStart: proximityData.countdownStart,
+                      countdownDuration: duration
+                    });
+                    console.log(`Re-sent pickupProximity on reconnect to driver ${data.driverId} for ride ${ride.id}`);
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error checking pickup countdown status on reconnect:', error);
+        }
       }
     });
 
@@ -920,7 +1043,7 @@ app.prepare().then(() => {
                 });
 
                 let eta = null;
-                if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'IN_PROGRESS')) {
+                if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'IN_PROGRESS' || ride.status === 'DISPATCHED')) {
                   const startLatLon = ride.startLatLon as any;
                   eta = await calculateETA(data.location, startLatLon.lat, startLatLon.lon);
                 }
@@ -944,6 +1067,10 @@ app.prepare().then(() => {
                   eta: eta,
                   timestamp: new Date().toISOString()
                 });
+
+                if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'DISPATCHED')) {
+                  await maybeSendPickupProximity(driver.currentRideId, data.driverId, data.location, ride.startLatLon);
+                }
               }
             }
           }
@@ -988,7 +1115,8 @@ app.prepare().then(() => {
           data: {
             driverId: data.driverId,
             car: driver.car || null,
-            status: 'ONGOING'
+            status: 'ONGOING',
+            acceptedAt: new Date()
           }
         });
 
@@ -1172,6 +1300,13 @@ app.prepare().then(() => {
       // Clear active offer
       global.activeOffers.delete(data.rideId);
 
+      // Clear pickup proximity sent
+      const rejectProximityKey = `${data.rideId}_${data.driverId}`;
+      if (global.pickupProximitySent.has(rejectProximityKey)) {
+        global.pickupProximitySent.delete(rejectProximityKey);
+        console.log(`Cleared pickup proximity for rejected ride ${data.rideId}, driver ${data.driverId}`);
+      }
+
       // Send rejection confirmation to clear offer on client side
       socket.emit('rideOfferRejected', {
         rideId: data.rideId
@@ -1221,6 +1356,13 @@ app.prepare().then(() => {
 
         // Clear active offer
         global.activeOffers.delete(data.rideId);
+
+        // Clear pickup proximity sent
+        const timeoutProximityKey = `${data.rideId}_${data.driverId}`;
+        if (global.pickupProximitySent.has(timeoutProximityKey)) {
+          global.pickupProximitySent.delete(timeoutProximityKey);
+          console.log(`Cleared pickup proximity for timed out ride ${data.rideId}, driver ${data.driverId}`);
+        }
 
         // Send timeout event to stop the sound and clear offer
         socket.emit('rideOfferTimeout', {

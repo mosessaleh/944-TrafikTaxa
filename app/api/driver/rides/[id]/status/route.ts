@@ -88,6 +88,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       data: updateData,
     });
 
+    if (status === 'PICKED_UP' || status === 'COMPLETED') {
+      const proximityMap = (global as any).pickupProximitySent as Map<string, any> | undefined;
+      const proximityKey = `${rideId}_${driver.id}`;
+      if (proximityMap?.delete) {
+        proximityMap.delete(proximityKey);
+      }
+    }
+
     // Notify driver via socket
     const io = (global as any).io;
     if (io) {

@@ -61,6 +61,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         stopLatLon: ride.stopLatLon || null,
         endLatLon: ride.endLatLon,
         pickupTime: ride.pickupTime.toISOString(),
+        acceptedAt: ride.acceptedAt ? ride.acceptedAt.toISOString() : null,
         price: ride.price,
         status: ride.status,
         distanceKm: ride.distanceKm,

@@ -24,8 +24,11 @@ const activeOffers = new Map(); // rideId -> driverId currently being offered
 global.activeOffers = activeOffers;
 
 // In-memory storage for pickup proximity notifications sent
-const pickupProximitySent = new Map(); // rideId -> { driverId, sentAt, countdownStart }
+const pickupProximitySent = new Map(); // rideId_driverId -> { driverId, sentAt, countdownStart, countdownDuration, distanceMeters }
 global.pickupProximitySent = pickupProximitySent;
+
+const PICKUP_PROXIMITY_THRESHOLD_METERS = 30;
+const PICKUP_COUNTDOWN_DURATION_SEC = 300;
 
 // Function to get available vehicles for a ride
 async function getAvailableVehiclesForRide(ride) {
@@ -367,14 +370,89 @@ async function calculateETA(driverLocation, pickupLat, pickupLon) {
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  const distanceKm = R * c;
-  const timeMinutes = Math.ceil(distanceKm * 2); // Assuming 30 km/h average speed
+  const distanceKmRaw = R * c;
+  const timeMinutes = Math.ceil(distanceKmRaw * 2); // Assuming 30 km/h average speed
 
   return {
-    distanceKm: Number(distanceKm.toFixed(1)),
+    distanceKm: Number(distanceKmRaw.toFixed(3)),
+    distanceKmRaw,
     timeMinutes: timeMinutes,
     timeText: timeMinutes <= 1 ? 'Arriving now' : `${timeMinutes} min`
   };
+}
+
+async function maybeSendPickupProximity(rideId, driverId, driverLocation, startLatLon) {
+  if (!rideId || !driverId || !driverLocation || !startLatLon) return;
+
+  const eta = await calculateETA(driverLocation, startLatLon.lat, startLatLon.lon);
+  if (!eta) return;
+
+  const distanceMeters = Math.round((eta.distanceKmRaw ?? eta.distanceKm) * 1000);
+  console.log(`Driver ${driverId} has a distance of ${distanceMeters} meters to the pickup location of ride ${rideId}`);
+
+  if (distanceMeters < PICKUP_PROXIMITY_THRESHOLD_METERS) {
+    const proximityKey = `${rideId}_${driverId}`;
+    const io = global.io;
+
+    if (!pickupProximitySent.has(proximityKey)) {
+      const countdownStart = Date.now();
+
+      if (io) {
+        io.to(`driver_${driverId}`).emit('pickupProximity', {
+          rideId,
+          distanceMeters,
+          countdownStart,
+          countdownDuration: PICKUP_COUNTDOWN_DURATION_SEC
+        });
+        console.log(`Sent pickupProximity to driver ${driverId} for ride ${rideId}: ${distanceMeters} meters, countdown start: ${new Date(countdownStart).toISOString()}`);
+      }
+
+      pickupProximitySent.set(proximityKey, {
+        driverId,
+        sentAt: Date.now(),
+        countdownStart,
+        countdownDuration: PICKUP_COUNTDOWN_DURATION_SEC,
+        distanceMeters,
+        startLocation: {
+          lat: startLatLon.lat,
+          lng: startLatLon.lon
+        },
+        expiredAt: null
+      });
+
+      // Schedule pickupCountdownExpired event after 5 minutes
+      setTimeout(() => {
+        const driverSocket = connectedDrivers?.get(driverId);
+        const activeIo = global.io;
+        const existing = pickupProximitySent.get(proximityKey);
+        if (!existing || existing.expiredAt) return;
+        if (driverSocket && driverSocket.socketId && activeIo) {
+          activeIo.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
+          console.log(`Sent pickupCountdownExpired to driver ${driverId} for ride ${rideId}`);
+        }
+        pickupProximitySent.set(proximityKey, {
+          ...existing,
+          expiredAt: Date.now()
+        });
+      }, PICKUP_COUNTDOWN_DURATION_SEC * 1000);
+    } else {
+      const proximityData = pickupProximitySent.get(proximityKey);
+      if (proximityData && proximityData.countdownStart) {
+        const duration = proximityData.countdownDuration || PICKUP_COUNTDOWN_DURATION_SEC;
+        const elapsed = Math.floor((Date.now() - proximityData.countdownStart) / 1000);
+        if (elapsed >= duration && !proximityData.expiredAt) {
+          if (io) {
+            io.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
+            console.log(`Sent pickupCountdownExpired (on proximity re-check) to driver ${driverId} for ride ${rideId}`);
+          }
+          pickupProximitySent.set(proximityKey, {
+            ...proximityData,
+            expiredAt: Date.now()
+          });
+        }
+      }
+    }
+  }
 }
 
 // REMOVED: sendPushNotification function - Using only local notifications
@@ -614,61 +692,9 @@ async function checkOngoingRidesDistances() {
         }
       }
 
-      if (driverLocation) {
-        // Calculate distance in meters
-        const eta = await calculateETA(driverLocation, startLatLon.lat, startLatLon.lon);
-        if (eta) {
-          const distanceMeters = Math.round(eta.distanceKm * 1000);
-          console.log(`Driver ${driverId} has a distance of ${distanceMeters} meters to the pickup location of ride ${rideId}`);
-
-          // Send proximity notification if within 30 meters and not already sent
-          if (distanceMeters < 30) {
-            const proximityKey = `${rideId}_${driverId}`;
-            const io = global.io;
-            if (!global.pickupProximitySent.has(proximityKey)) {
-              const countdownStart = Date.now();
-              if (io) {
-                io.to(`driver_${driverId}`).emit('pickupProximity', {
-                  rideId,
-                  distanceMeters,
-                  countdownStart,
-                  countdownDuration: 300 // 5 minutes in seconds
-                });
-                console.log(`Sent pickupProximity to driver ${driverId} for ride ${rideId}: ${distanceMeters} meters, countdown start: ${new Date(countdownStart).toISOString()}`);
-                global.pickupProximitySent.set(proximityKey, {
-                  driverId,
-                  sentAt: Date.now(),
-                  countdownStart
-                });
-
-                // Schedule pickupCountdownExpired event after 5 minutes
-                setTimeout(() => {
-                  const driverSocket = connectedDrivers?.get(driverId);
-                  if (driverSocket && driverSocket.socketId) {
-                    io.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
-                    console.log(`Sent pickupCountdownExpired to driver ${driverId} for ride ${rideId}`);
-                  }
-                  // Clean up the proximity sent record
-                  global.pickupProximitySent.delete(proximityKey);
-                }, 300 * 1000); // 5 minutes in milliseconds
-              }
-            } else {
-              // Check if countdown has already expired but driver reconnected
-              const proximityData = global.pickupProximitySent.get(proximityKey);
-              if (proximityData && proximityData.countdownStart) {
-                const elapsed = Math.floor((Date.now() - proximityData.countdownStart) / 1000);
-                if (elapsed >= 300) {
-                  // Countdown already expired, send expired event
-                  if (io) {
-                    io.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
-                    console.log(`Sent pickupCountdownExpired (on reconnect) to driver ${driverId} for ride ${rideId}`);
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
+    if (driverLocation) {
+      await maybeSendPickupProximity(rideId, driverId, driverLocation, startLatLon);
+    }
     }
   } catch (error) {
     console.error('Error in checkOngoingRidesDistances:', error);
@@ -754,16 +780,25 @@ app.prepare().then(() => {
               select: { id: true, status: true, driverId: true }
             });
 
-            if (ride && ride.status === 'ONGOING') {
+            if (ride && (ride.status === 'ONGOING' || ride.status === 'DISPATCHED')) {
               const proximityKey = `${ride.id}_${data.driverId}`;
-              if (global.pickupProximitySent.has(proximityKey)) {
-                const proximityData = global.pickupProximitySent.get(proximityKey);
+              if (pickupProximitySent.has(proximityKey)) {
+                const proximityData = pickupProximitySent.get(proximityKey);
                 if (proximityData && proximityData.countdownStart) {
+                  const duration = proximityData.countdownDuration || PICKUP_COUNTDOWN_DURATION_SEC;
                   const elapsed = Math.floor((Date.now() - proximityData.countdownStart) / 1000);
-                  if (elapsed >= 300) {
+                  if (elapsed >= duration) {
                     // Countdown already expired, send expired event
                     socket.emit('pickupCountdownExpired', { rideId: ride.id });
                     console.log(`Sent pickupCountdownExpired on reconnect to driver ${data.driverId} for ride ${ride.id}`);
+                  } else {
+                    socket.emit('pickupProximity', {
+                      rideId: ride.id,
+                      distanceMeters: proximityData.distanceMeters ?? 0,
+                      countdownStart: proximityData.countdownStart,
+                      countdownDuration: duration
+                    });
+                    console.log(`Re-sent pickupProximity on reconnect to driver ${data.driverId} for ride ${ride.id}`);
                   }
                 }
               }
@@ -822,9 +857,9 @@ app.prepare().then(() => {
                 });
 
                 let eta = null;
-                if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'IN_PROGRESS')) {
-                  eta = await calculateETA(data.location, ride.startLatLon.lat, ride.startLatLon.lon);
-                }
+            if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'IN_PROGRESS' || ride.status === 'DISPATCHED')) {
+              eta = await calculateETA(data.location, ride.startLatLon.lat, ride.startLatLon.lon);
+            }
 
                 // Get driver info
                 const driverInfo = await prisma.comDriver.findUnique({
@@ -837,15 +872,19 @@ app.prepare().then(() => {
                   }
                 });
 
-                io.to(`booking_${driver.currentRideId}`).emit('driverInfoUpdate', {
-                  bookingId: driver.currentRideId,
-                  driverId: data.driverId,
-                  driver: driverInfo,
-                  location: data.location,
-                  eta: eta,
-                  timestamp: new Date().toISOString()
-                });
-              }
+            io.to(`booking_${driver.currentRideId}`).emit('driverInfoUpdate', {
+              bookingId: driver.currentRideId,
+              driverId: data.driverId,
+              driver: driverInfo,
+              location: data.location,
+              eta: eta,
+              timestamp: new Date().toISOString()
+            });
+
+            if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'DISPATCHED')) {
+              await maybeSendPickupProximity(driver.currentRideId, data.driverId, data.location, ride.startLatLon);
+            }
+          }
             }
           }
         } catch (error) {
@@ -889,7 +928,8 @@ app.prepare().then(() => {
           data: {
             driverId: data.driverId,
             car: driver.car || null,
-            status: 'ONGOING'
+            status: 'ONGOING',
+            acceptedAt: new Date()
           }
         });
 
