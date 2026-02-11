@@ -89,6 +89,8 @@ interface Ride {
   status: string;
   paymentStatus: string;
   explanation: string;
+  cancellationReason?: string | null;
+  canceledBy?: string | null;
   paymentMethod?: string;
   createdAt: string;
   vehicleTypeId: number;
@@ -1101,6 +1103,28 @@ export default function AccountClient() {
                                   <div className="bg-slate-50 rounded-lg p-3">
                                     <p className="text-sm text-slate-600">{ride.explanation}</p>
                                   </div>
+                                </div>
+
+                                {ride.status === 'CANCELED' && (ride.cancellationReason || ride.canceledBy) && (
+                                  <div>
+                                    <h4 className="font-semibold text-slate-700 mb-2">{t('account.history.cancellationDetails')}</h4>
+                                    <div className="bg-red-50 rounded-lg p-3 space-y-2">
+                                      {ride.cancellationReason && (
+                                        <p className="text-sm text-red-700">
+                                          <span className="font-semibold">{t('account.history.cancellationReason')}:</span> {ride.cancellationReason}
+                                        </p>
+                                      )}
+                                      {ride.canceledBy && (
+                                        <p className="text-sm text-red-700">
+                                          <span className="font-semibold">{t('account.history.canceledBy')}:</span> {t(`account.history.canceledBy_${ride.canceledBy}`)}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="bg-amber-50 rounded-lg p-3 text-sm text-amber-800">
+                                  {t('account.history.complaintHint')}
                                 </div>
                                 {/* Actions */}
                                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:justify-end">

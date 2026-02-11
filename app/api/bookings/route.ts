@@ -130,6 +130,8 @@ export async function GET(request: NextRequest) {
         price: true,
         status: true,
         explanation: true,
+        cancellationReason: true,
+        canceledBy: true,
         paymentStatus: true,
         paymentMethod: true,
         createdAt: true,
@@ -173,27 +175,29 @@ export async function GET(request: NextRequest) {
     );
 
     // Transform bookings for frontend consumption
-     const transformedBookings = bookingsWithComplaints.map((booking: typeof bookingsWithComplaints[number]) => ({
-         id: booking.id,
-         riderName: booking.riderName,
-         passengers: booking.passengers,
-         pickupAddress: booking.pickupAddress,
-         dropoffAddress: booking.dropoffAddress,
-         stopAddress: booking.stopAddress,
-         pickupTime: booking.pickupTime.toISOString(),
-         distanceKm: booking.distanceKm,
-         durationMin: booking.durationMin,
-         price: booking.price,
-         status: booking.status,
-         paymentStatus: booking.paymentStatus,
-         explanation: booking.explanation,
-         paymentMethod: booking.paymentMethod,
-         scheduled: booking.scheduled,
-         vehicleType: booking.vehicleType || { title: 'Standard', capacity: 4 },
-         hasComplaint: booking.hasComplaint,
-         complaintStatus: booking.complaintStatus,
-         createdAt: booking.createdAt.toISOString()
-       }));
+      const transformedBookings = bookingsWithComplaints.map((booking: typeof bookingsWithComplaints[number]) => ({
+          id: booking.id,
+          riderName: booking.riderName,
+          passengers: booking.passengers,
+          pickupAddress: booking.pickupAddress,
+          dropoffAddress: booking.dropoffAddress,
+          stopAddress: booking.stopAddress,
+          pickupTime: booking.pickupTime.toISOString(),
+          distanceKm: booking.distanceKm,
+          durationMin: booking.durationMin,
+          price: booking.price,
+          status: booking.status,
+          paymentStatus: booking.paymentStatus,
+          explanation: booking.explanation,
+          cancellationReason: (booking as any).cancellationReason || null,
+          canceledBy: (booking as any).canceledBy || null,
+          paymentMethod: booking.paymentMethod,
+          scheduled: booking.scheduled,
+          vehicleType: booking.vehicleType || { title: 'Standard', capacity: 4 },
+          hasComplaint: booking.hasComplaint,
+          complaintStatus: booking.complaintStatus,
+          createdAt: booking.createdAt.toISOString()
+        }));
 
     return NextResponse.json({
       ok: true,
