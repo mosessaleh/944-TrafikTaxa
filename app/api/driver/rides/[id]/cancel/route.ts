@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db';
 import { requireDriverByJWT } from '@/lib/auth';
 import { validateDriverApiOrigin } from '@/lib/security-headers';
 import { getSocketServer } from '@/lib/socket-server';
-import { chargeSavedPaymentMethod } from '@/lib/payment-processor';
+import { chargeCancellationFee } from '@/lib/payment-processor';
 import { calculateDistance } from '@/lib/distance';
 
 const PICKUP_COUNTDOWN_DURATION_SEC = 300;
@@ -133,14 +133,35 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     // This would integrate with payment processor to deduct from driver's account
     // For now, we'll just record it
 
-    const roundedCost = Math.round(cost);
-    const paymentResult = ride.savedPaymentMethodId
-      ? await chargeSavedPaymentMethod({
-          ...ride,
-          savedPaymentMethod: ride.savedPaymentMethod,
-          price: roundedCost
-        })
+    const roundedCost = Math.max(0, Math.round(cost));
+    const originalPriceDkk = Math.max(0, Math.round(ride.price || 0));
+    const shouldProcessPayment = Boolean(
+      ride.paymentRef || (ride.savedPaymentMethodId && roundedCost > 0)
+    );
+    const paymentResult = shouldProcessPayment
+      ? await chargeCancellationFee(
+          {
+            ...ride,
+            savedPaymentMethod: ride.savedPaymentMethod
+          },
+          roundedCost,
+          originalPriceDkk
+        )
       : null;
+
+    const paymentStatus = paymentResult?.success
+      ? 'PAID'
+      : roundedCost > 0
+        ? 'UNPAID'
+        : 'PAID';
+
+    const explanation = paymentResult?.success
+      ? paymentResult.refundId
+        ? `Cancellation fee adjusted - Refund ${paymentResult.refundedAmountDkk} DKK, Refund: ${paymentResult.refundId}`
+        : paymentResult.canceledAuthorization && roundedCost <= 0
+          ? 'Authorization canceled - No cancellation fee'
+          : `Cancellation fee paid - Transaction: ${paymentResult.transactionId}`
+      : ride.explanation;
 
     await prisma.$transaction(async (tx) => {
       // Update ride
@@ -153,11 +174,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           distanceKm: distanceKm,
           durationMin: timeDiffMin,
           price: roundedCost,
-          paymentStatus: paymentResult?.success ? 'PAID' : ride.paymentStatus,
+          paymentStatus: paymentStatus,
           paymentRef: paymentResult?.transactionId || ride.paymentRef,
-          explanation: paymentResult?.success
-            ? `Cancellation fee paid - Transaction: ${paymentResult.transactionId}`
-            : ride.explanation
+          explanation: explanation
         } as any
       });
 
@@ -179,7 +198,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           userId: ride.userId,
           rideId: rideId,
           dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-          paymentStatus: paymentResult?.success ? 'PAID' : 'UNPAID',
+          paymentStatus: paymentStatus,
           status: 1,
           paymentMethod: ride.paymentMethod,
           paymentRef: paymentResult?.transactionId || `cancel-${rideId}`,
@@ -234,7 +253,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         cost: roundedCost,
         distanceKm: distanceKm,
         timeMin: timeDiffMin,
-        paymentStatus: paymentResult?.success ? 'PAID' : ride.paymentStatus,
+        paymentStatus: paymentStatus,
         paymentRef: paymentResult?.transactionId || ride.paymentRef
       }
     });

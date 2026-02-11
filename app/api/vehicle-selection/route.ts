@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { computePrice } from '@/lib/price';
 import { calculateDistance, getDistanceAndDuration } from '@/lib/distance';
+import { computePrice } from '@/lib/price';
+import Holidays from 'date-holidays';
 
 interface VehicleSelectionRequest {
   pickupLat: number;
@@ -13,242 +14,160 @@ interface VehicleSelectionRequest {
   excludedDriverIds?: number[];
 }
 
-interface DriverInfo {
-  rating: number;
-  createdAt: Date;
-  comId: number;
+interface RawDriver {
+  driverId: number;
+  location: { lat: number; lng: number };
+  socketId?: string | null;
+  vehicleTypeId: number | null;
 }
 
-interface VehicleScore {
+interface CandidateDriver {
+  driverId: number;
   vehicleId: number;
-  distance: number;
+  vehicleTypeId: number;
+  location: { lat: number; lng: number };
+  distanceKm: number;
   etaMinutes: number;
-  score: number;
-  rating: number;
-  commissionRate: number;
-  experience: 'low' | 'medium' | 'high';
   income: number;
+  incomePerHour: number;
+  hoursWorked: number;
+  rating: number;
+  ratingScore: number;
+  completedRides: number;
+  experienceScore: number;
+}
+
+const SPEED_KMH = 30;
+const SHORT_WINDOW_MINUTES = 5;
+const MID_WINDOW_MINUTES = 10;
+const LONG_WINDOW_MINUTES = 20;
+const DISTANCE_MATRIX_LIMIT = 6;
+
+const VEHICLE_TYPE_MAP: Record<string, number> = {
+  SEDAN5: 1,
+  SEVEN_NO_BAG: 2,
+  VAN: 3,
+  LIMO: 4
+};
+
+const PRIORITY_TYPES: Record<number, number[]> = {
+  1: [1, 2, 3, 4], // Sedan: sedan -> 7-seat -> van -> limo
+  2: [2, 3], // 7-seat: 7-seat -> van
+  3: [3], // Van: van only
+  4: [4] // Limo: limo only
+};
+
+const ALLOWED_TYPES: Record<number, number[]> = {
+  1: [1, 2, 3, 4],
+  2: [2, 3],
+  3: [3],
+  4: [4]
+};
+
+function estimateEtaMinutes(distanceKm: number) {
+  return Math.ceil((distanceKm / SPEED_KMH) * 60);
+}
+
+function isHoliday(at: Date) {
+  const dayOfWeek = at.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return true;
+
+  const hd = new Holidays('DK');
+  const holidays = hd.getHolidays(at.getFullYear());
+  const ymd = at.toISOString().slice(0, 10);
+  if (holidays.some((h: any) => h.date.slice(0, 10) === ymd)) return true;
+
+  const list = (process.env.HOLIDAYS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.includes(ymd);
+}
+
+function getHourlyRateThreshold(vehicleTypeId: number, at: Date) {
+  const hour = at.getHours();
+  const holiday = isHoliday(at);
+  const night = hour < 6 || hour >= 18;
+
+  const thresholds = {
+    1: { day: 400, night: 500, holiday: 600 },
+    2: { day: 450, night: 550, holiday: 650 },
+    3: { day: 500, night: 600, holiday: 750 },
+    4: { day: 800, night: 900, holiday: 1100 }
+  } as Record<number, { day: number; night: number; holiday: number }>;
+
+  const vehicleThreshold = thresholds[vehicleTypeId] || thresholds[1];
+  if (holiday) return vehicleThreshold.holiday;
+  if (night) return vehicleThreshold.night;
+  return vehicleThreshold.day;
+}
+
+function getPriorityTypes(vehicleTypeId: number) {
+  return PRIORITY_TYPES[vehicleTypeId] || [vehicleTypeId];
+}
+
+function getAllowedTypes(vehicleTypeId: number) {
+  return ALLOWED_TYPES[vehicleTypeId] || [vehicleTypeId];
+}
+
+function sortByScore(candidates: CandidateDriver[]) {
+  return [...candidates].sort((a, b) => {
+    if (a.incomePerHour !== b.incomePerHour) return a.incomePerHour - b.incomePerHour;
+    if (a.income !== b.income) return a.income - b.income;
+    if (a.ratingScore !== b.ratingScore) return b.ratingScore - a.ratingScore;
+    if (a.experienceScore !== b.experienceScore) return b.experienceScore - a.experienceScore;
+    if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+    return a.distanceKm - b.distanceKm;
+  });
+}
+
+function sortByClosest(candidates: CandidateDriver[]) {
+  return [...candidates].sort((a, b) => {
+    if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+    return a.distanceKm - b.distanceKm;
+  });
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: VehicleSelectionRequest = await request.json();
-    const { pickupLat, pickupLon, vehicleTypeId, maxVehicles = 3, dropoffLat, dropoffLon, excludedDriverIds = [] } = body;
+    const {
+      pickupLat,
+      pickupLon,
+      vehicleTypeId,
+      maxVehicles = 3,
+      dropoffLat,
+      dropoffLon,
+      excludedDriverIds = []
+    } = body;
 
-    // console.log('=== VEHICLE SELECTION API START ===');
-    // console.log('Input:', { pickupLat, pickupLon, vehicleTypeId, maxVehicles, dropoffLat, dropoffLon });
-
-    if (!pickupLat || !pickupLon || !vehicleTypeId) {
-      return NextResponse.json({
-        ok: false,
-        error: 'Missing required parameters: pickupLat, pickupLon, vehicleTypeId'
-      }, { status: 400 });
-    }
-
-    // Get available drivers from connected drivers (real-time socket data)
-    const connectedDrivers = (global as any).connectedDrivers || new Map();
-
-    // New strategy based on vehicle type
-    let searchTypes: number[] = [];
-    let maxDistanceMinutes = 10; // Default 10 minutes
-
-    if (vehicleTypeId === 1) { // SEDAN5
-      searchTypes = [1]; // First try SEDAN5
-    } else if (vehicleTypeId === 2) { // SEVEN_NO_BAG
-      searchTypes = [2]; // First try SEVEN_NO_BAG
-    } else if (vehicleTypeId === 3) { // VAN
-      searchTypes = [3]; // Only VAN
-    } else if (vehicleTypeId === 4) { // LIMO
-      searchTypes = [4]; // Only LIMO
-    }
-
-    let availableDrivers: any[] = [];
-    let foundWithin10 = false;
-
-    // First, try to find within 10 minutes
-    for (const type of searchTypes) {
-      availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
-        .filter(([driverId, driverData]) =>
-          driverData.vehicleTypeId === type &&
-          driverData.location &&
-          !excludedDriverIds.includes(parseInt(driverId))
-        )
-        .map(([driverId, driverData]) => ({
-          driverId: parseInt(driverId),
-          location: driverData.location,
-          socketId: driverData.socketId,
-          vehicleTypeId: type
-        }));
-
-      // Check if any within 10 minutes
-      const within10 = availableDrivers.filter(driver => {
-        const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
-        const eta = Math.ceil((distance / 30) * 60);
-        return eta <= 10;
-      });
-
-      if (within10.length > 0) {
-        availableDrivers = within10;
-        foundWithin10 = true;
-        break;
-      }
-    }
-
-    // If no drivers within 10 minutes for SEDAN5, try alternatives in order
-    if (!foundWithin10 && vehicleTypeId === 1) {
-      const alternatives = [2, 3, 4]; // SEVEN_NO_BAG, VAN, LIMO
-      for (const altType of alternatives) {
-        availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
-          .filter(([driverId, driverData]) =>
-            driverData.vehicleTypeId === altType &&
-            driverData.location &&
-            !excludedDriverIds.includes(parseInt(driverId))
-          )
-          .map(([driverId, driverData]) => ({
-            driverId: parseInt(driverId),
-            location: driverData.location,
-            socketId: driverData.socketId,
-            vehicleTypeId: altType
-          }));
-
-        const within10 = availableDrivers.filter(driver => {
-          const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
-          const eta = Math.ceil((distance / 30) * 60);
-          return eta <= 10;
-        });
-
-        if (within10.length > 0) {
-          availableDrivers = within10;
-          foundWithin10 = true;
-          break;
-        }
-      }
-    }
-
-    // If no drivers within 10 minutes for SEVEN_NO_BAG, try VAN
-    if (!foundWithin10 && vehicleTypeId === 2) {
-      availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
-        .filter(([driverId, driverData]) =>
-          driverData.vehicleTypeId === 3 && // VAN
-          driverData.location &&
-          !excludedDriverIds.includes(parseInt(driverId))
-        )
-        .map(([driverId, driverData]) => ({
-          driverId: parseInt(driverId),
-          location: driverData.location,
-          socketId: driverData.socketId,
-          vehicleTypeId: 3
-        }));
-
-      const within10 = availableDrivers.filter(driver => {
-        const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
-        const eta = Math.ceil((distance / 30) * 60);
-        return eta <= 10;
-      });
-
-      if (within10.length > 0) {
-        availableDrivers = within10;
-        foundWithin10 = true;
-      }
-    }
-
-    // If still no drivers within 10 minutes, expand to 11-20 minutes and allow any type
-    if (!foundWithin10) {
-      maxDistanceMinutes = 20;
-      let allTypes: number[] = [];
-      if (vehicleTypeId === 1) {
-        allTypes = [1, 2, 3, 4];
-      } else if (vehicleTypeId === 2) {
-        allTypes = [2, 3];
-      } else {
-        allTypes = [vehicleTypeId];
-      }
-
-      availableDrivers = (Array.from(connectedDrivers.entries()) as [string, any][])
-        .filter(([driverId, driverData]) =>
-          allTypes.includes(driverData.vehicleTypeId) &&
-          driverData.location &&
-          !excludedDriverIds.includes(parseInt(driverId))
-        )
-        .map(([driverId, driverData]) => ({
-          driverId: parseInt(driverId),
-          location: driverData.location,
-          socketId: driverData.socketId,
-          vehicleTypeId: driverData.vehicleTypeId
-        }));
-
-      // Filter to 11-20 minutes
-      availableDrivers = availableDrivers.filter(driver => {
-        const distance = calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng);
-        const eta = Math.ceil((distance / 30) * 60);
-        return eta >= 11 && eta <= 20;
-      });
-    }
-
-    // Database fallback with same logic
-    let useDatabaseFallback = false;
-    if (availableDrivers.length === 0) {
-      console.log('No connected drivers found, using database fallback for vehicle selection');
-      useDatabaseFallback = true;
-
-      // Get online drivers from database
-      const onlineDriversFromDb: any[] = await (prisma as any).comDriver.findMany({
-        where: {
-          isOnline: true,
-          isActive: true,
-          car: { not: null },
-          currentRideId: null, // Driver must not have a current ride
-          isBusy: false // Driver must not be busy
+    if (pickupLat === undefined || pickupLon === undefined || !vehicleTypeId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Missing required parameters: pickupLat, pickupLon, vehicleTypeId'
         },
-        select: {
-          id: true,
-          car: true
-        }
-      });
-
-      if (onlineDriversFromDb.length > 0) {
-        const carPlates = onlineDriversFromDb.map(d => d.car).filter(car => car !== null);
-
-        // Get vehicles with location data
-        const vehiclesWithLocation: any[] = await (prisma as any).comVehicles.findMany({
-          where: {
-            regNumber: { in: carPlates },
-            lastLat: { not: null },
-            lastLon: { not: null }
-          },
-          select: {
-            id: true,
-            regNumber: true,
-            lastLat: true,
-            lastLon: true,
-            vehicleType: true
-          }
-        });
-
-        // Map vehicle type strings to IDs
-        const vehicleTypeMap: { [key: string]: number } = {
-          'SEDAN5': 1,
-          'SEVEN_NO_BAG': 2,
-          'VAN': 3,
-          'LIMO': 4
-        };
-
-        // Create availableDrivers from database data with same logic
-        availableDrivers = vehiclesWithLocation.map(vehicle => {
-          const driver = onlineDriversFromDb.find(d => d.car === vehicle.regNumber);
-          if (driver) {
-            const mappedVehicleTypeId = vehicleTypeMap[vehicle.vehicleType] || vehicleTypeId; // Fallback to requested type
-            return {
-              driverId: driver.id,
-              location: { lat: vehicle.lastLat, lng: vehicle.lastLon },
-              socketId: null,
-              vehicleTypeId: mappedVehicleTypeId
-            };
-          }
-          return null;
-        }).filter(d => d !== null) as any[];
-      }
+        { status: 400 }
+      );
     }
+
+    const excludedSet = new Set((excludedDriverIds || []).map((id) => Number(id)));
+    const connectedDrivers = (global as any).connectedDrivers || new Map();
+    const useDatabaseFallback = false;
+
+    let availableDrivers: RawDriver[] = (Array.from(connectedDrivers.entries()) as [string, any][])
+      .filter(([driverId, driverData]) =>
+        driverData?.location &&
+        typeof driverData.location.lat === 'number' &&
+        typeof driverData.location.lng === 'number' &&
+        !excludedSet.has(Number(driverId))
+      )
+      .map(([driverId, driverData]) => ({
+        driverId: Number(driverId),
+        location: driverData.location,
+        socketId: driverData.socketId || null,
+        vehicleTypeId: Number(driverData.vehicleTypeId || 0) || null
+      }));
 
     if (availableDrivers.length === 0) {
       return NextResponse.json({
@@ -256,36 +175,46 @@ export async function POST(request: NextRequest) {
         vehicles: [],
         totalAvailable: 0,
         selectedCount: 0,
-        strategy: useDatabaseFallback ? 'Database fallback: no online drivers with location' : 'Real-time socket-based selection: no connected drivers'
+        windowUsed: 'none',
+        selectionMode: 'none',
+        useDatabaseFallback
       });
     }
 
-    // Get driver and vehicle details from database for scoring
-    const driverIds = availableDrivers.map(d => d.driverId);
-    const onlineDrivers: any[] = await (prisma as any).comDriver.findMany({
+    const driverIds = availableDrivers.map((d) => d.driverId);
+    const now = new Date();
+
+    const driverRecords: any[] = await (prisma as any).comDriver.findMany({
       where: {
         id: { in: driverIds },
         isActive: true,
         car: { not: null },
-        currentRideId: null, // Driver must not have a current ride
-        isBusy: false // Driver must not be busy
+        currentRideId: null,
+        isBusy: false,
+        OR: [{ bannedUntil: null }, { bannedUntil: { lte: now } }]
       },
       select: {
         id: true,
         car: true,
-        rating: true,
-        createdAt: true,
-        comId: true
+        rating: true
       }
     });
 
-    // Filter availableDrivers to only include drivers that are not busy
-    const availableDriverIds = onlineDrivers.map(d => d.id);
-    availableDrivers = availableDrivers.filter(d => availableDriverIds.includes(d.driverId));
+    if (driverRecords.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        vehicles: [],
+        totalAvailable: 0,
+        selectedCount: 0,
+        windowUsed: 'none',
+        selectionMode: 'none',
+        useDatabaseFallback
+      });
+    }
 
-    const carPlates = onlineDrivers.map((d: any) => d.car).filter((car: any): car is string => car !== null);
+    const driverRecordMap = new Map(driverRecords.map((d) => [d.id, d]));
+    const carPlates = driverRecords.map((d) => d.car).filter((car: any): car is string => car !== null);
 
-    // Get vehicles (we still need vehicle IDs for response)
     const vehicles: any[] = await (prisma as any).comVehicles.findMany({
       where: {
         regNumber: { in: carPlates }
@@ -293,302 +222,264 @@ export async function POST(request: NextRequest) {
       select: {
         id: true,
         regNumber: true,
-        comId: true
+        vehicleType: true
       }
     });
 
-    // Get company commission rates
-    const companyIds = [...new Set(vehicles.map((v: any) => v.comId))];
-    const companies: any[] = await (prisma as any).PartnerCompany.findMany({
+    const vehicleMap = new Map(vehicles.map((v: any) => [v.regNumber, v]));
+
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+
+    const shifts: any[] = await (prisma as any).driversvagt.findMany({
       where: {
-        id: { in: companyIds }
+        drId: { in: driverIds },
+        date: {
+          gte: startOfDay,
+          lt: endOfDay
+        }
       },
       select: {
-        id: true,
-        commissionRate: true
+        drId: true,
+        startVagt: true,
+        endVagt: true,
+        workTime: true
       }
     });
 
-    const companyMap = new Map(companies.map((c: any) => [c.id, c.commissionRate]));
-    const driverMap = new Map(onlineDrivers.map((d: any) => [d.car, {
-      rating: d.rating,
-      createdAt: d.createdAt,
-      comId: d.comId
-    } as DriverInfo]));
+    const hoursMap = new Map<number, number>();
+    for (const shift of shifts) {
+      const workTimeRaw = shift.workTime;
+      const workTime = workTimeRaw ? Number(workTimeRaw) : 0;
+      let hours = 0;
+      if (!Number.isNaN(workTime) && workTime > 0) {
+        hours = workTime;
+      } else if (shift.startVagt) {
+        const start = new Date(shift.startVagt).getTime();
+        const end = shift.endVagt ? new Date(shift.endVagt).getTime() : now.getTime();
+        hours = Math.max((end - start) / (1000 * 60 * 60), 0);
+      }
 
-    // Calculate target income based on current time
-    const now = new Date();
-    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
-    const dayOfWeek = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const hour = now.getHours();
-    const isDayTime = hour >= 6 && hour < 18;
-    let targetIncome: number;
-    let margin: number;
-    if (isWeekend) {
-      targetIncome = 600;
-      margin = 100;
-    } else {
-      if (isDayTime) {
-        targetIncome = 400;
-        margin = 25;
-      } else {
-        targetIncome = 550;
-        margin = 25;
+      if (hours > 0) {
+        hoursMap.set(shift.drId, (hoursMap.get(shift.drId) || 0) + hours);
       }
     }
 
-    // Get daily incomes for drivers
-    const incomes: any[] = await (prisma as any).Ride.groupBy({
-      by: ['car'],
+    const incomeGroups: any[] = await (prisma as any).ride.groupBy({
+      by: ['driverId'],
       where: {
-        car: { in: carPlates },
+        driverId: { in: driverIds },
         status: 'COMPLETED',
         createdAt: {
-          gte: new Date(today + 'T00:00:00.000Z'),
-          lt: new Date(today + 'T23:59:59.999Z')
+          gte: startOfDay,
+          lt: endOfDay
         }
       },
       _sum: {
         price: true
+      },
+      _count: {
+        _all: true
       }
     });
-    const incomeMap = new Map(incomes.map((i: any) => [i.car, i._sum.price || 0]));
 
-    // Calculate distances using real-time socket locations
-    const driverDistances = availableDrivers.map((driver: any) => ({
-      driver,
-      distance: calculateDistance(pickupLat, pickupLon, driver.location.lat, driver.location.lng)
-    }));
+    const incomeMap = new Map(incomeGroups.map((g: any) => [g.driverId, Number(g._sum.price || 0)]));
+    const completedMap = new Map(incomeGroups.map((g: any) => [g.driverId, Number(g._count._all || 0)]));
 
-    // Sort by distance and select top candidates (e.g., within 20km)
-    const candidates = driverDistances
-      .filter(item => item.distance <= 20) // Only drivers within 20km
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, Math.min(10, availableDrivers.length)); // Take top 10 closest
+    const candidates: CandidateDriver[] = [];
 
-    // Get precise distances using Google for vehicle selection API
-    const candidateDestinations = candidates.map(item => ({
-      lat: item.driver.location.lat,
-      lng: item.driver.location.lng
-    }));
+    for (const raw of availableDrivers) {
+      const driver = driverRecordMap.get(raw.driverId);
+      if (!driver || !driver.car) continue;
+      const vehicle = vehicleMap.get(driver.car);
+      if (!vehicle) continue;
 
-    let googleResults = [];
-    try {
-      const { getDistanceAndDuration } = require('@/lib/distance');
-      googleResults = await getDistanceAndDuration(
-        [{ lat: pickupLat, lng: pickupLon }],
-        candidateDestinations
-      );
-    } catch (error) {
-      console.warn('Failed to get Google distances for vehicle selection:', error);
-      googleResults = candidateDestinations.map(() => null);
-    }
+      const resolvedVehicleTypeId = raw.vehicleTypeId || VEHICLE_TYPE_MAP[vehicle.vehicleType] || vehicleTypeId;
+      const distanceKm = calculateDistance(pickupLat, pickupLon, raw.location.lat, raw.location.lng);
+      const etaMinutes = estimateEtaMinutes(distanceKm);
+      const rating = Number(driver.rating || 0);
+      const completedRides = completedMap.get(driver.id) || 0;
+      const income = incomeMap.get(driver.id) || 0;
+      const hoursWorked = hoursMap.get(driver.id) || 0;
+      const incomePerHour = hoursWorked > 0 ? income / hoursWorked : income;
+      const ratingScore =
+        rating >= 5
+          ? 10
+          : rating >= 4.5
+            ? 8
+            : rating >= 4
+              ? 6
+              : rating >= 3.5
+                ? 4
+                : rating >= 3
+                  ? 2
+                  : 0;
+      const experienceScore = Math.floor(completedRides / 100) * 3;
 
-    const candidateResults = candidates.map((candidate, index) => {
-      let distance = candidate.distance;
-      let etaMinutes = Math.ceil((candidate.distance / 30) * 60);
-
-      if (googleResults[index]) {
-        distance = googleResults[index].distance;
-        etaMinutes = Math.ceil(googleResults[index].duration);
-      }
-
-      return {
-        driver: candidate.driver,
-        distance,
-        etaMinutes
-      };
-    });
-
-    // Calculate scores for each candidate driver using the agreed strategy
-    const vehicleScores: VehicleScore[] = candidateResults.map((item) => {
-      // Find the vehicle for this driver
-      const driverInfo = onlineDrivers.find(d => d.id === item.driver.driverId);
-      if (!driverInfo) return null;
-
-      const vehicle = vehicles.find(v => v.regNumber === driverInfo.car);
-      if (!vehicle) return null;
-
-      const driver = driverMap.get(vehicle.regNumber) as DriverInfo | undefined;
-      if (!driver) return null;
-
-      const commissionRate = companyMap.get(vehicle.comId) || 0;
-      const income = incomeMap.get(vehicle.regNumber) || 0;
-
-      // Use real-time distance
-      let distance = item.distance;
-      let etaMinutes = item.etaMinutes;
-
-      // Priority scoring system (distance, type, income, rating)
-      let score = 0;
-
-      // Distance score (closer = higher score, but balanced)
-      if (distance <= 2) score += 10;      // Within 2km: +10
-      else if (distance <= 5) score += 7; // Within 5km: +7
-      else if (distance <= 10) score += 4; // Within 10km: +4
-      else if (distance <= 15) score += 2;  // Within 15km: +2
-
-      // Income score (prefer lower income to balance daily earnings)
-      let incomeScore = 0;
-      if (income < targetIncome - margin) {
-        incomeScore = 20; // Well below target, high preference
-      } else if (income < targetIncome + margin) {
-        incomeScore = 10; // Around target, medium preference
-      } else {
-        incomeScore = 0; // Above target, low preference
-      }
-      score += incomeScore;
-
-      // Rating score (higher rating = higher score) - TEMPORARILY DISABLED
-      // score += (driver.rating - 3) * 10; // Rating 5.0 = +20, Rating 3.0 = 0
-
-      // Experience score (derived from driver creation date)
-      const yearsExperience = (Date.now() - new Date(driver.createdAt).getTime()) / (1000 * 60 * 60 * 24 * 365);
-      let experience: 'low' | 'medium' | 'high';
-      if (yearsExperience >= 2) experience = 'high';
-      else if (yearsExperience >= 1) experience = 'medium';
-      else experience = 'low';
-
-      if (experience === 'high') score += 15;
-      else if (experience === 'medium') score += 10;
-      else score += 5;
-
-      // Company commission rate (higher commission = higher score - more profit)
-      if (commissionRate >= 12) score += 10;
-      else if (commissionRate >= 8) score += 5;
-
-      return {
+      candidates.push({
+        driverId: driver.id,
         vehicleId: vehicle.id,
-        distance: Math.round(distance * 10) / 10,
+        vehicleTypeId: resolvedVehicleTypeId,
+        location: raw.location,
+        distanceKm,
         etaMinutes,
-        score,
-        rating: driver.rating,
-        commissionRate,
-        experience,
-        income
-      };
-    }).filter((item): item is VehicleScore => item !== null);
-
-    // Check if any vehicles are within 15km (15 minutes)
-    const vehiclesWithin15km = vehicleScores.filter(v => v.distance <= 15);
-
-    // Store whether we used scoring algorithm for response
-    const usedScoringAlgorithm = vehiclesWithin15km.length > 0;
-
-    let topVehicles: VehicleScore[];
-
-    if (vehiclesWithin15km.length > 0) {
-      // If there are vehicles within 15km, use the scoring algorithm
-      topVehicles = vehiclesWithin15km
-        .sort((a, b) => b.score - a.score) // Sort by score descending
-        .slice(0, Math.min(maxVehicles, vehiclesWithin15km.length));
-
-      // If still need more vehicles, add closest vehicles within 30km
-      if (topVehicles.length < maxVehicles) {
-        const remaining = vehicleScores
-          .filter(v => v.distance > 15 && v.distance <= 30 && !topVehicles.some(tv => tv.vehicleId === v.vehicleId))
-          .sort((a, b) => a.distance - b.distance); // Sort by distance ascending
-        const additional = remaining.slice(0, maxVehicles - topVehicles.length);
-        topVehicles = topVehicles.concat(additional);
-      }
-    } else {
-      // If no vehicles within 15km, just select the closest vehicles (no scoring algorithm)
-      topVehicles = vehicleScores
-        .sort((a, b) => a.distance - b.distance) // Sort by distance ascending only
-        .slice(0, Math.min(maxVehicles, vehicleScores.length));
+        income,
+        incomePerHour,
+        hoursWorked,
+        rating,
+        ratingScore,
+        completedRides,
+        experienceScore
+      });
     }
 
-    // Create map from vehicleId to driverId
-    const vehicleToDriverMap = new Map();
-    onlineDrivers.forEach((driver: any) => {
-      const vehicle = vehicles.find((v: any) => v.regNumber === driver.car);
-      if (vehicle) {
-        vehicleToDriverMap.set(vehicle.id, driver.id);
+    if (candidates.length === 0) {
+      return NextResponse.json({
+        ok: true,
+        vehicles: [],
+        totalAvailable: 0,
+        selectedCount: 0,
+        windowUsed: 'none',
+        selectionMode: 'none',
+        useDatabaseFallback
+      });
+    }
+
+    const shortlist = [...candidates]
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .slice(0, DISTANCE_MATRIX_LIMIT);
+
+    if (shortlist.length > 0) {
+      const destinations = shortlist.map((candidate) => candidate.location);
+      const distanceResults = await getDistanceAndDuration(
+        [{ lat: pickupLat, lng: pickupLon }],
+        destinations
+      );
+
+      distanceResults.forEach((result: { distance: number; duration: number } | null, index: number) => {
+        if (!result) return;
+        const candidate = shortlist[index];
+        if (!candidate) return;
+        candidate.distanceKm = result.distance;
+        candidate.etaMinutes = Math.ceil(result.duration);
+      });
+    }
+
+    const priorityTypes = getPriorityTypes(vehicleTypeId);
+    const allowedTypes = getAllowedTypes(vehicleTypeId);
+
+    let windowUsed: '0-5' | '5-10' | '10-20' | 'none' = 'none';
+    let selectionMode: 'score' | 'closest' | 'none' = 'none';
+    let selected: CandidateDriver[] = [];
+    let profitabilityChecked = false;
+
+    // Window 0-5 minutes with priority by type
+    for (const type of priorityTypes) {
+      const shortCandidates = candidates.filter((c) => c.vehicleTypeId === type && c.etaMinutes <= SHORT_WINDOW_MINUTES);
+      if (shortCandidates.length > 0) {
+        windowUsed = '0-5';
+        selectionMode = 'score';
+        selected = sortByScore(shortCandidates).slice(0, maxVehicles);
+        break;
       }
-    });
+    }
 
-    let finalVehicles = topVehicles.map((item: VehicleScore) => item.vehicleId);
-    let longWait = false;
-    let fallbackVehicles: number[] = [];
+    // Window 5-10 minutes
+    if (selected.length === 0) {
+      const midCandidates = candidates.filter(
+        (c) =>
+          allowedTypes.includes(c.vehicleTypeId) &&
+          c.etaMinutes > SHORT_WINDOW_MINUTES &&
+          c.etaMinutes <= MID_WINDOW_MINUTES
+      );
 
-    // Fallback for distant vehicles if all selected vehicles are too far (>30 min) and dropoff provided
-    const allVehiclesTooFar = finalVehicles.length > 0 && vehicleScores.every(v => v.distance > 30); // More than 30 min (30km at 60km/h)
-    const shouldTriggerFallback = (finalVehicles.length === 0 || allVehiclesTooFar) && dropoffLat && dropoffLon;
-
-    if ((finalVehicles.length === 0 || allVehiclesTooFar) && dropoffLat && dropoffLon) {
-      // Calculate trip distance and time
-      const tripDistance = calculateDistance(pickupLat, pickupLon, dropoffLat, dropoffLon);
-      const tripTimeHours = tripDistance / 30; // Assume 30 km/h average speed
-      const tripTimeMin = tripTimeHours * 60;
-
-      // Estimate price for the trip
-      const pickupTime = new Date(); // Use current time for estimation
-      const estimatedPrice = await computePrice(tripDistance, tripTimeMin, pickupTime, vehicleTypeId);
-
-      // Check each candidate driver for profitability
-      for (const item of candidateResults) {
-        const driverInfo = onlineDrivers.find(d => d.id === item.driver.driverId);
-        if (!driverInfo) continue;
-
-        const vehicle = vehicles.find(v => v.regNumber === driverInfo.car);
-        if (!vehicle) continue;
-
-        const vehicleScore = vehicleScores.find(v => v.vehicleId === vehicle.id);
-        if (!vehicleScore) continue;
-
-        const timeToPickupHours = vehicleScore.distance / 30;
-        const returnTimeHours = tripDistance / 30;
-        const totalTimeHours = timeToPickupHours + tripTimeHours + returnTimeHours;
-
-        if (totalTimeHours > 0) {
-          const pricePerHour = estimatedPrice / totalTimeHours;
-          if (pricePerHour > 400) { // 400 DKK per hour threshold
-            fallbackVehicles.push(vehicleScore.vehicleId);
-          }
+      if (midCandidates.length > 0) {
+        windowUsed = '5-10';
+        if (vehicleTypeId === 2) {
+          selectionMode = 'closest';
+          selected = sortByClosest(midCandidates).slice(0, maxVehicles);
+        } else {
+          selectionMode = 'score';
+          selected = sortByScore(midCandidates).slice(0, maxVehicles);
         }
       }
+    }
 
-      // Sort fallback vehicles by distance and select top
-      if (fallbackVehicles.length > 0) {
-        const fallbackSorted = vehicleScores
-          .filter(v => fallbackVehicles.includes(v.vehicleId))
-          .sort((a, b) => a.distance - b.distance);
-        finalVehicles = fallbackSorted.slice(0, Math.min(maxVehicles, fallbackSorted.length)).map(v => v.vehicleId);
-        longWait = true;
+    // Window 10-20 minutes with profitability check
+    if (selected.length === 0) {
+      const longCandidates = candidates.filter(
+        (c) =>
+          allowedTypes.includes(c.vehicleTypeId) &&
+          c.etaMinutes > MID_WINDOW_MINUTES &&
+          c.etaMinutes <= LONG_WINDOW_MINUTES
+      );
+
+      if (longCandidates.length > 0) {
+        windowUsed = '10-20';
+        selectionMode = 'closest';
+        let filtered = longCandidates;
+
+        if (dropoffLat !== undefined && dropoffLon !== undefined && dropoffLat !== null && dropoffLon !== null) {
+          profitabilityChecked = true;
+          const tripDistance = calculateDistance(pickupLat, pickupLon, dropoffLat, dropoffLon);
+          const tripTimeMin = estimateEtaMinutes(tripDistance);
+
+          const filteredCandidates: CandidateDriver[] = [];
+          for (const candidate of longCandidates) {
+            const totalTimeHours = (candidate.etaMinutes + tripTimeMin) / 60;
+            if (totalTimeHours <= 0) continue;
+            const price = await computePrice(tripDistance, tripTimeMin, now, candidate.vehicleTypeId);
+            const pricePerHour = price / totalTimeHours;
+            const threshold = getHourlyRateThreshold(candidate.vehicleTypeId, now);
+            if (pricePerHour >= threshold) {
+              filteredCandidates.push(candidate);
+            }
+          }
+          filtered = filteredCandidates;
+        }
+
+        if (filtered.length > 0) {
+          selected = sortByClosest(filtered).slice(0, maxVehicles);
+        }
       }
     }
 
-    // Determine which strategy was used
-    const strategyDescription = usedScoringAlgorithm
-      ? 'Advanced scoring: distance + income + experience + commission (vehicles within 15km)'
-      : 'Distance-based selection only (no vehicles within 15km)';
+    const selectedVehicleIds = selected.map((s) => s.vehicleId);
 
     return NextResponse.json({
       ok: true,
-      vehicles: finalVehicles,
-      totalAvailable: vehicles.length, // Total vehicles available, not just candidates
-      selectedCount: finalVehicles.length,
-      strategy: strategyDescription,
-      usedScoringAlgorithm,
-      longWait,
-      scores: topVehicles.map((v: VehicleScore) => ({
-        id: v.vehicleId,
-        score: usedScoringAlgorithm ? v.score : 0, // No score if distance-only
-        distance: v.distance,
-        etaMinutes: v.etaMinutes,
-        rating: v.rating,
-        experience: v.experience,
-        commissionRate: v.commissionRate,
-        income: v.income
+      vehicles: selectedVehicleIds,
+      totalAvailable: candidates.length,
+      selectedCount: selectedVehicleIds.length,
+      windowUsed,
+      selectionMode,
+      profitabilityChecked,
+      useDatabaseFallback,
+      longWait: windowUsed === '10-20',
+      strategy: 'Custom: 0-5 priority types, 5-10 fallback, 10-20 profitability check',
+      scores: selected.map((s) => ({
+        vehicleId: s.vehicleId,
+        driverId: s.driverId,
+        vehicleTypeId: s.vehicleTypeId,
+        etaMinutes: s.etaMinutes,
+        distanceKm: Math.round(s.distanceKm * 10) / 10,
+        income: s.income,
+        incomePerHour: Math.round(s.incomePerHour * 100) / 100,
+        hoursWorked: Math.round(s.hoursWorked * 100) / 100,
+        rating: s.rating,
+        ratingScore: s.ratingScore,
+        completedRides: s.completedRides,
+        experienceScore: s.experienceScore
       }))
     });
-
   } catch (error) {
     console.error('Error in vehicle selection:', error);
-    return NextResponse.json({
-      ok: false,
-      error: 'Internal server error during vehicle selection'
-    }, { status: 500 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'Internal server error during vehicle selection'
+      },
+      { status: 500 }
+    );
   }
 }

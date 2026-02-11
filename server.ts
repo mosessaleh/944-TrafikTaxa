@@ -51,11 +51,13 @@ async function getAvailableVehiclesForRide(ride: any) {
       where: { id: ride.id },
       select: {
         startLatLon: true,
+        endLatLon: true,
         vehicleTypeId: true
       }
     });
 
     const startLatLon = rideDetails?.startLatLon as any;
+    const endLatLon = rideDetails?.endLatLon as any;
     if (!rideDetails || !startLatLon) {
       console.log(`Ride ${ride.id} missing location data`);
       return [];
@@ -73,6 +75,8 @@ async function getAvailableVehiclesForRide(ride: any) {
       body: JSON.stringify({
         pickupLat: startLatLon.lat,
         pickupLon: startLatLon.lon,
+        dropoffLat: endLatLon?.lat,
+        dropoffLon: endLatLon?.lon,
         vehicleTypeId: rideDetails.vehicleTypeId,
         maxVehicles: 3,
         excludedDriverIds

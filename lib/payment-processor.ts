@@ -12,6 +12,10 @@ export interface PaymentResult {
   error?: string;
   requiresAction?: boolean;
   actionUrl?: string;
+  refundId?: string;
+  refundedAmountDkk?: number;
+  canceledAuthorization?: boolean;
+  additionalChargeAmountDkk?: number;
 }
 
 /**
@@ -222,6 +226,7 @@ export async function chargeSavedPaymentMethod(trip: any): Promise<PaymentResult
     paymentStatus: trip.paymentStatus,
     paymentRef: trip.paymentRef,
     price: trip.price,
+    captureAmount: trip.captureAmount,
     hasUserPaymentMethod: !!trip.userpaymentmethod
   });
 
@@ -263,10 +268,194 @@ export async function chargeSavedPaymentMethod(trip: any): Promise<PaymentResult
 }
 
 /**
+ * Charge cancellation fee with proper authorization cancel/refund handling
+ */
+export async function chargeCancellationFee(
+  trip: any,
+  cancellationAmountDkk: number,
+  originalAmountDkk: number
+): Promise<PaymentResult> {
+  const stripeClient = stripe();
+  const paymentRef = trip.paymentRef;
+  const safeCancellationAmountDkk = Math.max(0, Math.round(cancellationAmountDkk));
+  const safeOriginalAmountDkk = Math.max(0, Math.round(originalAmountDkk));
+  const deltaDkk = safeOriginalAmountDkk - safeCancellationAmountDkk;
+  let authorizationCanceled = false;
+
+  const paymentMethod = trip.savedPaymentMethod;
+
+  console.log(`💳 chargeCancellationFee called for trip ${trip.id}`, {
+    paymentStatus: trip.paymentStatus,
+    paymentRef: trip.paymentRef,
+    cancellationAmountDkk: safeCancellationAmountDkk,
+    originalAmountDkk: safeOriginalAmountDkk,
+    deltaDkk
+  });
+
+  // If payment is authorized but not captured, cancel the authorization first
+  if (paymentRef && (trip.paymentStatus === 'AUTHORIZED' || trip.paymentStatus === 'PENDING_PAYMENT')) {
+    try {
+      await stripeClient.paymentIntents.cancel(paymentRef);
+      console.log(`✅ Authorization canceled for trip ${trip.id}: ${paymentRef}`);
+      authorizationCanceled = true;
+
+      if (safeCancellationAmountDkk <= 0) {
+        return {
+          success: true,
+          transactionId: paymentRef,
+          canceledAuthorization: true
+        };
+      }
+    } catch (error: any) {
+      const message = error?.message || 'Unknown error';
+      console.error(`❌ Failed to cancel authorization for trip ${trip.id}:`, message);
+      return {
+        success: false,
+        error: `Failed to cancel authorization: ${message}`
+      };
+    }
+  }
+
+  // If payment was already captured, refund the difference (or charge extra if needed)
+  if (paymentRef && trip.paymentStatus === 'PAID') {
+    if (deltaDkk > 0) {
+      try {
+        const refund = await stripeClient.refunds.create({
+          payment_intent: paymentRef,
+          amount: Math.round(deltaDkk * 100)
+        });
+
+        console.log(`✅ Refunded ${deltaDkk} DKK for trip ${trip.id}: ${refund.id}`);
+        return {
+          success: true,
+          transactionId: paymentRef,
+          refundId: refund.id,
+          refundedAmountDkk: deltaDkk
+        };
+      } catch (error: any) {
+        const message = error?.message || 'Unknown error';
+        console.error(`❌ Refund failed for trip ${trip.id}:`, message);
+        return {
+          success: false,
+          error: `Refund failed: ${message}`
+        };
+      }
+    }
+
+    if (deltaDkk === 0) {
+      return {
+        success: true,
+        transactionId: paymentRef
+      };
+    }
+  }
+
+  // If no charge is needed, return success
+  if (safeCancellationAmountDkk <= 0) {
+    return {
+      success: true,
+      transactionId: paymentRef
+    };
+  }
+
+  // Determine charge amount
+  const chargeAmountDkk = trip.paymentStatus === 'PAID'
+    ? Math.max(0, Math.abs(deltaDkk))
+    : safeCancellationAmountDkk;
+
+  if (chargeAmountDkk <= 0) {
+    return {
+      success: true,
+      transactionId: paymentRef,
+      canceledAuthorization: authorizationCanceled || undefined
+    };
+  }
+
+  if (!paymentMethod) {
+    return {
+      success: false,
+      error: 'No saved payment method found'
+    };
+  }
+
+  if (paymentMethod.provider !== 'stripe') {
+    return {
+      success: false,
+      error: `Unsupported payment provider: ${paymentMethod.provider}`
+    };
+  }
+
+  // Get the user's Stripe customer ID from database
+  const user = await prisma.user.findUnique({
+    where: { id: trip.userId },
+    select: { stripeCustomerId: true }
+  });
+
+  if (!user?.stripeCustomerId) {
+    return {
+      success: false,
+      error: 'User does not have a Stripe customer account'
+    };
+  }
+
+  try {
+    const paymentIntent = await stripeClient.paymentIntents.create({
+      amount: Math.round(chargeAmountDkk * 100),
+      currency: 'dkk',
+      payment_method: paymentMethod.token,
+      customer: user.stripeCustomerId,
+      confirm: true,
+      automatic_payment_methods: {
+        enabled: true,
+        allow_redirects: 'never'
+      }
+    });
+
+    if (paymentIntent.status === 'succeeded') {
+      return {
+        success: true,
+        transactionId: paymentIntent.id,
+        additionalChargeAmountDkk: trip.paymentStatus === 'PAID' && deltaDkk < 0 ? chargeAmountDkk : undefined,
+        canceledAuthorization: authorizationCanceled || undefined
+      };
+    }
+
+    if (paymentIntent.status === 'requires_action') {
+      return {
+        success: false,
+        requiresAction: true,
+        actionUrl: paymentIntent.next_action?.redirect_to_url?.url || undefined,
+        error: 'Customer authentication required'
+      };
+    }
+
+    return {
+      success: false,
+      error: `Payment ${paymentIntent.status}: ${paymentIntent.last_payment_error?.message || 'Unknown error'}`
+    };
+  } catch (error: any) {
+    if (error.type === 'card_error') {
+      return {
+        success: false,
+        error: `Card error: ${error.message}`
+      };
+    }
+
+    return {
+      success: false,
+      error: `Stripe error: ${error.message}`
+    };
+  }
+}
+
+/**
  * Charge using Stripe saved payment method
  */
 async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise<PaymentResult> {
   const stripeClient = stripe();
+  const amountDkk = typeof trip.captureAmount === 'number' ? trip.captureAmount : trip.price;
+  const safeAmountDkk = Math.max(0, Math.round(amountDkk));
+  const amountOre = Math.round(safeAmountDkk * 100);
 
   console.log(`🔄 Processing Stripe payment for trip ${trip.id}, paymentMethod:`, {
     id: paymentMethod.id,
@@ -286,19 +475,21 @@ async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise
     }
 
     // Check if we have a stored Payment Intent ID for capture
-    if (trip.paymentRef) {
+    if (trip.paymentRef && amountOre > 0) {
       console.log(`🔄 Attempting to capture existing Payment Intent: ${trip.paymentRef}`);
 
       try {
         // Capture the existing authorized payment
-        const capturedPaymentIntent = await stripeClient.paymentIntents.capture(trip.paymentRef);
+        const capturedPaymentIntent = await stripeClient.paymentIntents.capture(trip.paymentRef, {
+          amount_to_capture: amountOre
+        });
 
         if (capturedPaymentIntent.status === 'succeeded') {
           // Update trip payment status
           await updateTripPaymentSuccess(trip.id, {
             transactionId: capturedPaymentIntent.id,
             provider: 'stripe',
-            amount: trip.price
+            amount: safeAmountDkk
           });
 
           return {
@@ -315,6 +506,13 @@ async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise
 
     // Fallback: Create new payment intent
     console.log(`💳 Creating new payment intent for trip ${trip.id}`);
+
+    if (amountOre <= 0) {
+      return {
+        success: false,
+        error: 'Invalid capture amount'
+      };
+    }
 
     // Get the user's Stripe customer ID from database
     const user = await prisma.user.findUnique({
@@ -334,7 +532,7 @@ async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise
 
     // Create payment intent with saved payment method
     const paymentIntent = await stripeClient.paymentIntents.create({
-      amount: Math.round(trip.price * 100), // Convert to øre
+      amount: amountOre, // Convert to øre
       currency: 'dkk',
       payment_method: paymentMethod.token, // Stripe payment method ID
       customer: user.stripeCustomerId, // Required for payment methods from setup intents
@@ -350,7 +548,7 @@ async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise
       await updateTripPaymentSuccess(trip.id, {
         transactionId: paymentIntent.id,
         provider: 'stripe',
-        amount: trip.price
+        amount: safeAmountDkk
       });
 
       return {
