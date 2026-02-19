@@ -1006,12 +1006,6 @@ export default function BookClient(){
   async function handleBookAndConfirm(){
     if(!quote || !me) return;
 
-    // Temporarily disable scheduled bookings
-    if (whenType === 'later') {
-      alert(t('book.scheduled_bookings_disabled') || 'Scheduled bookings are temporarily unavailable. Only instant bookings are currently supported.');
-      return;
-    }
-
     setBookingLoading(true);
     try{
       const bookingData = {
@@ -1027,8 +1021,10 @@ export default function BookClient(){
         dropoffLat: quotePayload.dropoffLat,
         dropoffLon: quotePayload.dropoffLon,
         vehicleTypeId: vehicleId!,
-        scheduled: false, // Always instant booking for now
-        pickupTime: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
+        scheduled: whenType === 'later',
+        pickupTime: whenType === 'later'
+          ? new Date(when).toISOString()
+          : new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
         longWaitAccepted: longWaitWarning.show ? longWaitAccepted : undefined
         // paymentMethod will be selected on payment page
       };
@@ -1564,12 +1560,6 @@ export default function BookClient(){
                           {t('book.session_problem')}
                         </span>
                       )}
-                      {me && quote && whenType === 'later' && (
-                        <span className="flex items-center gap-1 text-orange-600">
-                          <span>⏰</span>
-                          {t('book.scheduled_bookings_disabled')}
-                        </span>
-                      )}
                       {me && quote && whenType === 'now' && (
                         <span className="flex items-center gap-1 text-emerald-600">
                           <span>✅</span>
@@ -1588,7 +1578,6 @@ export default function BookClient(){
                         !bothSelected ||
                         !vehicleId ||
                         bookingLoading ||
-                        whenType === 'later' ||
                         (longWaitWarning.show && !longWaitAccepted) ||
                         !pickupSel?.lat ||
                         !pickupSel?.lon ||

@@ -29,7 +29,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       include: {
         vehicleType: true,
         user: {
-          select: { phone: true }
+          select: { firstName: true, lastName: true, phone: true }
         }
       }
     });
@@ -60,13 +60,28 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         startLatLon: ride.startLatLon,
         stopLatLon: ride.stopLatLon || null,
         endLatLon: ride.endLatLon,
-        pickupTime: ride.pickupTime.toISOString(),
+        pickupTime: ride.pickupTime ? ride.pickupTime.toISOString() : null,
+        createdAt: ride.createdAt ? ride.createdAt.toISOString() : null,
         acceptedAt: ride.acceptedAt ? ride.acceptedAt.toISOString() : null,
+        pickedAt: ride.pickedAt ? ride.pickedAt.toISOString() : null,
+        droppedAt: ride.droppedAt ? ride.droppedAt.toISOString() : null,
         price: ride.price,
         status: ride.status,
         distanceKm: ride.distanceKm,
         durationMin: ride.durationMin,
+        paymentMethod: ride.paymentMethod,
+        cancellationReason: ride.cancellationReason,
+        canceledBy: ride.canceledBy,
+        scheduled: ride.scheduled,
         vehicleType: ride.vehicleType,
+        vehicleTypeName: ride.vehicleType?.title || null,
+        user: ride.user
+          ? {
+              firstName: ride.user.firstName,
+              lastName: ride.user.lastName,
+              phone: ride.user.phone
+            }
+          : null,
       }
     };
 

@@ -3,8 +3,9 @@ import { prisma } from '@/lib/db';
 import { sign, verify } from 'jsonwebtoken';
 import { comparePassword as cmp, hashPassword as hsh } from '@/lib/crypto';
 
-const SECRET =
+  const SECRET =
   process.env.AUTH_SECRET ||
+  process.env.JWT_SECRET ||
   (process.env.NODE_ENV === 'production'
     ? (() => {
         throw new Error('AUTH_SECRET env var is required in production');

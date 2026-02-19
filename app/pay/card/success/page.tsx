@@ -155,14 +155,24 @@ function PaymentSuccessContent() {
     confirmPayment();
   }, [paymentIntent, isMock]);
 
+  const bookingInfo = bookingDetails && (bookingDetails as any).ride
+    ? (bookingDetails as any).ride
+    : bookingDetails;
+
+  const isScheduledBooking = Boolean((bookingInfo as any)?.scheduled);
+  const primaryActionHref = isScheduledBooking || !bookingId
+    ? "/bookings"
+    : `/waiting-for-driver?bookingId=${bookingId}`;
+  const primaryActionLabel = isScheduledBooking
+    ? "📅 View Bookings"
+    : "🚗 Waiting for Driver";
+
   // Determine the amount to display in the message: prefer calculated amount for invoices, fallback to booking price
   const displayAmount =
     invoiceId && amount
       ? Number(amount) // For invoice payments, use the calculated amount (includes late fees)
-      : bookingDetails && typeof (bookingDetails as any).price === "number"
-      ? (bookingDetails as any).price
-      : bookingDetails && (bookingDetails as any).ride && typeof (bookingDetails as any).ride.price === "number"
-      ? (bookingDetails as any).ride.price
+      : bookingInfo && typeof (bookingInfo as any).price === "number"
+      ? (bookingInfo as any).price
       : amount
       ? Number(amount)
       : undefined;
@@ -233,17 +243,17 @@ function PaymentSuccessContent() {
           {isMock && <span className="text-orange-600 font-semibold block mt-2">(Mock Payment - Admin Mode)</span>}
           </p>
 
-          {bookingDetails && (
+          {bookingInfo && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
               <h3 className="font-semibold text-blue-800 mb-2">📋 Booking Details</h3>
               <div className="text-sm text-blue-700 space-y-1">
-                <p><strong>From:</strong> {bookingDetails.pickupAddress}</p>
-                {bookingDetails.stopAddress && (
-                  <p><strong>Stop:</strong> {bookingDetails.stopAddress}</p>
+                <p><strong>From:</strong> {bookingInfo.pickupAddress}</p>
+                {bookingInfo.stopAddress && (
+                  <p><strong>Stop:</strong> {bookingInfo.stopAddress}</p>
                 )}
-                <p><strong>To:</strong> {bookingDetails.dropoffAddress}</p>
-                <p><strong>Time:</strong> {new Date(bookingDetails.pickupTime).toLocaleString()}</p>
-                <p><strong>Status:</strong> <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">{bookingDetails.status}</span></p>
+                <p><strong>To:</strong> {bookingInfo.dropoffAddress}</p>
+                <p><strong>Time:</strong> {new Date(bookingInfo.pickupTime).toLocaleString()}</p>
+                <p><strong>Status:</strong> <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">{bookingInfo.status}</span></p>
               </div>
             </div>
           )}
@@ -288,10 +298,10 @@ function PaymentSuccessContent() {
 
           <div className="space-y-3">
             <button
-              onClick={() => router.push(`/waiting-for-driver?bookingId=${bookingId}`)}
+              onClick={() => router.push(primaryActionHref)}
               className="block w-full bg-gradient-to-r from-green-600 to-emerald-600 text-white py-4 px-6 rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
             >
-              🚗 Waiting for Driver
+              {primaryActionLabel}
             </button>
             <button
               onClick={() => router.push("/")}

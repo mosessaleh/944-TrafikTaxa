@@ -1,5 +1,5 @@
-import { prisma } from '@/lib/db';
-import { stripe } from '@/lib/stripe';
+import { prisma } from './db';
+import { stripe } from './stripe';
 
 /**
  * Payment Processor Service

@@ -36,7 +36,10 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     let driver;
     try {
-      const decoded: any = verify(token, process.env.AUTH_SECRET || 'change_me_dev_secret');
+      const decoded: any = verify(
+        token,
+        process.env.AUTH_SECRET || process.env.JWT_SECRET || 'change_me_dev_secret'
+      );
 
       if (!decoded.driverId || decoded.type !== 'driver') {
         return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 });
@@ -90,9 +93,13 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     if (status === 'PICKED_UP' || status === 'COMPLETED') {
       const proximityMap = (global as any).pickupProximitySent as Map<string, any> | undefined;
+      const lateWarningMap = (global as any).scheduledLateWarnings as Map<string, any> | undefined;
       const proximityKey = `${rideId}_${driver.id}`;
       if (proximityMap?.delete) {
         proximityMap.delete(proximityKey);
+      }
+      if (lateWarningMap?.delete) {
+        lateWarningMap.delete(proximityKey);
       }
     }
 

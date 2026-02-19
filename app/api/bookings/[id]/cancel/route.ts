@@ -139,8 +139,47 @@ export async function POST(
       }
     });
 
-    // Notify driver if ride was offered to them
     const io = getSocketServer();
+
+    const scheduledOffers = (global as any).scheduledOffers as Map<number, any> | undefined;
+    if (scheduledOffers?.has(bookingId)) {
+      const offerState = scheduledOffers.get(bookingId);
+      if (offerState?.timerId) {
+        clearTimeout(offerState.timerId);
+      }
+      scheduledOffers.delete(bookingId);
+      if (io && offerState?.candidates?.length) {
+        offerState.candidates.forEach((candidate: any) => {
+          io.to(`driver_${candidate.driverId}`).emit('rideCancelled', { rideId: bookingId });
+        });
+      }
+    }
+
+    if (io && booking.driverId) {
+      io.to(`driver_${booking.driverId}`).emit('rideCancelled', {
+        rideId: bookingId
+      });
+    }
+
+    if (booking.driverId) {
+      const driverRecord = await prisma.comDriver.findUnique({
+        where: { id: booking.driverId },
+        select: { currentRideId: true }
+      });
+
+      if (driverRecord?.currentRideId === bookingId) {
+        await prisma.comDriver.update({
+          where: { id: booking.driverId },
+          data: {
+            currentRideId: null,
+            isBusy: false,
+            rideAccepted: 0
+          }
+        });
+      }
+    }
+
+    // Notify driver if ride was offered to them
     if (io && (global as any).activeOffers?.has(bookingId)) {
       const driverId = (global as any).activeOffers.get(bookingId);
       console.log(`Notifying driver ${driverId} that ride ${bookingId} was cancelled`);
@@ -152,6 +191,12 @@ export async function POST(
 
       // Remove from active offers
       (global as any).activeOffers.delete(bookingId);
+    }
+
+    if (typeof (global as any).checkForNewRides === 'function') {
+      (global as any).checkForNewRides().catch((error: any) => {
+        console.error('[API] Failed to refresh ride offers after cancellation:', error);
+      });
     }
 
     // Send email to admin

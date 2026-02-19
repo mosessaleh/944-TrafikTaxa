@@ -178,8 +178,14 @@ function PayIndexContent(){
           if (response.ok) {
             const result = await response.json();
             console.log('✅ Invoice payment method updated successfully:', result);
-            alert('🎉 Invoice created successfully! You will be redirected to waiting for a driver.');
-            router.push(`/waiting-for-driver?bookingId=${bookingId}`);
+            const isScheduled = bookingData?.scheduled === true;
+            const redirectPath = isScheduled ? '/bookings' : `/waiting-for-driver?bookingId=${bookingId}`;
+            alert(
+              isScheduled
+                ? '🎉 Invoice created successfully! You will be redirected to your bookings.'
+                : '🎉 Invoice created successfully! You will be redirected to waiting for a driver.'
+            );
+            router.push(redirectPath);
           } else {
             const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
             console.error('❌ Error updating payment method:', errorData);
@@ -209,8 +215,14 @@ function PayIndexContent(){
         if (response.ok) {
           const result = await response.json();
           console.log('✅ Card payment authorized successfully:', result);
-          alert('🎉 Payment authorized! You will be redirected to waiting for a driver.');
-          router.push(`/waiting-for-driver?bookingId=${bookingId}`);
+          const isScheduled = bookingData?.scheduled === true;
+          const redirectPath = isScheduled ? '/bookings' : `/waiting-for-driver?bookingId=${bookingId}`;
+          alert(
+            isScheduled
+              ? '🎉 Payment authorized! You will be redirected to your bookings.'
+              : '🎉 Payment authorized! You will be redirected to waiting for a driver.'
+          );
+          router.push(redirectPath);
         } else {
           const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
           console.error('❌ Error authorizing card payment:', errorData);
