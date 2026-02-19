@@ -107,6 +107,48 @@ function isDriverInActiveOffer(driverId) {
   return false;
 }
 
+async function getMergedBanUntil(driverId, proposedUntil) {
+  if (!driverId || !proposedUntil) return proposedUntil;
+  try {
+    const driver = await prisma.comDriver.findUnique({
+      where: { id: driverId },
+      select: { bannedUntil: true }
+    });
+    if (driver?.bannedUntil) {
+      const existing = new Date(driver.bannedUntil);
+      if (!Number.isNaN(existing.getTime()) && existing > proposedUntil) {
+        return existing;
+      }
+    }
+  } catch (error) {
+    console.error(`Error reading bannedUntil for driver ${driverId}:`, error);
+  }
+  return proposedUntil;
+}
+
+function scheduleAutoUnban(driverId, delayMs) {
+  setTimeout(async () => {
+    try {
+      const driver = await prisma.comDriver.findUnique({
+        where: { id: driverId },
+        select: { bannedUntil: true }
+      });
+      if (!driver?.bannedUntil) return;
+      const bannedUntil = new Date(driver.bannedUntil);
+      if (Number.isNaN(bannedUntil.getTime())) return;
+      if (bannedUntil <= new Date()) {
+        await prisma.comDriver.update({
+          where: { id: driverId },
+          data: { bannedUntil: null }
+        });
+        console.log(`Unbanned driver ${driverId} after timeout`);
+      }
+    } catch (error) {
+      console.error(`Error unbanning driver ${driverId}:`, error);
+    }
+  }, delayMs);
+}
+
 // Function to get available vehicles for a ride
 async function getAvailableVehiclesForRide(ride) {
   try {
@@ -1429,6 +1471,11 @@ async function autoAssignRide(ride, vehicleInfo) {
 
         if (!driverData) continue;
 
+        if (isDriverInActiveOffer(driver.driverId)) {
+          console.log(`Skipping driver ${driver.driverId} - already has active offer`);
+          continue;
+        }
+
         // Check if driver is banned
         const now = new Date();
         if (driverData.bannedUntil && driverData.bannedUntil > now) {
@@ -1483,19 +1530,23 @@ async function autoAssignRide(ride, vehicleInfo) {
               timeoutMs: 30000 // 30 seconds timeout
             };
 
+            // Mark as active offer before sending
+            global.activeOffers.set(ride.id, driver.driverId);
+
             io.to(`driver_${driver.driverId}`).emit('rideOffer', rideOfferData);
             console.log(`Ride ${ride.id} assigned to driver ${driver.driverId} (${driver.timeMinutes} minutes away)`);
             console.log('Sent rideOffer data:', rideOfferData);
             console.log(`Driver ${driver.driverId} is connected and should receive the offer`);
 
             // Send push notification to driver
-            await sendPushToDriver(driver.driverId, 'New Ride Available!', `Pickup: ${ride.pickupAddress} → Dropoff: ${ride.dropoffAddress}`, {
-              type: 'newRide',
-              rideId: ride.id
-            });
-
-            // Mark as active offer
-            global.activeOffers.set(ride.id, driver.driverId);
+            try {
+              await sendPushToDriver(driver.driverId, 'New Ride Available!', `Pickup: ${ride.pickupAddress} → Dropoff: ${ride.dropoffAddress}`, {
+                type: 'newRide',
+                rideId: ride.id
+              });
+            } catch (pushError) {
+              console.error(`Error sending push notification to driver ${driver.driverId}:`, pushError);
+            }
             return; // Successfully assigned
           } else {
             console.log(`Global io not available for driver ${driver.driverId}`);
@@ -2615,7 +2666,8 @@ app.prepare().then(() => {
           return;
         }
         // Clear currentRideId and ban driver for 2 minutes
-        const bannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
+        const proposedBannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
+        const bannedUntil = await getMergedBanUntil(data.driverId, proposedBannedUntil);
         await prisma.comDriver.update({
           where: { id: data.driverId },
           data: {
@@ -2634,20 +2686,8 @@ app.prepare().then(() => {
           rideAccepted: null
         });
 
-        // Auto-unban after 2 minutes
-        setTimeout(async () => {
-          try {
-            await prisma.comDriver.update({
-              where: { id: data.driverId },
-              data: {
-                bannedUntil: null
-              }
-            });
-            console.log(`Unbanned driver ${data.driverId} after 2 minutes`);
-          } catch (error) {
-            console.error(`Error unbanning driver ${data.driverId}:`, error);
-          }
-        }, 120000); // 2 minutes
+        // Auto-unban after 2 minutes (if no longer banned)
+        scheduleAutoUnban(data.driverId, 120000);
       } catch (error) {
         console.error(`Error updating driver ${data.driverId} after rejection:`, error);
       }
@@ -2704,7 +2744,8 @@ app.prepare().then(() => {
           return;
         }
         // Reset driver status and ban for 2 minutes
-        const bannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
+        const proposedBannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
+        const bannedUntil = await getMergedBanUntil(data.driverId, proposedBannedUntil);
         await prisma.comDriver.update({
           where: { id: data.driverId },
           data: {
@@ -2761,20 +2802,8 @@ app.prepare().then(() => {
 
         console.log(`Driver ${data.driverId} banned until ${bannedUntil} after ride timeout`);
 
-        // Auto-unban after 2 minutes
-        setTimeout(async () => {
-          try {
-            await prisma.comDriver.update({
-              where: { id: data.driverId },
-              data: {
-                bannedUntil: null
-              }
-            });
-            console.log(`Unbanned driver ${data.driverId} after 2 minutes`);
-          } catch (error) {
-            console.error(`Error unbanning driver ${data.driverId}:`, error);
-          }
-        }, 120000); // 2 minutes
+        // Auto-unban after 2 minutes (if no longer banned)
+        scheduleAutoUnban(data.driverId, 120000);
 
         // Try to reassign to another driver
         setTimeout(() => reassignRide(data.rideId), 1000);
@@ -2819,6 +2848,23 @@ app.prepare().then(() => {
           connectedDrivers.delete(driverId);
           console.log(`Driver ${driverId} disconnected`);
           console.log(`Connected drivers now: ${Array.from(connectedDrivers.keys()).join(', ')}`);
+
+          const clearedRideIds = [];
+          if (global.activeOffers?.size) {
+            for (const [rideId, activeDriverId] of global.activeOffers.entries()) {
+              if (activeDriverId === driverId) {
+                global.activeOffers.delete(rideId);
+                clearedRideIds.push(rideId);
+              }
+            }
+          }
+
+          if (clearedRideIds.length) {
+            console.log(`Cleared active offers for disconnected driver ${driverId}: ${clearedRideIds.join(', ')}`);
+            clearedRideIds.forEach((rideId) => {
+              setTimeout(() => reassignRide(rideId), 1000);
+            });
+          }
 
           try {
           const warningKeys = Array.from(scheduledLateWarnings.keys());
