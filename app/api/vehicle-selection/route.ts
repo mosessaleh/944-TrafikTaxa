@@ -12,6 +12,8 @@ interface VehicleSelectionRequest {
   dropoffLat?: number;
   dropoffLon?: number;
   excludedDriverIds?: number[];
+  // للحجوزات المجدولة: تمرير موعد الالتقاط لاقتراح سائق متسلسل يوضع في driverQueue
+  scheduledPickupTime?: string;
 }
 
 interface RawDriver {
@@ -42,6 +44,10 @@ const SHORT_WINDOW_MINUTES = 5;
 const MID_WINDOW_MINUTES = 10;
 const LONG_WINDOW_MINUTES = 20;
 const DISTANCE_MATRIX_LIMIT = 6;
+// الحد الأقصى المسموح لزمن الانتقال بين نهاية رحلة مجدولة وبداية أخرى ليتم اعتباره مرشح تتابع
+const CHAIN_MAX_TRAVEL_MINUTES = 25;
+const CHAIN_LOOKBACK_HOURS = 6;
+const CHAIN_LOOKAHEAD_HOURS = 6;
 
 const VEHICLE_TYPE_MAP: Record<string, number> = {
   SEDAN5: 1,
@@ -66,6 +72,14 @@ const ALLOWED_TYPES: Record<number, number[]> = {
 
 function estimateEtaMinutes(distanceKm: number) {
   return Math.ceil((distanceKm / SPEED_KMH) * 60);
+}
+
+function computeRideEndTime(pickupTime: Date | null, durationMin?: number | null, distanceKm?: number | null) {
+  if (!pickupTime) return null;
+  const duration = Number.isFinite(durationMin) && durationMin !== null
+    ? Number(durationMin)
+    : (Number.isFinite(distanceKm) && distanceKm !== null ? Math.max(1, Math.ceil(Number(distanceKm) * 2)) : 30);
+  return new Date(pickupTime.getTime() + duration * 60000);
 }
 
 function isHoliday(at: Date) {
@@ -138,7 +152,8 @@ export async function POST(request: NextRequest) {
       maxVehicles = 3,
       dropoffLat,
       dropoffLon,
-      excludedDriverIds = []
+      excludedDriverIds = [],
+      scheduledPickupTime
     } = body;
 
     if (pickupLat === undefined || pickupLon === undefined || !vehicleTypeId) {
@@ -446,6 +461,69 @@ export async function POST(request: NextRequest) {
 
     const selectedVehicleIds = selected.map((s) => s.vehicleId);
 
+    // === اقتراح driverQueue للرحلات المجدولة بناءً على أقرب سائق ينهي رحلة قريبة مكانياً خلال 25 دقيقة ===
+    let recommendedQueue: number[] = [];
+    if (scheduledPickupTime && pickupLat !== undefined && pickupLon !== undefined) {
+      const targetPickup = new Date(scheduledPickupTime);
+      if (!Number.isNaN(targetPickup.getTime())) {
+        try {
+          const windowStart = new Date(targetPickup.getTime() - CHAIN_LOOKBACK_HOURS * 60 * 60 * 1000);
+          const windowEnd = new Date(targetPickup.getTime() + CHAIN_LOOKAHEAD_HOURS * 60 * 60 * 1000);
+
+          const chainRides = await prisma.ride.findMany({
+            where: {
+              driverId: { not: null },
+              scheduled: true,
+              pickupTime: { gte: windowStart, lte: windowEnd },
+              status: { notIn: ['CANCELED', 'COMPLETED', 'REFUNDED'] }
+            },
+            select: {
+              driverId: true,
+              pickupTime: true,
+              durationMin: true,
+              distanceKm: true,
+              endLatLon: true
+            }
+          });
+
+          const chainCandidates = chainRides
+            .map((ride: any) => {
+              const endAt = computeRideEndTime(ride.pickupTime ? new Date(ride.pickupTime) : null, ride.durationMin, ride.distanceKm);
+              const endLoc = ride.endLatLon;
+              if (!endAt || !endLoc?.lat || !endLoc?.lon) return null;
+              const distanceKmToNew = calculateDistance(pickupLat, pickupLon, endLoc.lat, endLoc.lon);
+              const etaMinutes = estimateEtaMinutes(distanceKmToNew);
+              const gapMinutes = (targetPickup.getTime() - endAt.getTime()) / 60000;
+              if (etaMinutes <= CHAIN_MAX_TRAVEL_MINUTES && gapMinutes >= -5) {
+                return {
+                  driverId: ride.driverId as number,
+                  etaMinutes,
+                  gapMinutes
+                };
+              }
+              return null;
+            })
+            .filter(Boolean) as { driverId: number; etaMinutes: number; gapMinutes: number; }[];
+
+          chainCandidates.sort((a, b) => {
+            if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+            return a.gapMinutes - b.gapMinutes;
+          });
+
+          const seen = new Set<number>();
+          recommendedQueue = chainCandidates
+            .map((c) => c.driverId)
+            .filter((id) => {
+              if (seen.has(id)) return false;
+              seen.add(id);
+              return true;
+            });
+        } catch (err) {
+          console.error('vehicle-selection: failed to build recommendedQueue for scheduled ride', err);
+        }
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       vehicles: selectedVehicleIds,
@@ -457,6 +535,7 @@ export async function POST(request: NextRequest) {
       useDatabaseFallback,
       longWait: windowUsed === '10-20',
       strategy: 'Custom: 0-5 priority types, 5-10 fallback, 10-20 profitability check',
+      recommendedQueue,
       scores: selected.map((s) => ({
         vehicleId: s.vehicleId,
         driverId: s.driverId,

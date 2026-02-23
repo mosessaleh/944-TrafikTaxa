@@ -38,11 +38,138 @@ const activeOffers = new Map(); // rideId -> driverId currently being offered
 global.activeOffers = activeOffers;
 
 // In-memory storage for pickup proximity notifications sent
-const pickupProximitySent = new Map(); // rideId_driverId -> { driverId, sentAt, countdownStart, countdownDuration, distanceMeters }
+const pickupProximitySent = new Map(); // rideId_driverId -> { driverId, sentAt, countdownStart, countdownDuration, distanceMeters, timeoutId?: NodeJS.Timeout | number | undefined }
 global.pickupProximitySent = pickupProximitySent;
 
 const PICKUP_PROXIMITY_THRESHOLD_METERS = 30;
 const PICKUP_COUNTDOWN_DURATION_SEC = 300;
+const SCHEDULED_CHAIN_WINDOW_MIN = 25; // أقصى زمن انتقال بين نهاية رحلة مؤجلة وبداية التالية ليُعتبر أولوية زمنية
+const SOCKET_INACTIVITY_MS = 60000; // إزالة السائقين الخاملين بعد 60 ثانية
+
+// لا تبدأ عد التنازلي للإلغاء في الرحلات المؤجلة قبل وقت البدء الفعلي
+function canStartPickupCountdown(ride: any) {
+  if (!ride?.scheduled || !ride?.pickupTime) return true;
+  const now = Date.now();
+  const scheduledTs = new Date(ride.pickupTime).getTime();
+  return now >= scheduledTs;
+}
+
+function normalizeLatLon(point: any): { lat: number; lon: number } | null {
+  if (!point) return null;
+  if (Array.isArray(point) && point.length >= 2) {
+    const [lat, lon] = point;
+    if (typeof lat === 'number' && typeof lon === 'number') return { lat, lon };
+  }
+  if (typeof point === 'object' && point.lat !== undefined && (point.lon !== undefined || point.lng !== undefined)) {
+    const lat = Number(point.lat);
+    const lon = Number(point.lon ?? point.lng);
+    if (!isNaN(lat) && !isNaN(lon)) return { lat, lon };
+  }
+  return null;
+}
+
+function estimateRideEndTime(ride: any) {
+  const pickup = new Date(ride.pickupTime);
+  const durationMin = ride.durationMin ?? (ride.distanceKm ? Math.ceil(ride.distanceKm * 2) : 20);
+  return new Date(pickup.getTime() + durationMin * 60000);
+}
+
+async function cleanupInactiveDrivers() {
+  const now = Date.now();
+  for (const [driverId, driverData] of connectedDrivers.entries()) {
+    const lastUpdate = driverData.lastUpdate || 0;
+    if (now - lastUpdate > SOCKET_INACTIVITY_MS) {
+      // حاول فصل السوكيت نفسه قبل إزالة السائق من الذاكرة حتى لا يبقى اتصالٌ غير فعّال
+      try {
+        const socketId = driverData.socketId;
+        const ioInstance = (global as any).io;
+        const staleSocket = socketId && ioInstance?.sockets?.sockets?.get(socketId);
+        if (staleSocket) {
+          staleSocket.disconnect(true);
+          console.log(`Forcefully disconnected stale socket ${socketId} for driver ${driverId}`);
+        }
+      } catch (error) {
+        console.error(`Error forcefully disconnecting inactive driver ${driverId}:`, error);
+      }
+      connectedDrivers.delete(driverId);
+      console.log(`Removed inactive driver ${driverId} after ${now - lastUpdate}ms of inactivity`);
+      try {
+        await prisma.comDriver.update({
+          where: { id: driverId },
+          data: { isOnline: false }
+        });
+      } catch (error) {
+        console.error(`Error updating offline status for inactive driver ${driverId}:`, error);
+      }
+    }
+  }
+}
+
+function clearPickupProximity(rideId: any, driverId: any, reason?: string) {
+  const proximityKey = `${rideId}_${driverId}`;
+  const existing = global.pickupProximitySent.get(proximityKey);
+  if (existing?.timeoutId) {
+    clearTimeout(existing.timeoutId as any);
+  }
+  if (existing) {
+    global.pickupProximitySent.delete(proximityKey);
+    if (reason) {
+      console.log(`Cleared pickup proximity for ride ${rideId}, driver ${driverId} (${reason})`);
+    }
+  }
+}
+
+// التحقق من ملكية/صلاحية الوصول لحجز (ركوب) قبل السماح بدخول غرف السوكيت
+async function canAccessBooking(bookingId: any, socket: any) {
+  const normalizedId = Number(bookingId);
+  if (!normalizedId) return false;
+
+  const decodedUserId = (socket as any).data?.userId;
+  const decodedDriverId = (socket as any).data?.driverId;
+
+  try {
+    const ride = await prisma.ride.findUnique({
+      where: { id: normalizedId },
+      select: { id: true, userId: true, driverId: true }
+    });
+
+    if (!ride) return false;
+    if (decodedUserId && ride.userId === decodedUserId) return true;
+    if (decodedDriverId && ride.driverId === decodedDriverId) return true;
+    return false;
+  } catch (error) {
+    console.error('Error verifying booking access:', error);
+    return false;
+  }
+}
+
+async function isSequentiallyCompatible(existingRide: any, newRide: any) {
+  const existingEndPoint = normalizeLatLon(existingRide.endLatLon);
+  const newStartPoint = normalizeLatLon(newRide.startLatLon);
+
+  if (!existingEndPoint || !newStartPoint) {
+    return { compatible: true, withinWindow: false, travelMinutes: null, distanceKm: null };
+  }
+
+  const existingEndTime = estimateRideEndTime(existingRide);
+  const newPickupTime = new Date(newRide.pickupTime);
+
+  // إذا كان وقت نهاية الرحلة الحالية بعد موعد التقاط الجديدة فهناك تعارض
+  if (existingEndTime.getTime() > newPickupTime.getTime()) {
+    return { compatible: false, withinWindow: false, travelMinutes: null, distanceKm: null };
+  }
+
+  const eta = await calculateETA({ lat: existingEndPoint.lat, lng: existingEndPoint.lon }, newStartPoint.lat, newStartPoint.lon);
+  if (!eta) {
+    return { compatible: true, withinWindow: false, travelMinutes: null, distanceKm: null };
+  }
+
+  const arrivalAfterTransfer = new Date(existingEndTime.getTime() + eta.timeMinutes * 60000);
+  const compatible = arrivalAfterTransfer.getTime() <= newPickupTime.getTime();
+  const withinWindow = eta.timeMinutes <= SCHEDULED_CHAIN_WINDOW_MIN; // المسافة مفتوحة، الشرط فقط زمن الانتقال
+
+  return { compatible, withinWindow, travelMinutes: eta.timeMinutes, distanceKm: eta.distanceKm };
+}
 
 // Function to get available vehicles for a ride
 async function getAvailableVehiclesForRide(ride: any) {
@@ -187,7 +314,7 @@ async function autoAssignRide(ride: any, vehicleInfo: any) {
   try {
     console.log(`Starting auto-assign for ride ${ride.id} with ${vehicleInfo.length} potential vehicles`);
     // Parse vehicle info to get driver IDs and times
-    const availableDrivers = [];
+    const availableDrivers = [] as { vehicleId: number; driverId: number; timeMinutes: number; priority: number; meta?: any }[];
     for (const info of vehicleInfo) {
       const match = info.match(/car\d+: \[(\d+), (\d+), (\d+)\]/);
       if (match) {
@@ -195,19 +322,108 @@ async function autoAssignRide(ride: any, vehicleInfo: any) {
         availableDrivers.push({
           vehicleId: parseInt(vehicleId),
           driverId: parseInt(driverId),
-          timeMinutes: parseInt(timeMinutes)
+          timeMinutes: parseInt(timeMinutes),
+          priority: 0
         });
       }
     }
 
-    // Sort by time (closest first)
-    availableDrivers.sort((a, b) => a.timeMinutes - b.timeMinutes);
+    // === أولوية السائقين ذوي الرحلات المؤجلة المتسلسلة ===
+    // إذا كان السائق لديه رحلة مجدولة حالياً أو قريبة الانتهاء ونقطة إنزالها قريبة من نقطة بدء الرحلة الجديدة خلال 15 دقيقة انتقال، نعطيه أولوية أعلى
+    // نجمع بيانات الرحلات المجدولة الحالية لكل سائق متصل
+    const driverIds = availableDrivers.map(d => d.driverId);
+    const driversWithScheduled = await prisma.comDriver.findMany({
+      where: { id: { in: driverIds } },
+      select: {
+        id: true,
+        currentRideId: true,
+        isBusy: true,
+        isOnline: true,
+        lastLocation: true
+      }
+    });
+
+    const now = new Date();
+    const upcomingRides = await prisma.ride.findMany({
+      where: {
+        driverId: { in: driverIds },
+        scheduled: true,
+        status: { notIn: ['CANCELED', 'COMPLETED', 'REFUNDED'] },
+        pickupTime: { gte: now }
+      },
+      select: {
+        id: true,
+        driverId: true,
+        pickupTime: true,
+        durationMin: true,
+        distanceKm: true,
+        startLatLon: true,
+        endLatLon: true
+      },
+      orderBy: { pickupTime: 'asc' }
+    });
+
+    const upcomingMap = new Map<number, any>();
+    for (const r of upcomingRides) {
+      if (!upcomingMap.has(r.driverId!)) {
+        upcomingMap.set(r.driverId!, r);
+      }
+    }
+
+    const rideStart = normalizeLatLon(ride.startLatLon);
+
+    for (const driverObj of driversWithScheduled) {
+      const candidate = availableDrivers.find(d => d.driverId === driverObj.id);
+      if (!candidate) continue;
+
+      // إذا كان مشغولاً الآن، أزل من الترشيح (ما زلنا لا نرسل لمن لديه currentRideId نشطة فورية)
+      if (driverObj.currentRideId !== null || driverObj.isBusy === true || driverObj.isOnline === false) {
+        candidate.priority = -9999; // لاحقاً سيتم استبعاد السلبي
+        continue;
+      }
+
+      const upcoming = upcomingMap.get(driverObj.id);
+      if (upcoming && rideStart) {
+        const compatibility = await isSequentiallyCompatible(upcoming, ride);
+        if (!compatibility.compatible) {
+          // تعارض زمني صريح، لا نمنع لكن نخفض الأولوية بشدة
+          candidate.priority = -500;
+          candidate.meta = { reason: 'conflict_with_existing_scheduled' };
+        } else if (compatibility.withinWindow) {
+          // أولوية عليا للسلسلة المتتالية ضمن 15 دقيقة انتقال
+          candidate.priority = 1000 - (compatibility.travelMinutes ?? 0) - candidate.timeMinutes;
+          candidate.meta = {
+            sequential: true,
+            travelMinutes: compatibility.travelMinutes,
+            distanceKm: compatibility.distanceKm
+          };
+        } else {
+          // متوافق لكن ليس ضمن 15 دقيقة، نعطي أولوية طفيفة
+          candidate.priority = 100 - candidate.timeMinutes;
+        }
+      }
+    }
+
+    // استبعاد المرشحين ذوي الأولوية السلبية القوية (مشغول أو تعارض صارخ)
+    const filteredDrivers = availableDrivers
+      .filter(d => d.priority > -9000)
+      .map(d => ({
+        ...d,
+        // إذا لم تُحسب أولوية، اجعلها تعتمد على الوقت فقط
+        priority: d.priority === 0 ? 50 - d.timeMinutes : d.priority
+      }));
+
+    // Sort by priority desc ثم الزمن asc لتقليل الوقت ضمن نفس الأولوية
+    filteredDrivers.sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority;
+      return a.timeMinutes - b.timeMinutes;
+    });
 
     // Get rejected drivers for this ride
     const rejectedDrivers = global.rejectedRides?.get(ride.id) || new Set();
 
-    // Try to assign to the closest driver
-    for (const driver of availableDrivers) {
+    // Try to assign بحسب أولوية filteredDrivers (الأعلى أولوية ثم الأقرب زمنياً)
+    for (const driver of filteredDrivers) {
       try {
         // Check if driver has rejected this ride
         if (rejectedDrivers.has(driver.driverId)) {
@@ -245,14 +461,19 @@ async function autoAssignRide(ride: any, vehicleInfo: any) {
           continue; // Driver not connected
         }
 
-        // Assign the ride
-        await prisma.comDriver.update({
-          where: { id: driver.driverId },
-          data: {
-            currentRideId: ride.id,
-            isBusy: true
-          }
-        });
+        // Assign العرض للسائق. في الرحلات المجدولة لا نجعل السائق Busy الآن كي يُسمح بسلسلة مجدولة لاحقة.
+        const driverUpdateData: any = {};
+        if (!ride.scheduled) {
+          driverUpdateData.currentRideId = ride.id;
+          driverUpdateData.isBusy = true;
+        }
+
+        if (Object.keys(driverUpdateData).length) {
+          await prisma.comDriver.update({
+            where: { id: driver.driverId },
+            data: driverUpdateData
+          });
+        }
 
         // Send ride offer to driver
         const driverSocket = connectedDrivers.get(driver.driverId);
@@ -406,6 +627,15 @@ async function calculateETA(driverLocation: any, pickupLat: any, pickupLon: any)
 async function maybeSendPickupProximity(rideId: any, driverId: any, driverLocation: any, startLatLon: any) {
   if (!rideId || !driverId || !driverLocation || !startLatLon) return;
 
+  const ride = await prisma.ride.findUnique({
+    where: { id: rideId },
+    select: { scheduled: true, pickupTime: true }
+  });
+
+  if (!canStartPickupCountdown(ride)) {
+    return;
+  }
+
   const eta = await calculateETA(driverLocation, startLatLon.lat, startLatLon.lon);
   if (!eta) return;
 
@@ -427,20 +657,7 @@ async function maybeSendPickupProximity(rideId: any, driverId: any, driverLocati
         });
         console.log(`Sent pickupProximity to driver ${driverId} for ride ${rideId}: ${distanceMeters} meters, countdown start: ${new Date(countdownStart).toISOString()}`);
       }
-      global.pickupProximitySent.set(proximityKey, {
-        driverId,
-        sentAt: Date.now(),
-        countdownStart,
-        countdownDuration: PICKUP_COUNTDOWN_DURATION_SEC,
-        distanceMeters,
-        startLocation: {
-          lat: startLatLon.lat,
-          lng: startLatLon.lon
-        },
-        expiredAt: null
-      });
-
-      setTimeout(() => {
+      const countdownTimeout = setTimeout(() => {
         const driverSocket = connectedDrivers?.get(driverId);
         const activeIo = global.io;
         const existing = global.pickupProximitySent.get(proximityKey);
@@ -451,9 +668,24 @@ async function maybeSendPickupProximity(rideId: any, driverId: any, driverLocati
         }
         global.pickupProximitySent.set(proximityKey, {
           ...existing,
-          expiredAt: Date.now()
+          expiredAt: Date.now(),
+          timeoutId: undefined
         });
       }, PICKUP_COUNTDOWN_DURATION_SEC * 1000);
+
+      global.pickupProximitySent.set(proximityKey, {
+        driverId,
+        sentAt: Date.now(),
+        countdownStart,
+        countdownDuration: PICKUP_COUNTDOWN_DURATION_SEC,
+        distanceMeters,
+        startLocation: {
+          lat: startLatLon.lat,
+          lng: startLatLon.lon
+        },
+        expiredAt: null,
+        timeoutId: countdownTimeout
+      });
     } else {
       const proximityData = global.pickupProximitySent.get(proximityKey);
       if (proximityData && proximityData.countdownStart) {
@@ -466,7 +698,8 @@ async function maybeSendPickupProximity(rideId: any, driverId: any, driverLocati
           }
           global.pickupProximitySent.set(proximityKey, {
             ...proximityData,
-            expiredAt: Date.now()
+            expiredAt: Date.now(),
+            timeoutId: undefined
           });
         }
       }
@@ -909,26 +1142,37 @@ app.prepare().then(() => {
   const driverStatusMonitor = new DriverStatusMonitor(io);
 
   io.on('connection', (socket) => {
+    const authToken = socket.handshake.auth?.token;
+    if (!authToken) {
+      console.log('Connection rejected: missing token');
+      socket.disconnect();
+      return;
+    }
+
+    try {
+      const decoded: any = jwt.verify(authToken, process.env.AUTH_SECRET || 'change_me_dev_secret');
+      (socket as any).data = (socket as any).data || {};
+      (socket as any).data.userId = decoded?.id ?? decoded?.userId ?? decoded?.sub ?? null;
+      (socket as any).data.driverId = decoded?.driverId ?? null;
+    } catch (error) {
+      console.log('Connection rejected: invalid token', (error as any).message);
+      socket.disconnect();
+      return;
+    }
+
     console.log('Client connected:', socket.id);
 
     socket.on('join', async (data) => {
-      // Verify token if provided
-      if (socket.handshake.auth && socket.handshake.auth.token) {
-        try {
-          const jwt = require('jsonwebtoken');
-          const decoded = jwt.verify(socket.handshake.auth.token, process.env.AUTH_SECRET || 'change_me_dev_secret');
-          if (!decoded.driverId || decoded.driverId !== data.driverId) {
-            console.log('Invalid token for driver join');
-            socket.disconnect();
-            return;
-          }
-        } catch (error) {
-          console.log('Token verification failed for driver join:', (error as any).message);
-          socket.disconnect();
-          return;
-        }
-      } else {
-        console.log('No token provided for driver join');
+      const authDriverId = (socket as any).data?.driverId;
+
+      if (!authDriverId) {
+        console.log('Join rejected: driverId missing in token');
+        socket.disconnect();
+        return;
+      }
+
+      if (!data.driverId || data.driverId !== authDriverId) {
+        console.log('Join rejected: driverId mismatch between token and payload');
         socket.disconnect();
         return;
       }
@@ -1001,16 +1245,22 @@ app.prepare().then(() => {
     });
 
     socket.on('updateLocation', async (data) => {
-      if (data.driverId && connectedDrivers.has(data.driverId)) {
-        connectedDrivers.get(data.driverId).location = data.location;
-        connectedDrivers.get(data.driverId).lastUpdate = Date.now();
-        console.log(`Driver ${data.driverId} location updated:`, data.location);
+      const authDriverId = (socket as any).data?.driverId;
+      if (!authDriverId) return;
+      if (data.driverId && data.driverId !== authDriverId) {
+        console.log(`Ignoring updateLocation for mismatched driverId. token driver: ${authDriverId}, payload driver: ${data.driverId}`);
+        return;
+      }
+      if (connectedDrivers.has(authDriverId)) {
+        connectedDrivers.get(authDriverId).location = data.location;
+        connectedDrivers.get(authDriverId).lastUpdate = Date.now();
+        console.log(`Driver ${authDriverId} location updated:`, data.location);
 
         // Update database
         try {
           // Find the vehicle assigned to this driver
           const driver = await prisma.comDriver.findUnique({
-            where: { id: data.driverId },
+            where: { id: authDriverId },
             select: { car: true, currentRideId: true }
           });
 
@@ -1054,26 +1304,26 @@ app.prepare().then(() => {
 
                 // Get driver info
                 const driverInfo = await prisma.comDriver.findUnique({
-                  where: { id: data.driverId },
-                  select: {
-                    id: true,
-                    drFname: true,
-                    drLname: true,
-                    car: true
+                   where: { id: authDriverId },
+                   select: {
+                     id: true,
+                     drFname: true,
+                     drLname: true,
+                     car: true
                   }
                 });
 
                 io.to(`booking_${driver.currentRideId}`).emit('driverInfoUpdate', {
                   bookingId: driver.currentRideId,
-                  driverId: data.driverId,
-                  driver: driverInfo,
-                  location: data.location,
-                  eta: eta,
-                  timestamp: new Date().toISOString()
-                });
+                   driverId: authDriverId,
+                   driver: driverInfo,
+                   location: data.location,
+                   eta: eta,
+                   timestamp: new Date().toISOString()
+                 });
 
                 if (ride && ride.startLatLon && (ride.status === 'ONGOING' || ride.status === 'DISPATCHED')) {
-                  await maybeSendPickupProximity(driver.currentRideId, data.driverId, data.location, ride.startLatLon);
+                  await maybeSendPickupProximity(driver.currentRideId, authDriverId, data.location, ride.startLatLon);
                 }
               }
             }
@@ -1085,8 +1335,15 @@ app.prepare().then(() => {
     });
 
     socket.on('acceptRide', async (data) => {
+      const authDriverId = (socket as any).data?.driverId;
+      if (!authDriverId) return;
+      if (data.driverId && data.driverId !== authDriverId) {
+        console.log(`Ignoring acceptRide for mismatched driverId. token driver: ${authDriverId}, payload driver: ${data.driverId}`);
+        socket.emit('rideAcceptFailed', { rideId: data.rideId, reason: 'unauthorized_driver' });
+        return;
+      }
       try {
-        console.log(`Driver ${data.driverId} accepted ride ${data.rideId}`);
+        console.log(`Driver ${authDriverId} accepted ride ${data.rideId}`);
 
         // Check if ride is still available
         const ride = await prisma.ride.findUnique({
@@ -1101,7 +1358,7 @@ app.prepare().then(() => {
 
         // Get driver info
         const driver = await prisma.comDriver.findUnique({
-          where: { id: data.driverId },
+          where: { id: authDriverId },
           include: {
             company: true,
             shifts: true
@@ -1117,7 +1374,7 @@ app.prepare().then(() => {
         await prisma.ride.update({
           where: { id: data.rideId },
           data: {
-            driverId: data.driverId,
+            driverId: authDriverId,
             car: driver.car || null,
             status: 'ONGOING',
             acceptedAt: new Date()
@@ -1126,7 +1383,7 @@ app.prepare().then(() => {
 
         // Update driver status
         await prisma.comDriver.update({
-          where: { id: data.driverId },
+          where: { id: authDriverId },
           data: {
             currentRideId: data.rideId,
             rideAccepted: 1,
@@ -1165,14 +1422,14 @@ app.prepare().then(() => {
         console.log(`Sending bookingUpdate to booking_${data.rideId}:`, {
           bookingId: data.rideId,
           status: 'ONGOING',
-          driverId: data.driverId,
+          driverId: authDriverId,
           driver: passengerDriverInfo,
           timestamp: new Date().toISOString()
         });
         io.to(`booking_${data.rideId}`).emit('bookingUpdate', {
           bookingId: data.rideId,
           status: 'ONGOING',
-          driverId: data.driverId,
+          driverId: authDriverId,
           driver: passengerDriverInfo,
           timestamp: new Date().toISOString()
         });
@@ -1208,7 +1465,7 @@ app.prepare().then(() => {
 
         // Send initial driver info update
         const driverInfo = await prisma.comDriver.findUnique({
-          where: { id: data.driverId },
+          where: { id: authDriverId },
           select: {
             id: true,
             drFname: true,
@@ -1219,7 +1476,7 @@ app.prepare().then(() => {
 
         io.to(`booking_${data.rideId}`).emit('driverInfoUpdate', {
           bookingId: data.rideId,
-          driverId: data.driverId,
+          driverId: authDriverId,
           driver: driverInfo,
           location: null,
           eta: null,
@@ -1230,12 +1487,12 @@ app.prepare().then(() => {
         realtimeService.sendBookingUpdate(data.rideId, {
           bookingId: data.rideId,
           status: 'ONGOING',
-          driverId: data.driverId,
+          driverId: authDriverId,
           driver: driver,
           timestamp: new Date().toISOString()
         });
 
-        console.log(`Ride ${data.rideId} assigned to driver ${data.driverId}`);
+        console.log(`Ride ${data.rideId} assigned to driver ${authDriverId}`);
 
       } catch (error) {
         console.error('Error accepting ride:', error);
@@ -1244,12 +1501,18 @@ app.prepare().then(() => {
     });
 
     socket.on('rejectRide', async (data) => {
+      const authDriverId = (socket as any).data?.driverId;
+      if (!authDriverId) return;
+      if (data.driverId && data.driverId !== authDriverId) {
+        console.log(`Ignoring rejectRide for mismatched driverId. token driver: ${authDriverId}, payload driver: ${data.driverId}`);
+        return;
+      }
       console.log(`Driver ${data.driverId} rejected ride ${data.rideId}`);
       try {
         // Clear currentRideId and ban driver for 2 minutes
         const bannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
         await prisma.comDriver.update({
-          where: { id: data.driverId },
+          where: { id: authDriverId },
           data: {
             currentRideId: null,
             bannedUntil,
@@ -1270,31 +1533,31 @@ app.prepare().then(() => {
         setTimeout(async () => {
           try {
             await prisma.comDriver.update({
-              where: { id: data.driverId },
+              where: { id: authDriverId },
               data: {
                 bannedUntil: null
               }
             });
-            console.log(`Unbanned driver ${data.driverId} after 2 minutes`);
+            console.log(`Unbanned driver ${authDriverId} after 2 minutes`);
           } catch (error) {
-            console.error(`Error unbanning driver ${data.driverId}:`, error);
+            console.error(`Error unbanning driver ${authDriverId}:`, error);
           }
         }, 120000); // 2 minutes
       } catch (error) {
-        console.error(`Error updating driver ${data.driverId} after rejection:`, error);
+        console.error(`Error updating driver ${authDriverId} after rejection:`, error);
       }
 
       // Add to rejected rides to avoid re-offering
       if (!global.rejectedRides.has(data.rideId)) {
         global.rejectedRides.set(data.rideId, new Set());
       }
-      global.rejectedRides.get(data.rideId)!.add(data.driverId);
+      global.rejectedRides.get(data.rideId)!.add(authDriverId);
 
       // Set timeout to remove rejection after 30 seconds for each driver
       const timeoutMs = 30000; // 30 seconds
       setTimeout(() => {
         if (global.rejectedRides.has(data.rideId)) {
-          global.rejectedRides.get(data.rideId)!.delete(data.driverId);
+          global.rejectedRides.get(data.rideId)!.delete(authDriverId);
           if (global.rejectedRides.get(data.rideId)!.size === 0) {
             global.rejectedRides.delete(data.rideId);
           }
@@ -1305,10 +1568,9 @@ app.prepare().then(() => {
       global.activeOffers.delete(data.rideId);
 
       // Clear pickup proximity sent
-      const rejectProximityKey = `${data.rideId}_${data.driverId}`;
+      const rejectProximityKey = `${data.rideId}_${authDriverId}`;
       if (global.pickupProximitySent.has(rejectProximityKey)) {
-        global.pickupProximitySent.delete(rejectProximityKey);
-        console.log(`Cleared pickup proximity for rejected ride ${data.rideId}, driver ${data.driverId}`);
+        clearPickupProximity(data.rideId, authDriverId, 'rejectRide');
       }
 
       // Send rejection confirmation to clear offer on client side
@@ -1321,12 +1583,18 @@ app.prepare().then(() => {
     });
 
     socket.on('rideTimeout', async (data) => {
+      const authDriverId = (socket as any).data?.driverId;
+      if (!authDriverId) return;
+      if (data.driverId && data.driverId !== authDriverId) {
+        console.log(`Ignoring rideTimeout for mismatched driverId. token driver: ${authDriverId}, payload driver: ${data.driverId}`);
+        return;
+      }
       console.log(`Driver ${data.driverId} timed out on ride ${data.rideId}`);
       try {
         // Reset driver status and ban for 2 minutes
         const bannedUntil = new Date(Date.now() + 120000); // 2 minutes from now
         await prisma.comDriver.update({
-          where: { id: data.driverId },
+          where: { id: authDriverId },
           data: {
             currentRideId: null,
             bannedUntil,
@@ -1338,13 +1606,13 @@ app.prepare().then(() => {
         if (!global.rejectedRides.has(data.rideId)) {
           global.rejectedRides.set(data.rideId, new Set());
         }
-        global.rejectedRides.get(data.rideId)!.add(data.driverId);
+        global.rejectedRides.get(data.rideId)!.add(authDriverId);
 
         // Set timeout to remove rejection after 30 seconds
         const timeoutMs = 30000; // 30 seconds
         setTimeout(() => {
           if (global.rejectedRides.has(data.rideId)) {
-            global.rejectedRides.get(data.rideId)!.delete(data.driverId);
+            global.rejectedRides.get(data.rideId)!.delete(authDriverId);
             if (global.rejectedRides.get(data.rideId)!.size === 0) {
               global.rejectedRides.delete(data.rideId);
             }
@@ -1364,8 +1632,7 @@ app.prepare().then(() => {
         // Clear pickup proximity sent
         const timeoutProximityKey = `${data.rideId}_${data.driverId}`;
         if (global.pickupProximitySent.has(timeoutProximityKey)) {
-          global.pickupProximitySent.delete(timeoutProximityKey);
-          console.log(`Cleared pickup proximity for timed out ride ${data.rideId}, driver ${data.driverId}`);
+          clearPickupProximity(data.rideId, authDriverId, 'rideTimeout');
         }
 
         // Send timeout event to stop the sound and clear offer
@@ -1373,20 +1640,20 @@ app.prepare().then(() => {
           rideId: data.rideId
         });
 
-        console.log(`Driver ${data.driverId} banned until ${bannedUntil} after ride timeout`);
+        console.log(`Driver ${authDriverId} banned until ${bannedUntil} after ride timeout`);
 
         // Auto-unban after 2 minutes
         setTimeout(async () => {
           try {
             await prisma.comDriver.update({
-              where: { id: data.driverId },
+              where: { id: authDriverId },
               data: {
                 bannedUntil: null
               }
             });
-            console.log(`Unbanned driver ${data.driverId} after 2 minutes`);
+            console.log(`Unbanned driver ${authDriverId} after 2 minutes`);
           } catch (error) {
-            console.error(`Error unbanning driver ${data.driverId}:`, error);
+            console.error(`Error unbanning driver ${authDriverId}:`, error);
           }
         }, 120000); // 2 minutes
 
@@ -1398,32 +1665,47 @@ app.prepare().then(() => {
     });
 
     // Chat functionality
-    socket.on('joinChat', (data) => {
-      if (data.bookingId) {
-        socket.join(`chat_${data.bookingId}`);
-        console.log(`User joined chat for booking ${data.bookingId}`);
+    socket.on('joinChat', async (data) => {
+      if (!data?.bookingId) return;
+      const authorized = await canAccessBooking(data.bookingId, socket);
+      if (!authorized) {
+        console.log(`Unauthorized chat join attempt for booking ${data.bookingId}`);
+        socket.emit('error', { type: 'unauthorized_chat', message: 'Not allowed to join this chat' });
+        return;
       }
+      socket.join(`chat_${data.bookingId}`);
+      console.log(`User joined chat for booking ${data.bookingId}`);
     });
 
     // Booking updates functionality
-    socket.on('joinBooking', (data) => {
-      if (data.bookingId) {
-        socket.join(`booking_${data.bookingId}`);
-        console.log(`User joined booking updates for booking ${data.bookingId}`);
+    socket.on('joinBooking', async (data) => {
+      if (!data?.bookingId) return;
+      const authorized = await canAccessBooking(data.bookingId, socket);
+      if (!authorized) {
+        console.log(`Unauthorized booking join attempt for booking ${data.bookingId}`);
+        socket.emit('error', { type: 'unauthorized_booking', message: 'Not allowed to join this booking' });
+        return;
       }
+      socket.join(`booking_${data.bookingId}`);
+      console.log(`User joined booking updates for booking ${data.bookingId}`);
     });
 
-    socket.on('sendMessage', (data) => {
-      if (data.bookingId && data.message && data.sender) {
-        const messageData = {
-          message: data.message,
-          sender: data.sender,
-          timestamp: new Date().toISOString()
-        };
-        // Broadcast to all in the chat room including sender
-        io.to(`chat_${data.bookingId}`).emit('newMessage', messageData);
-        console.log(`Message sent in chat ${data.bookingId} by ${data.sender}`);
+    socket.on('sendMessage', async (data) => {
+      if (!data?.bookingId || !data?.message || !data?.sender) return;
+      const authorized = await canAccessBooking(data.bookingId, socket);
+      if (!authorized) {
+        console.log(`Unauthorized sendMessage attempt for booking ${data.bookingId}`);
+        socket.emit('error', { type: 'unauthorized_chat', message: 'Not allowed to send messages to this chat' });
+        return;
       }
+
+      const messageData = {
+        message: data.message,
+        sender: data.sender,
+        timestamp: new Date().toISOString()
+      };
+      io.to(`chat_${data.bookingId}`).emit('newMessage', messageData);
+      console.log(`Message sent in chat ${data.bookingId} by ${data.sender}`);
     });
 
     socket.on('disconnect', () => {
@@ -1453,6 +1735,11 @@ app.prepare().then(() => {
 
     // Start driver status monitor
     driverStatusMonitor.start();
+
+    // مراقبة الخمول للسائقين كل 30 ثانية
+    setInterval(() => {
+      cleanupInactiveDrivers();
+    }, 30000);
 
     // Check for existing new rides on server start
     setTimeout(() => {

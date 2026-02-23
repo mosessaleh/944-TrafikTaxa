@@ -272,6 +272,14 @@ export async function POST(request: NextRequest) {
 
     const validatedData = createBookingSchema.parse(sanitizedData);
 
+    // Temporarily disable scheduled rides
+    if (validatedData.scheduled) {
+      return NextResponse.json(
+        { ok: false, error: 'الرحلات المجدولة متوقفة مؤقتاً. الرجاء اختيار رحلة فورية.' },
+        { status: 403 }
+      );
+    }
+
     // Verify vehicle type exists and is active
     const vehicleType = await prisma.vehicleType.findUnique({
       where: { id: validatedData.vehicleTypeId },
@@ -405,8 +413,8 @@ export async function POST(request: NextRequest) {
 
     console.log('[DEBUG] About to create booking with paymentMethod:', paymentMethod);
 
-    // Initialize driver queue (will be populated during vehicle assignment)
-    let driverQueue: string[] = [];
+    // Initialize driver queue (will be populated أثناء اختيار السيارة، وقد نضيف أولوية تتابع لسائق قادم لنفس المنطقة)
+    let driverQueue: number[] = [];
 
     // Create booking with PENDING status (awaiting payment confirmation)
     console.log(`[DEBUG] Creating booking with status PENDING for user ${user.id}`);
@@ -506,16 +514,72 @@ export async function POST(request: NextRequest) {
           console.log(`[DEBUG] Authorization result:`, authResult);
 
           if (authResult.success) {
-            // Update booking with payment capture
-            await prisma.ride.update({
+            // Update booking with payment capture and attempt تهيئة driverQueue لسائق تتابع مجدول
+            const rideAfterPayment = await prisma.ride.update({
               where: { id: booking.id },
               data: {
                 status: 'CONFIRMED',
                 // paymentStatus is set by authorizeCardPayment
                 explanation: `Payment authorized - Transaction: ${authResult.transactionId}`,
                 paymentRef: authResult.transactionId // Store Payment Intent ID
+              },
+              select: {
+                id: true,
+                scheduled: true,
+                pickupTime: true,
+                startLatLon: true,
+                vehicleTypeId: true,
+                driverQueue: true
               }
             });
+
+            // إذا الرحلة مجدولة حاول استدعاء vehicle-selection للحصول على recommendedQueue وتحديث driverQueue
+            if (
+              rideAfterPayment.scheduled &&
+              rideAfterPayment.pickupTime &&
+              rideAfterPayment.startLatLon &&
+              typeof rideAfterPayment.startLatLon === 'object' &&
+              !Array.isArray(rideAfterPayment.startLatLon) &&
+              'lat' in rideAfterPayment.startLatLon &&
+              'lon' in rideAfterPayment.startLatLon
+            ) {
+              const startLatLon = rideAfterPayment.startLatLon as { lat: number; lon: number };
+              try {
+                const vsResp = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    pickupLat: startLatLon.lat,
+                    pickupLon: startLatLon.lon,
+                    vehicleTypeId: rideAfterPayment.vehicleTypeId,
+                    maxVehicles: 3,
+                    scheduledPickupTime: rideAfterPayment.pickupTime.toISOString()
+                  })
+                });
+
+                if (vsResp.ok) {
+                  const data = await vsResp.json();
+                  const recommendedQueue: number[] = Array.isArray(data?.recommendedQueue)
+                    ? data.recommendedQueue.filter((v: any) => Number.isInteger(v)).map((v: any) => Number(v))
+                    : [];
+                  if (recommendedQueue.length) {
+                    const currentQueue: number[] = Array.isArray(rideAfterPayment.driverQueue)
+                      ? rideAfterPayment.driverQueue.filter((v: any) => Number.isInteger(v)).map((v: any) => Number(v))
+                      : [];
+                    const merged = Array.from(new Set([...(currentQueue || []), ...recommendedQueue]));
+                    await prisma.ride.update({
+                      where: { id: rideAfterPayment.id },
+                      data: { driverQueue: merged }
+                    });
+                    console.log(`booking POST: updated driverQueue for scheduled ride ${rideAfterPayment.id} with recommendedQueue`, merged);
+                  }
+                } else {
+                  console.warn('booking POST: vehicle-selection returned non-OK status for scheduled ride', rideAfterPayment.id, vsResp.status);
+                }
+              } catch (err) {
+                console.error('booking POST: failed to fetch vehicle-selection for recommendedQueue', err);
+              }
+            }
 
             console.log(`[DEBUG] Payment authorized for booking ${booking.id}, transaction: ${authResult.transactionId}`);
 

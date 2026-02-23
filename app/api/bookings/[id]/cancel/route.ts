@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { getSocketServer } from '@/lib/socket-server';
+import { chargeCancellationFee } from '@/lib/payment-processor';
 
 /**
  * POST /api/bookings/[id]/cancel - Cancel a booking
@@ -78,6 +79,17 @@ export async function POST(
       );
     }
 
+    // Parse optional body for reason
+    let cancelReason: string | undefined;
+    try {
+      const body = await request.json().catch(() => null);
+      if (body && typeof body.reason === 'string') {
+        cancelReason = body.reason.slice(0, 255);
+      }
+    } catch (e) {
+      // ignore body parse errors (backward compatible)
+    }
+
     // Fetch cancellation fees from settings
     const settings = await prisma.settings.findFirst();
     if (!settings) {
@@ -131,11 +143,52 @@ export async function POST(
 
     refundAmount = booking.price - cancellationFee;
 
-    // Update booking status to cancelled
+    // Default payment status/result before payment ops
+    let paymentStatus: string | null = booking.paymentStatus;
+    let paymentRef: string | null | undefined = booking.paymentRef;
+    let paymentExplanation: string | null = booking.explanation;
+    let refundId: string | undefined;
+
+    // Process payment adjustments (refund or cancel auth or charge fee if needed)
+    if (booking.paymentMethod === 'card' && booking.savedPaymentMethodId && booking.paymentStatus) {
+      const paymentResult = await chargeCancellationFee(
+        {
+          ...booking,
+          savedPaymentMethod: await prisma.userPaymentMethod.findUnique({
+            where: { id: booking.savedPaymentMethodId }
+          })
+        },
+        cancellationFee,
+        booking.price
+      );
+
+      if (paymentResult.success) {
+        paymentStatus = cancellationFee > 0 ? 'PAID' : 'REFUNDED';
+        paymentRef = paymentResult.transactionId || paymentRef;
+        refundId = paymentResult.refundId;
+        paymentExplanation = paymentResult.refundId
+          ? `Cancellation refund ${paymentResult.refundedAmountDkk} DKK, refundId=${paymentResult.refundId}`
+          : paymentResult.canceledAuthorization
+            ? 'Authorization canceled - no cancellation fee'
+            : paymentResult.transactionId
+              ? `Cancellation fee charged - tx=${paymentResult.transactionId}`
+              : booking.explanation;
+      } else {
+        paymentStatus = cancellationFee > 0 ? 'UNPAID' : booking.paymentStatus;
+        paymentExplanation = `Cancellation payment handling failed: ${paymentResult.error || 'unknown error'}`;
+      }
+    }
+
+    // Update booking status to cancelled and persist payment updates
     const updatedBooking = await prisma.ride.update({
       where: { id: bookingId },
       data: {
-        status: 'CANCELED'
+        status: 'CANCELED',
+        canceledBy: 'user',
+        cancellationReason: cancelReason || null,
+        paymentStatus: paymentStatus || undefined,
+        paymentRef: paymentRef || undefined,
+        explanation: paymentExplanation || undefined
       }
     });
 
@@ -262,7 +315,14 @@ export async function POST(
       message: 'Booking cancelled successfully',
       booking: {
         id: updatedBooking.id,
-        status: updatedBooking.status
+        status: updatedBooking.status,
+        cancellationFee,
+        refundAmount,
+        paymentStatus: paymentStatus || booking.paymentStatus,
+        paymentRef,
+        refundId,
+        canceledBy: 'user',
+        cancellationReason: cancelReason || null
       }
     });
 

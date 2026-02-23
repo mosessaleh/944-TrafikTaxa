@@ -48,7 +48,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const now = new Date();
     const timeDiffMs = now.getTime() - acceptedAt.getTime();
-    const timeDiffMin = Math.floor(timeDiffMs / (1000 * 60));
+    let timeDiffMin = Math.floor(timeDiffMs / (1000 * 60));
 
     const proximityMap = (global as any).pickupProximitySent as Map<string, any> | undefined;
     const proximityKey = `${rideId}_${driver.id}`;
@@ -70,6 +70,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           );
         }
       }
+    }
+
+    // إذا كان العد التنازلي قد بدأ قبل موعد الرحلة المجدول، لا نحتسب زمن الانتظار قبل الموعد
+    let timeDiffMin = Math.floor(timeDiffMs / (1000 * 60));
+    if (proximityData?.countdownStart && ride.scheduled && ride.pickupTime) {
+      const scheduledTs = new Date(ride.pickupTime).getTime();
+      const effectiveStart = Math.max(proximityData.countdownStart, scheduledTs);
+      timeDiffMin = Math.max(0, Math.floor((Date.now() - effectiveStart) / (1000 * 60)));
     }
 
     const settings = await prisma.settings.findFirst();

@@ -78,6 +78,24 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ ok: false, error: 'Pickup countdown has not started yet' }, { status: 400 });
     }
 
+    // لا نسمح بحساب أو اعتبار العد التنازلي قبل وقت الرحلة المجدول
+    if (ride.scheduled && ride.pickupTime) {
+      const scheduledTs = new Date(ride.pickupTime).getTime();
+      if (proximityData.countdownStart < scheduledTs) {
+        const adjustedElapsed = Math.floor((Date.now() - scheduledTs) / 1000);
+        const countdownDuration = proximityData.countdownDuration || PICKUP_COUNTDOWN_DURATION_SEC;
+        if (adjustedElapsed < countdownDuration) {
+          return NextResponse.json({
+            ok: false,
+            error: 'Pickup countdown has not expired yet',
+            data: {
+              remainingSec: Math.max(0, countdownDuration - adjustedElapsed)
+            }
+          }, { status: 400 });
+        }
+      }
+    }
+
     const countdownDuration = proximityData.countdownDuration || PICKUP_COUNTDOWN_DURATION_SEC;
     const elapsedFromCountdown = proximityData.expiredAt
       ? countdownDuration
