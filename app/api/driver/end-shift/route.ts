@@ -2,8 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireDriverByJWT } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 
+const {
+  invalidateDriverScheduleCache,
+  ensureDriverScheduleTables
+} = require('@/lib/driver-schedule');
+
 export async function POST(request: NextRequest) {
   try {
+    await ensureDriverScheduleTables(prisma);
+
     // Verify driver authentication
     const driver = await requireDriverByJWT(request as any);
 
@@ -127,6 +134,8 @@ export async function POST(request: NextRequest) {
       where: { id: driver.id },
       data: { isOnline: false }
     });
+
+    invalidateDriverScheduleCache(driver.id);
 
     console.log('Ending shift for driver:', driver.id, 'shiftData:', {
       workTime: workTimeHours,

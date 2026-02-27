@@ -10,6 +10,11 @@ const DriverStatusMonitor = require('./lib/driver-status-monitor');
 const { sendPushToDriver } = require('./lib/notification-service');
 const { sendEmail } = require('./lib/email');
 const { chargeCancellationFee } = require('./lib/payment-processor');
+const {
+  ensureDriverScheduleTables,
+  canDriverReceiveRide,
+  invalidateDriverScheduleCache
+} = require('./lib/driver-schedule');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -556,7 +561,25 @@ async function buildScheduledCandidates(ride) {
 
   if (!candidates.length) return [];
 
-  return filterConflictingDrivers(candidates, ride);
+  const eligibleBySchedule = [];
+  for (const candidate of candidates) {
+    try {
+      const schedule = await canDriverReceiveRide(prisma, candidate.driverId, {
+        strict: true,
+        now: new Date()
+      });
+      if (!schedule?.eligible) {
+        continue;
+      }
+      eligibleBySchedule.push(candidate);
+    } catch (error) {
+      console.error(`Error checking schedule eligibility for driver ${candidate.driverId}:`, error);
+    }
+  }
+
+  if (!eligibleBySchedule.length) return [];
+
+  return filterConflictingDrivers(eligibleBySchedule, ride);
 }
 
 function selectBestScheduledCandidate(candidates, rideVehicleTypeId) {
@@ -1548,6 +1571,16 @@ async function autoAssignRide(ride, vehicleInfo) {
           continue; // Driver not available
         }
 
+        // Check schedule eligibility for immediate rides
+        const schedule = await canDriverReceiveRide(prisma, driver.driverId, {
+          strict: true,
+          now
+        });
+        if (!schedule?.eligible) {
+          console.log(`Skipping driver ${driver.driverId} - schedule rule: ${schedule?.reason || 'unknown'}`);
+          continue;
+        }
+
         // Check if driver is still connected in socket
         if (!connectedDrivers.has(driver.driverId)) {
           continue; // Driver not connected
@@ -2368,6 +2401,7 @@ app.prepare().then(() => {
             where: { id: data.driverId },
             data: { isOnline: true, isBusy: false }
           });
+          invalidateDriverScheduleCache(data.driverId);
           console.log(`Driver ${data.driverId} status updated to online`);
         } catch (error) {
           console.error('Error updating driver status:', error);
@@ -2572,6 +2606,18 @@ app.prepare().then(() => {
           return;
         }
 
+        const schedule = await canDriverReceiveRide(prisma, data.driverId, {
+          strict: true,
+          now: new Date()
+        });
+        if (!schedule?.eligible) {
+          socket.emit('rideAcceptFailed', {
+            rideId: data.rideId,
+            reason: 'Driver is outside configured work schedule'
+          });
+          return;
+        }
+
         if (!ride.scheduled) {
           let driverPickupEtaMinutes = 0;
           const driverLocation = await resolveDriverLocation(data.driverId);
@@ -2715,6 +2761,7 @@ app.prepare().then(() => {
             isBusy: false
           }
         });
+        invalidateDriverScheduleCache(data.driverId);
         console.log(`Banned driver ${data.driverId} until ${bannedUntil} after ride rejection`);
 
         // Send status update to driver app
@@ -2792,6 +2839,7 @@ app.prepare().then(() => {
             isBusy: false
           }
         });
+        invalidateDriverScheduleCache(data.driverId);
 
         // Add to rejected rides to avoid re-offering
         if (!global.rejectedRides.has(data.rideId)) {
@@ -2953,6 +3001,13 @@ app.prepare().then(() => {
   server.listen(3000, async (err) => {
     if (err) throw err;
     console.log('> Ready on http://localhost:3000');
+
+    try {
+      await ensureDriverScheduleTables(prisma);
+      console.log('Driver schedule tables are ready');
+    } catch (scheduleError) {
+      console.error('Failed to ensure driver schedule tables:', scheduleError);
+    }
 
     // Start driver status monitor
     driverStatusMonitor.start();

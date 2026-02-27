@@ -2,10 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 
+const {
+  ensureDriverScheduleTables,
+  getDriverScheduleSnapshot,
+  getDriverScheduleSuggestions
+} = require('@/lib/driver-schedule');
+
 const prisma = new PrismaClient();
 
 export async function GET(request: NextRequest) {
   try {
+    await ensureDriverScheduleTables(prisma);
+
     console.log('Analytics API called');
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -14,7 +22,10 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { driverId: number };
+    const decoded = jwt.verify(
+      token,
+      process.env.AUTH_SECRET || process.env.JWT_SECRET || 'change_me_dev_secret'
+    ) as { driverId: number };
     console.log('Decoded driverId:', decoded.driverId);
 
     const driverId = decoded.driverId;
@@ -111,6 +122,12 @@ export async function GET(request: NextRequest) {
     const averageRating = 4.2; // This would come from ratings system
     const completionRate = totalRides > 0 ? (rides.filter(r => r.status === 'COMPLETED').length / totalRides) * 100 : 0;
 
+    const scheduleSnapshot = await getDriverScheduleSnapshot(prisma, driverId, now);
+    const scheduleSuggestions = await getDriverScheduleSuggestions(prisma, driverId, {
+      now,
+      daysBack: 42
+    });
+
     // If no rides, return sample data for demo
     if (totalRides === 0) {
       const sampleAnalytics = {
@@ -151,6 +168,10 @@ export async function GET(request: NextRequest) {
           ],
           busiestDay: { date: '02', rides: 5, earnings: 750 },
         },
+        schedule: {
+          current: scheduleSnapshot,
+          suggestions: scheduleSuggestions
+        }
       };
       return NextResponse.json(sampleAnalytics);
     }
@@ -176,6 +197,10 @@ export async function GET(request: NextRequest) {
         peakHours: hourlyData.filter(h => h.rides > 0).sort((a, b) => b.rides - a.rides).slice(0, 3),
         busiestDay: chartData.length > 0 ? chartData.reduce((max, day) => day.rides > max.rides ? day : max) : null,
       },
+      schedule: {
+        current: scheduleSnapshot,
+        suggestions: scheduleSuggestions
+      }
     };
 
     return NextResponse.json(analytics);

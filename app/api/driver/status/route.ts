@@ -2,10 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 
+const {
+  getDriverScheduleSnapshot,
+  ensureDriverScheduleTables
+} = require('@/lib/driver-schedule');
+
 const prisma = new PrismaClient();
 
 export async function GET(request: NextRequest) {
   try {
+    await ensureDriverScheduleTables(prisma);
+
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -72,6 +79,8 @@ export async function GET(request: NextRequest) {
     const totalRidesToday = todayStats._count?._all ?? 0;
     const earningsToday = todayStats._sum?.price ?? 0;
 
+    const schedule = await getDriverScheduleSnapshot(prisma, decoded.driverId, new Date());
+
     const response = {
       isOnline: isOnline,
       isBusy: driver.isBusy,
@@ -83,6 +92,7 @@ export async function GET(request: NextRequest) {
       totalRidesToday,
       earningsToday,
       rating: driver.rating ? parseFloat(driver.rating.toString()) : 5.0,
+      schedule,
     };
 
     return NextResponse.json(response);
@@ -94,6 +104,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    await ensureDriverScheduleTables(prisma);
+
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -107,6 +119,16 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { online, busy, busyMode } = body;
+
+    if (online === true) {
+      const schedule = await getDriverScheduleSnapshot(prisma, decoded.driverId, new Date());
+      if (!schedule?.eligible) {
+        return NextResponse.json({
+          error: 'Driver cannot go online outside configured schedule',
+          schedule
+        }, { status: 409 });
+      }
+    }
 
     if (online !== undefined && typeof online !== 'boolean') {
       return NextResponse.json({ error: 'Invalid online status' }, { status: 400 });
@@ -144,7 +166,9 @@ export async function POST(request: NextRequest) {
       console.log(`Sent driverStatusUpdate for driver ${decoded.driverId}`);
     }
 
-    return NextResponse.json({ success: true });
+    const schedule = await getDriverScheduleSnapshot(prisma, decoded.driverId, new Date());
+
+    return NextResponse.json({ success: true, schedule });
   } catch (error) {
     console.error('Toggle driver online error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

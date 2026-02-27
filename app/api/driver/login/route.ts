@@ -4,6 +4,12 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { signToken } from '@/lib/auth';
 
+const {
+  getDriverScheduleSnapshot,
+  ensureDriverScheduleTables,
+  invalidateDriverScheduleCache
+} = require('@/lib/driver-schedule');
+
 const prisma = new PrismaClient();
 
 export async function OPTIONS() {
@@ -19,6 +25,8 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
+    await ensureDriverScheduleTables(prisma);
+
     const { username, password, startKM } = await request.json();
     console.log('Driver login attempt:', { username, startKM }); // Log username and startKM, not password
 
@@ -89,6 +97,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const scheduleSnapshot = await getDriverScheduleSnapshot(prisma, driver.id, new Date());
+    if (!scheduleSnapshot?.eligible) {
+      return NextResponse.json(
+        {
+          error: 'Driver is outside configured work schedule',
+          schedule: scheduleSnapshot
+        },
+        {
+          status: 409,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          },
+        }
+      );
+    }
+
     // Check odometer reading against last recorded endKM
     const lastShift = await prisma.driversvagt.findFirst({
       where: { drId: driver.id },
@@ -147,6 +173,8 @@ export async function POST(request: NextRequest) {
       console.log(`Created new shift for driver ${driver.id}`);
     }
 
+    invalidateDriverScheduleCache(driver.id);
+
     const token = signToken({ driverId: driver.id, type: 'driver' });
 
     return NextResponse.json({
@@ -161,6 +189,7 @@ export async function POST(request: NextRequest) {
       },
       shiftId: shift.id,
       shiftStartTime: shift.startVagt ? shift.startVagt.toISOString() : null,
+      schedule: scheduleSnapshot,
     }, {
       headers: {
         'Access-Control-Allow-Origin': '*',

@@ -3,6 +3,12 @@ import { prisma } from '@/lib/db';
 import { requireAdmin } from '@/lib/auth';
 import { z } from 'zod';
 
+const {
+  getDriverScheduleAdminPolicy,
+  upsertDriverScheduleAdminPolicy,
+  LEGAL_MAX_DAILY_MINUTES
+} = require('@/lib/driver-schedule');
+
 const Schema = z.object({
   brandName: z.string().min(1),
   contactEmail: z.string().email(),
@@ -41,38 +47,74 @@ const PaymentMethodSchema = z.object({
   prodApiUrl: z.string().optional()
 });
 
+const SchedulePolicySchema = z.object({
+  maxDailyMinutes: z.number().int().min(60).max(LEGAL_MAX_DAILY_MINUTES),
+  maxWeeklyMinutes: z.number().int().min(60).max(90 * 60),
+  minRestMinutes: z.number().int().min(0).max(24 * 60),
+  lockMinutesBeforeStart: z.number().int().min(0).max(24 * 60),
+  allowEmergencyOverride: z.boolean()
+}).superRefine((value, ctx) => {
+  if (value.maxWeeklyMinutes < value.maxDailyMinutes) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['maxWeeklyMinutes'],
+      message: 'maxWeeklyMinutes must be greater than or equal to maxDailyMinutes'
+    });
+  }
+});
+
 export async function GET(){
   try{ await requireAdmin(); }catch{ return NextResponse.json({ ok:false }, { status:403 }); }
-  const s = await prisma.settings.upsert({
-    where: { id: 1 },
-    update: {},
-    create: {
-      brandName: process.env.BRAND_NAME || '944 Trafik',
-      contactEmail: process.env.CONTACT_EMAIL || 'trafik@944.dk',
-      contactPhone: process.env.CONTACT_PHONE || '26444944',
-      addressCity: process.env.ADDRESS_CITY || 'Frederikssund',
-      dayBase: 40, dayPerKm: 12.75, dayPerMin: 5.75,
-      nightBase: 60, nightPerKm: 16, nightPerMin: 7,
-      workStart: '06:00', workEnd: '18:00',
-      discountPercentage: 0, maxDiscountAmount: 0,
-      scheduledCancellationFee1: 0,
-      scheduledCancellationFee2: 25,
-      scheduledCancellationFee3: 50,
-      immediateCancellationFee: 50
-    }
-  });
+  const [s, schedulePolicy] = await Promise.all([
+    prisma.settings.upsert({
+      where: { id: 1 },
+      update: {},
+      create: {
+        brandName: process.env.BRAND_NAME || '944 Trafik',
+        contactEmail: process.env.CONTACT_EMAIL || 'trafik@944.dk',
+        contactPhone: process.env.CONTACT_PHONE || '26444944',
+        addressCity: process.env.ADDRESS_CITY || 'Frederikssund',
+        dayBase: 40, dayPerKm: 12.75, dayPerMin: 5.75,
+        nightBase: 60, nightPerKm: 16, nightPerMin: 7,
+        workStart: '06:00', workEnd: '18:00',
+        discountPercentage: 0, maxDiscountAmount: 0,
+        scheduledCancellationFee1: 0,
+        scheduledCancellationFee2: 25,
+        scheduledCancellationFee3: 50,
+        immediateCancellationFee: 50
+      }
+    }),
+    getDriverScheduleAdminPolicy(prisma)
+  ]);
 
   // Get payment methods
   const paymentMethods = await prisma.paymentMethod.findMany({
     orderBy: { createdAt: 'asc' }
   });
 
-  return NextResponse.json({ ok:true, settings: s, paymentMethods });
+  return NextResponse.json({
+    ok:true,
+    settings: s,
+    paymentMethods,
+    schedulePolicy,
+    legalMaxDailyMinutes: LEGAL_MAX_DAILY_MINUTES
+  });
 }
 
 export async function POST(req: Request){
   try{ await requireAdmin(); }catch{ return NextResponse.json({ ok:false }, { status:403 }); }
   const body = await req.json();
+
+  // Handle schedule policy update
+  if (body.schedulePolicy) {
+    const schedulePolicyData = SchedulePolicySchema.parse(body.schedulePolicy);
+    const policy = await upsertDriverScheduleAdminPolicy(prisma, schedulePolicyData);
+    return NextResponse.json({
+      ok: true,
+      schedulePolicy: policy,
+      legalMaxDailyMinutes: LEGAL_MAX_DAILY_MINUTES
+    });
+  }
 
   // Handle settings update
   if (body.settings) {

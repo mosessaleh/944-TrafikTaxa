@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireDriverByJWT } from '@/lib/auth';
 
+const {
+  getDriverScheduleSnapshot,
+  ensureDriverScheduleTables
+} = require('@/lib/driver-schedule');
+
 export async function GET(req: NextRequest) {
   let driver;
   try {
@@ -11,6 +16,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    await ensureDriverScheduleTables(prisma);
+
     const now = new Date();
 
     const rides = await prisma.ride.findMany({
@@ -41,7 +48,9 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    return NextResponse.json({ ok: true, rides });
+    const schedule = await getDriverScheduleSnapshot(prisma, driver.id, now);
+
+    return NextResponse.json({ ok: true, rides, schedule });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || 'Invalid' }, { status: 400 });
   }

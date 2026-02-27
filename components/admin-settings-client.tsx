@@ -18,6 +18,8 @@ const f=(u:string,o?:any)=> fetch(u,o).then(r=>r.json());
 export default function AdminSettingsClient(){
   const { data, mutate } = useSWR('/api/admin/settings', (u)=>f(u));
   const s = data?.settings;
+  const schedulePolicy = data?.schedulePolicy;
+  const legalMaxDailyMinutes = Number(data?.legalMaxDailyMinutes || 660);
 
   async function saveSettings(e:React.FormEvent){
     e.preventDefault();
@@ -31,6 +33,22 @@ export default function AdminSettingsClient(){
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ settings: payload })
+    });
+    if(res?.ok) mutate();
+  }
+
+  async function saveSchedulePolicy(e: React.FormEvent){
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const fd = new FormData(form);
+    const payload:any = Object.fromEntries(fd.entries());
+    ['maxDailyMinutes','maxWeeklyMinutes','minRestMinutes','lockMinutesBeforeStart'].forEach(k=> payload[k]=Number(payload[k]));
+    payload.allowEmergencyOverride = String(payload.allowEmergencyOverride) === 'true';
+
+    const res = await f('/api/admin/settings',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ schedulePolicy: payload })
     });
     if(res?.ok) mutate();
   }
@@ -190,7 +208,86 @@ export default function AdminSettingsClient(){
                 </button>
             </div>
         </div>
+
       </form>
+
+      {/* Driver Schedule Policy */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center gap-2">
+              <Clock size={18} className="text-gray-500" />
+              <h2 className="text-lg font-semibold text-gray-900">Driver Work Schedule Policy</h2>
+          </div>
+          <form onSubmit={saveSchedulePolicy} className="p-6 space-y-6">
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+                  القيد القانوني في الدنمارك: الحد الأقصى اليومي لا يمكن أن يتجاوز
+                  <span className="font-semibold"> {legalMaxDailyMinutes} </span>
+                  دقيقة (11 ساعة).
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                  <Field label={`Max Daily Minutes (<= ${legalMaxDailyMinutes})`} icon={<Clock size={14} />}>
+                      <input
+                          name="maxDailyMinutes"
+                          type="number"
+                          min="60"
+                          max={legalMaxDailyMinutes}
+                          defaultValue={schedulePolicy?.maxDailyMinutes ?? legalMaxDailyMinutes}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+                      />
+                  </Field>
+                  <Field label="Max Weekly Minutes" icon={<Clock size={14} />}>
+                      <input
+                          name="maxWeeklyMinutes"
+                          type="number"
+                          min="60"
+                          max="5400"
+                          defaultValue={schedulePolicy?.maxWeeklyMinutes ?? 3360}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+                      />
+                  </Field>
+                  <Field label="Minimum Rest Minutes" icon={<Clock size={14} />}>
+                      <input
+                          name="minRestMinutes"
+                          type="number"
+                          min="0"
+                          max="1440"
+                          defaultValue={schedulePolicy?.minRestMinutes ?? 660}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+                      />
+                  </Field>
+                  <Field label="Lock Minutes Before Start" icon={<Clock size={14} />}>
+                      <input
+                          name="lockMinutesBeforeStart"
+                          type="number"
+                          min="0"
+                          max="1440"
+                          defaultValue={schedulePolicy?.lockMinutesBeforeStart ?? 30}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+                      />
+                  </Field>
+              </div>
+
+              <div className="max-w-sm">
+                  <Field label="Allow Emergency Override" icon={<Info size={14} />}>
+                      <select
+                          name="allowEmergencyOverride"
+                          defaultValue={String(Boolean(schedulePolicy?.allowEmergencyOverride ?? true))}
+                          className="w-full px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+                      >
+                          <option value="true">Yes</option>
+                          <option value="false">No</option>
+                      </select>
+                  </Field>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium flex items-center gap-2 shadow-sm">
+                      <Save size={16} />
+                      Save Schedule Policy
+                  </button>
+              </div>
+          </form>
+      </div>
 
     </div>
   );
