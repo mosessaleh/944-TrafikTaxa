@@ -10,7 +10,6 @@ const DriverStatusMonitor = require('./lib/driver-status-monitor');
 const { sendPushToDriver } = require('./lib/notification-service');
 const { sendEmail } = require('./lib/email');
 const { chargeCancellationFee } = require('./lib/payment-processor');
-const { Expo, ExpoPushMessage, ExpoPushToken } = require('expo-server-sdk');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -1809,42 +1808,6 @@ async function maybeSendPickupProximity(rideId, driverId, driverLocation, startL
     }
   }
 }
-
-// REMOVED: sendPushNotification function - Using only local notifications
-// async function sendPushNotification(driverId, rideData) {
-//   try {
-//     const driver = await prisma.comDriver.findUnique({
-//       where: { id: driverId },
-//       select: { expoPushToken: true }
-//     });
-
-//     if (!driver || !driver.expoPushToken) {
-//       console.log(`No push token for driver ${driverId}`);
-//       return;
-//     }
-
-//     // Check if token is valid Expo push token
-//     if (!Expo.isExpoPushToken(driver.expoPushToken)) {
-//       console.log(`Invalid push token for driver ${driverId}: ${driver.expoPushToken}`);
-//       return;
-//     }
-
-//     const expo = new Expo();
-//     const message = {
-//       to: driver.expoPushToken,
-//       sound: 'default',
-//       title: 'New Ride Available!',
-//       body: `Pickup: ${rideData.pickupAddress} → Dropoff: ${rideData.dropoffAddress}`,
-//       data: { type: 'newRide', rideId: rideData.id },
-//       priority: 'high',
-//     };
-
-//     const ticket = await expo.sendPushNotificationsAsync([message]);
-//     console.log(`Push notification sent to driver ${driverId}:`, ticket);
-//   } catch (error) {
-//     console.error(`Error sending push notification to driver ${driverId}:`, error);
-//   }
-// }
 
 // Function to cleanup stale currentRideId assignments
 async function cleanupStaleRideAssignments() {

@@ -4,7 +4,7 @@ import {
   notifyUserPaymentReceived,
   notifyUserInvoiceReady,
 } from './notify';
-import { Expo, ExpoPushMessage, ExpoPushToken } from 'expo-server-sdk';
+import { Expo, ExpoPushMessage } from 'expo-server-sdk';
 
 const prismaAny = prisma as any;
 
@@ -39,7 +39,6 @@ export async function createNotification(userId: number, params: {
   title: string;
   body: string;
   data?: any;
-  sendRealtime?: boolean;
 }) {
   const { type, title, body, data } = params;
 
@@ -59,7 +58,6 @@ export async function createNotification(userId: number, params: {
 /**
  * إشعار موحّد لتأكيد الحجز:
  * - يسجّل Notification في قاعدة البيانات
- * - يرسل Realtime notification
  * - يرسل إيميل تأكيد حجز لو تفضيلات المستخدم تسمح
  */
 export async function notifyBookingConfirmedUnified(
@@ -95,7 +93,6 @@ export async function notifyBookingConfirmedUnified(
 /**
  * إشعار موحّد لاستلام الدفع:
  * - يسجّل Notification
- * - يرسل Realtime notification
  * - يرسل إيميل "Payment Received" لو مسموح
  */
 export async function notifyPaymentReceivedUnified(
@@ -133,7 +130,6 @@ export async function notifyPaymentReceivedUnified(
 /**
  * إشعار موحّد لجهوزية الفاتورة:
  * - يسجّل Notification
- * - يرسل Realtime notification
  * - يرسل إيميل "Invoice Ready" لو مسموح
  */
 export async function notifyInvoiceReadyUnified(
@@ -171,9 +167,8 @@ export async function sendPushNotification(
   body: string,
   data?: any
 ) {
-  console.log('sendPushNotification called with token:', pushToken.substring(0, 10) + '...', 'title:', title);
   if (!Expo.isExpoPushToken(pushToken)) {
-    console.error(`Push token ${pushToken} is not a valid Expo push token`);
+    console.error('Invalid Expo push token');
     return;
   }
 
@@ -187,16 +182,10 @@ export async function sendPushNotification(
     priority: 'high',
   };
 
-  console.log('Sending push notification with message:', message);
-
   try {
-    console.log('Sending push notification to Expo server...');
     const ticket = await expo.sendPushNotificationsAsync([message]);
-    console.log('Push notification sent to Expo, ticket:', ticket);
-    if (ticket[0].status === 'ok') {
-      console.log('Push notification accepted by Expo');
-    } else {
-      console.log('Push notification rejected by Expo, details:', ticket[0]);
+    if (ticket[0]?.status !== 'ok') {
+      console.warn('Push notification rejected by Expo:', ticket[0]);
     }
   } catch (error) {
     console.error('Error sending push notification to Expo:', error);
@@ -225,18 +214,12 @@ export async function sendPushToDriver(
   body: string,
   data?: any
 ) {
-  console.log('sendPushToDriver called for driverId:', driverId, 'title:', title, 'body:', body);
   const driver = await prismaAny.comDriver.findUnique({
     where: { id: driverId },
     select: { expoPushToken: true },
   });
 
-  console.log('Driver found:', driver ? 'yes' : 'no', 'pushToken:', driver?.expoPushToken ? 'exists' : 'null');
   if (driver?.expoPushToken) {
-    console.log('Sending push notification to driverId:', driverId, 'with token:', driver.expoPushToken.substring(0, 20) + '...');
     await sendPushNotification(driver.expoPushToken, title, body, data);
-    console.log('Push notification sent successfully to driverId:', driverId);
-  } else {
-    console.log('No push token for driverId:', driverId, '- cannot send notification');
   }
 }
