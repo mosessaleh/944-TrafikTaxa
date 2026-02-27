@@ -4,9 +4,86 @@ import {
   notifyUserPaymentReceived,
   notifyUserInvoiceReady,
 } from './notify';
-import { Expo, ExpoPushMessage } from 'expo-server-sdk';
+import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceipt } from 'expo-server-sdk';
 
 const prismaAny = prisma as any;
+const expo = new Expo({
+  accessToken: process.env.EXPO_ACCESS_TOKEN,
+});
+
+const DRIVER_PUSH_CHANNEL_ID = 'driver-rides';
+const USER_PUSH_CHANNEL_ID = 'user-updates';
+
+const EXPO_RECEIPT_PROCESS_DELAY_MS = 15000;
+const EXPO_RECEIPT_CHUNK_DELAY_MS = 250;
+
+function normalizeExpoToken(rawToken: unknown): string | null {
+  if (typeof rawToken !== 'string') return null;
+  const token = rawToken.trim();
+  if (!token) return null;
+  return Expo.isExpoPushToken(token) ? token : null;
+}
+
+async function clearInvalidPushToken(pushToken: string) {
+  try {
+    await prismaAny.user.updateMany({
+      where: { pushToken },
+      data: { pushToken: null },
+    });
+  } catch (error) {
+    console.error('Failed to clear invalid user push token:', error);
+  }
+
+  try {
+    await prismaAny.comDriver.updateMany({
+      where: { expoPushToken: pushToken },
+      data: { expoPushToken: null },
+    });
+  } catch (error) {
+    console.error('Failed to clear invalid driver push token:', error);
+  }
+}
+
+async function processExpoReceipts(receiptIds: string[], receiptTokenMap?: Map<string, string>) {
+  if (!receiptIds.length) return;
+
+  const receiptIdChunks = expo.chunkPushNotificationReceiptIds(receiptIds);
+  for (const receiptIdChunk of receiptIdChunks) {
+    try {
+      const receipts = await expo.getPushNotificationReceiptsAsync(receiptIdChunk);
+
+      for (const receiptId of Object.keys(receipts)) {
+        const receipt = receipts[receiptId] as ExpoPushReceipt;
+        if (receipt?.status === 'ok') continue;
+
+        const errorCode = (receipt?.details as any)?.error;
+        if (!errorCode) continue;
+
+        if (errorCode === 'DeviceNotRegistered') {
+          const token =
+            (receipt?.details as any)?.expoPushToken ||
+            (receipt as any)?.to ||
+            (receiptTokenMap ? receiptTokenMap.get(receiptId) : null);
+          if (typeof token === 'string' && token.trim()) {
+            await clearInvalidPushToken(token.trim());
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error processing Expo push receipts:', error);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, EXPO_RECEIPT_CHUNK_DELAY_MS));
+  }
+}
+
+function collectInvalidTokenFromTicket(ticket: ExpoPushTicket): string | null {
+  if (ticket?.status !== 'error') return null;
+  const details = (ticket as any)?.details;
+  if (!details || details.error !== 'DeviceNotRegistered') return null;
+  const token = details.expoPushToken || (ticket as any)?.to;
+  return typeof token === 'string' && token.trim() ? token.trim() : null;
+}
 
 type NotificationKind = 'booking' | 'payment' | 'invoice';
 
@@ -156,36 +233,57 @@ export async function notifyInvoiceReadyUnified(
 }
 
 // Push Notification Functions
-const expo = new Expo({
-  accessToken: process.env.EXPO_ACCESS_TOKEN,
-});
 console.log('Expo client initialized with access token:', process.env.EXPO_ACCESS_TOKEN ? 'set' : 'not set');
 
 export async function sendPushNotification(
   pushToken: string,
   title: string,
   body: string,
-  data?: any
+  data?: any,
+  options?: { channelId?: string }
 ) {
-  if (!Expo.isExpoPushToken(pushToken)) {
+  const normalizedToken = normalizeExpoToken(pushToken);
+  if (!normalizedToken) {
     console.error('Invalid Expo push token');
     return;
   }
 
   const message: ExpoPushMessage = {
-    to: pushToken,
+    to: normalizedToken,
     sound: 'default',
     title,
     body,
     data: data || {},
-    channelId: 'batch',
+    channelId: options?.channelId || USER_PUSH_CHANNEL_ID,
     priority: 'high',
   };
 
   try {
-    const ticket = await expo.sendPushNotificationsAsync([message]);
-    if (ticket[0]?.status !== 'ok') {
-      console.warn('Push notification rejected by Expo:', ticket[0]);
+    const tickets = await expo.sendPushNotificationsAsync([message]);
+    const receiptIds: string[] = [];
+    const receiptTokenMap = new Map<string, string>();
+
+    for (const ticket of tickets) {
+      if (ticket?.status === 'ok' && ticket.id) {
+        receiptIds.push(ticket.id);
+        receiptTokenMap.set(ticket.id, normalizedToken);
+        continue;
+      }
+
+      const invalidToken = collectInvalidTokenFromTicket(ticket as ExpoPushTicket);
+      if (invalidToken) {
+        await clearInvalidPushToken(invalidToken);
+      } else {
+        console.warn('Push notification rejected by Expo:', ticket);
+      }
+    }
+
+    if (receiptIds.length > 0) {
+      setTimeout(() => {
+        processExpoReceipts(receiptIds, receiptTokenMap).catch((error) => {
+          console.error('Failed processing Expo receipts:', error);
+        });
+      }, EXPO_RECEIPT_PROCESS_DELAY_MS);
     }
   } catch (error) {
     console.error('Error sending push notification to Expo:', error);
@@ -204,7 +302,9 @@ export async function sendPushToUser(
   });
 
   if (user?.pushToken) {
-    await sendPushNotification(user.pushToken, title, body, data);
+    await sendPushNotification(user.pushToken, title, body, data, {
+      channelId: USER_PUSH_CHANNEL_ID,
+    });
   }
 }
 
@@ -220,6 +320,8 @@ export async function sendPushToDriver(
   });
 
   if (driver?.expoPushToken) {
-    await sendPushNotification(driver.expoPushToken, title, body, data);
+    await sendPushNotification(driver.expoPushToken, title, body, data, {
+      channelId: DRIVER_PUSH_CHANNEL_ID,
+    });
   }
 }

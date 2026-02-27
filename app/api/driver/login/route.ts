@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
 
     invalidateDriverScheduleCache(driver.id);
 
-    const token = signToken({ driverId: driver.id, type: 'driver' });
+    const token = signToken({ id: driver.id, driverId: driver.id, type: 'driver' });
 
     return NextResponse.json({
       success: true,

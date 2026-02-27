@@ -35,7 +35,7 @@ export async function POST(req: NextRequest){
       return NextResponse.json({ ok:false, error:'Invalid credentials' }, { status: 401 });
     }
 
-    const token = signToken({ id: driver.id, type: 'driver' });
+    const token = signToken({ id: driver.id, driverId: driver.id, type: 'driver' });
     await setSessionCookie(token);
 
     return NextResponse.json({ ok:true, message:'Logged in successfully' });

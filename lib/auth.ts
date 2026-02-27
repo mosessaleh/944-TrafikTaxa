@@ -255,15 +255,22 @@ export async function requireDriverByJWT(req: Request){
   try {
     console.log('requireDriverByJWT - Verifying token');
     const decoded: any = verify(token, SECRET);
-    console.log('requireDriverByJWT - Token decoded:', { driverId: decoded.driverId, type: decoded.type, exp: decoded.exp });
+    const driverId = Number(decoded?.driverId ?? decoded?.id);
+    console.log('requireDriverByJWT - Token decoded:', {
+      driverId,
+      rawDriverId: decoded?.driverId,
+      rawId: decoded?.id,
+      type: decoded?.type,
+      exp: decoded?.exp
+    });
 
-    if (!decoded.driverId || decoded.type !== 'driver') {
+    if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
       console.log('requireDriverByJWT - Invalid token payload');
       throw Object.assign(new Error('Invalid token'), { status: 401 });
     }
 
     const driver = await prisma.comDriver.findUnique({
-      where: { id: decoded.driverId },
+      where: { id: driverId },
       include: {
         company: {
           select: {
