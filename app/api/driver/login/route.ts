@@ -3,6 +3,12 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { signToken } from '@/lib/auth';
+import {
+  getDriverScheduledRidesBeyondLoginWindow,
+  releaseDriverScheduledRidesBeyondLoginWindow,
+  LOGIN_REASSIGN_MAX_HOURS,
+  LOGIN_REASSIGN_GRACE_MINUTES
+} from '@/lib/driver-login-policy';
 
 const {
   getDriverScheduleSnapshot,
@@ -27,7 +33,7 @@ export async function POST(request: NextRequest) {
   try {
     await ensureDriverScheduleTables(prisma);
 
-    const { username, password, startKM } = await request.json();
+    const { username, password, startKM, confirmOutsideSchedule } = await request.json();
     console.log('Driver login attempt:', { username, startKM }); // Log username and startKM, not password
 
     if (!username || !password || startKM === undefined) {
@@ -98,14 +104,27 @@ export async function POST(request: NextRequest) {
     }
 
     const scheduleSnapshot = await getDriverScheduleSnapshot(prisma, driver.id, new Date());
-    if (!scheduleSnapshot?.eligible) {
+    const isOutsideSchedule = !scheduleSnapshot?.eligible;
+    if (isOutsideSchedule && confirmOutsideSchedule !== true) {
+      const ridesBeyondWindow = await getDriverScheduledRidesBeyondLoginWindow(prisma, driver.id, new Date());
+
       return NextResponse.json(
         {
-          error: 'Driver is outside configured work schedule',
-          schedule: scheduleSnapshot
+          requiresConfirmation: true,
+          warningCode: 'OUTSIDE_SCHEDULE',
+          warning: 'Driver is outside configured work schedule',
+          message:
+            `You are outside your scheduled shift. If you continue, any scheduled rides more than ${LOGIN_REASSIGN_MAX_HOURS} hours and ${LOGIN_REASSIGN_GRACE_MINUTES} minutes from now will be removed from you and redistributed to other drivers.`,
+          schedule: scheduleSnapshot,
+          redistributionPolicy: {
+            maxHours: LOGIN_REASSIGN_MAX_HOURS,
+            graceMinutes: LOGIN_REASSIGN_GRACE_MINUTES,
+            affectedRideCount: ridesBeyondWindow.length,
+            affectedRideIds: ridesBeyondWindow.map((ride) => ride.id)
+          }
         },
         {
-          status: 409,
+          status: 200,
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -173,6 +192,24 @@ export async function POST(request: NextRequest) {
       console.log(`Created new shift for driver ${driver.id}`);
     }
 
+    let releasedScheduledRidesResult: {
+      count: number;
+      rideIds: number[];
+      rides: Array<{ id: number; pickupTime: string | null }>;
+    } = {
+      count: 0,
+      rideIds: [],
+      rides: []
+    };
+
+    if (isOutsideSchedule) {
+      releasedScheduledRidesResult = await releaseDriverScheduledRidesBeyondLoginWindow(
+        prisma,
+        driver.id,
+        new Date()
+      );
+    }
+
     invalidateDriverScheduleCache(driver.id);
 
     const token = signToken({ id: driver.id, driverId: driver.id, type: 'driver' });
@@ -180,6 +217,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'Login successful',
+      requiresConfirmation: false,
       token: token,
       driver: {
         id: driver.id,
@@ -190,6 +228,14 @@ export async function POST(request: NextRequest) {
       shiftId: shift.id,
       shiftStartTime: shift.startVagt ? shift.startVagt.toISOString() : null,
       schedule: scheduleSnapshot,
+      loginPolicy: {
+        outsideSchedule: isOutsideSchedule,
+        redistributionPolicy: {
+          maxHours: LOGIN_REASSIGN_MAX_HOURS,
+          graceMinutes: LOGIN_REASSIGN_GRACE_MINUTES
+        },
+        releasedScheduledRides: releasedScheduledRidesResult
+      }
     }, {
       headers: {
         'Access-Control-Allow-Origin': '*',

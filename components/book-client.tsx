@@ -17,17 +17,47 @@ import AddressAutocomplete, { Suggestion } from '@/components/address-autocomple
 import dkMessages from '@/messages/dk.json';
 import enMessages from '@/messages/en.json';
 import { calculateDistance, estimateArrivalTime, formatArrivalTime } from '@/lib/distance';
-
+ 
 // Translation messages
 const messages = {
   dk: dkMessages,
   en: enMessages
 };
 
+const BOOKING_SLOT_MINUTES = 15;
+const MIN_SCHEDULED_LEAD_MS = 60 * 60 * 1000;
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function toLocalDateTimeInputValue(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function roundUpToNext15Minutes(date: Date) {
+  const rounded = new Date(date);
+  rounded.setSeconds(0, 0);
+  const minutes = rounded.getMinutes();
+  const remainder = minutes % BOOKING_SLOT_MINUTES;
+  if (remainder !== 0) {
+    rounded.setMinutes(minutes + (BOOKING_SLOT_MINUTES - remainder));
+  }
+  return rounded;
+}
+
+function normalizeScheduledLocalInput(rawValue?: string | null) {
+  const base = rawValue ? new Date(rawValue) : new Date();
+  const safeBase = Number.isNaN(base.getTime()) ? new Date() : base;
+  const rounded = roundUpToNext15Minutes(safeBase);
+  const minAllowed = roundUpToNext15Minutes(new Date(Date.now() + MIN_SCHEDULED_LEAD_MS));
+  const normalized = rounded < minAllowed ? minAllowed : rounded;
+  return toLocalDateTimeInputValue(normalized);
+}
+ 
 function Field({label, children}:{label:string; children:React.ReactNode}){
   return (<div className="grid gap-1"><div className="label">{label}</div>{children}</div>);
 }
-
 function formatDKK(n:number){
   try{ return new Intl.NumberFormat('en-DK',{ style:'currency', currency:'DKK', maximumFractionDigits:0 }).format(n); }
   catch{ return `${Math.round(n)} DKK`; }
@@ -88,15 +118,7 @@ export default function BookClient(){
     const selectedVehicleType = vehicleTypes.find((v: Vehicle) => v.id === newVehicleId);
   };
   const [whenType, setWhenType] = useState<'now'|'later'>('now');
-  const [when, setWhen] = useState(() => {
-    const futureTime = new Date(Date.now() + 60 * 60 * 1000);
-    const year = futureTime.getFullYear();
-    const month = String(futureTime.getMonth() + 1).padStart(2, '0');
-    const day = String(futureTime.getDate()).padStart(2, '0');
-    const hours = String(futureTime.getHours()).padStart(2, '0');
-    const minutes = String(futureTime.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-  });
+  const [when, setWhen] = useState(() => normalizeScheduledLocalInput());
 
   // Quote state
   const [quote, setQuote] = useState<{price:number; distanceKm:number; durationMin:number; originalPrice?:number; discountAmount?:number}|null>(null);
@@ -232,6 +254,11 @@ export default function BookClient(){
     passengers: 1,
     vehicleTypeId: vehicleId || undefined
   }), [pickupSel, dropoffSel, stopSel, showStop, whenType, when, vehicleId]);
+
+  const minScheduledDateTime = useMemo(
+    () => normalizeScheduledLocalInput(),
+    [whenType]
+  );
 
     // Initialize Google Maps
     const initializeMap = async () => {
@@ -1023,7 +1050,7 @@ export default function BookClient(){
         vehicleTypeId: vehicleId!,
         scheduled: whenType === 'later',
         pickupTime: whenType === 'later'
-          ? new Date(when).toISOString()
+          ? new Date(normalizeScheduledLocalInput(when)).toISOString()
           : new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
         longWaitAccepted: longWaitWarning.show ? longWaitAccepted : undefined
         // paymentMethod will be selected on payment page
@@ -1490,29 +1517,13 @@ export default function BookClient(){
                         <input
                           type="datetime-local"
                           value={when}
-                          min={(() => {
-                            const futureTime = new Date(Date.now() + 60 * 60 * 1000);
-                            const year = futureTime.getFullYear();
-                            const month = String(futureTime.getMonth() + 1).padStart(2, '0');
-                            const day = String(futureTime.getDate()).padStart(2, '0');
-                            const hours = String(futureTime.getHours()).padStart(2, '0');
-                            const minutes = String(futureTime.getMinutes()).padStart(2, '0');
-                            return `${year}-${month}-${day}T${hours}:${minutes}`;
-                          })()}
+                          min={minScheduledDateTime}
+                          step={BOOKING_SLOT_MINUTES * 60}
                           onChange={e => {
-                            const selectedTime = new Date(e.target.value);
-                            const minTime = new Date(Date.now() + 60 * 60 * 1000);
-                            if (selectedTime >= minTime) {
-                              setWhen(e.target.value);
-                            } else {
-                              // Reset to minimum time if invalid selection
-                              const year = minTime.getFullYear();
-                              const month = String(minTime.getMonth() + 1).padStart(2, '0');
-                              const day = String(minTime.getDate()).padStart(2, '0');
-                              const hours = String(minTime.getHours()).padStart(2, '0');
-                              const minutes = String(minTime.getMinutes()).padStart(2, '0');
-                              setWhen(`${year}-${month}-${day}T${hours}:${minutes}`);
-                            }
+                            setWhen(normalizeScheduledLocalInput(e.target.value));
+                          }}
+                          onBlur={() => {
+                            setWhen((previous) => normalizeScheduledLocalInput(previous));
                           }}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                         />

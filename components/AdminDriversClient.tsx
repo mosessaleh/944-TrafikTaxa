@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Search,
   User,
@@ -60,6 +60,75 @@ type Props = {
 
 type ActionMessage = { type: "success" | "error"; text: string } | null;
 
+const SCHEDULE_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+type ScheduleDayDraft = {
+  dayOfWeek: number;
+  dayName: string;
+  enabled: boolean;
+  start: string;
+  end: string;
+};
+
+type ScheduleLockStatus = {
+  locked?: boolean;
+  reasonMessage?: string;
+} | null;
+
+function isHHmm(value: string) {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(String(value || '').trim());
+}
+
+function minuteToHHmm(minute?: number | null) {
+  if (!Number.isInteger(minute)) return null;
+  const safeMinute = Math.max(0, Math.min(1439, Number(minute)));
+  const hours = Math.floor(safeMinute / 60);
+  const mins = safeMinute % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}
+
+function hhmmToMinute(value: string) {
+  if (!isHHmm(value)) return null;
+  const [hourText, minuteText] = String(value).trim().split(':');
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return null;
+  return hour * 60 + minute;
+}
+
+function windowDurationMinutes(startMinute: number, endMinute: number) {
+  if (endMinute > startMinute) return endMinute - startMinute;
+  return (1440 - startMinute) + endMinute;
+}
+
+function normalizeScheduleDays(template: any[] = []): ScheduleDayDraft[] {
+  const byDay = new Map<number, any>();
+
+  for (const day of template) {
+    if (Number.isInteger(day?.dayOfWeek)) {
+      byDay.set(Number(day.dayOfWeek), day);
+    }
+  }
+
+  return Array.from({ length: 7 }, (_, dayOfWeek) => {
+    const row = byDay.get(dayOfWeek);
+    const windows = Array.isArray(row?.windows) ? row.windows : [];
+    const selectedWindow = windows.find((window: any) => window && window.isActive !== false) || windows[0];
+
+    return {
+      dayOfWeek,
+      dayName: row?.dayName || SCHEDULE_DAY_NAMES[dayOfWeek],
+      enabled: Boolean(selectedWindow),
+      start: typeof selectedWindow?.start === 'string'
+        ? selectedWindow.start
+        : minuteToHHmm(selectedWindow?.startMinute) || '08:00',
+      end: typeof selectedWindow?.end === 'string'
+        ? selectedWindow.end
+        : minuteToHHmm(selectedWindow?.endMinute) || '16:00',
+    };
+  });
+}
+
 export default function AdminDriversClient({ initialDrivers, companies }: Props) {
   const [drivers, setDrivers] = useState<Driver[]>(initialDrivers);
   const [searchTerm, setSearchTerm] = useState("");
@@ -68,6 +137,13 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
   const [banDriver, setBanDriver] = useState<Driver | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionMessage, setActionMessage] = useState<ActionMessage>(null);
+
+  const [scheduleDriver, setScheduleDriver] = useState<Driver | null>(null);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleDays, setScheduleDays] = useState<ScheduleDayDraft[]>([]);
+  const [scheduleLockStatus, setScheduleLockStatus] = useState<ScheduleLockStatus>(null);
+  const [scheduleMaxDailyMinutes, setScheduleMaxDailyMinutes] = useState(11 * 60);
 
   const filteredDrivers = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -245,6 +321,116 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
     }
   }
 
+  async function openSchedule(driver: Driver) {
+    setActionMessage(null);
+    setScheduleDriver(driver);
+    setScheduleLoading(true);
+    setScheduleSaving(false);
+
+    try {
+      const res = await fetch(`/api/admin/drivers/${driver.id}/schedule`);
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to load driver schedule');
+      }
+
+      setScheduleDays(normalizeScheduleDays(Array.isArray(data.template) ? data.template : []));
+      setScheduleLockStatus(data.lockStatus || null);
+      setScheduleMaxDailyMinutes(Math.min(11 * 60, Number(data?.preferences?.maxDailyMinutes) || 11 * 60));
+    } catch (e: any) {
+      setActionMessage({
+        type: 'error',
+        text: e?.message || 'Failed to load driver schedule',
+      });
+      setScheduleDriver(null);
+    } finally {
+      setScheduleLoading(false);
+    }
+  }
+
+  function closeSchedule() {
+    setScheduleDriver(null);
+    setScheduleDays([]);
+    setScheduleLockStatus(null);
+    setScheduleLoading(false);
+    setScheduleSaving(false);
+    setScheduleMaxDailyMinutes(11 * 60);
+  }
+
+  async function handleSaveSchedule(draftDays: ScheduleDayDraft[]) {
+    if (!scheduleDriver) return;
+
+    const maxDailyMinutes = Math.min(11 * 60, Number(scheduleMaxDailyMinutes) || 11 * 60);
+
+    for (const day of draftDays) {
+      if (!day.enabled) continue;
+
+      if (!isHHmm(day.start) || !isHHmm(day.end) || day.start === day.end) {
+        setActionMessage({
+          type: 'error',
+          text: `Invalid schedule time for ${day.dayName}. Use HH:mm and ensure start/end differ.`,
+        });
+        return;
+      }
+
+      const startMinute = hhmmToMinute(day.start);
+      const endMinute = hhmmToMinute(day.end);
+      if (startMinute === null || endMinute === null) {
+        setActionMessage({
+          type: 'error',
+          text: `Invalid schedule time for ${day.dayName}.`,
+        });
+        return;
+      }
+
+      const duration = windowDurationMinutes(startMinute, endMinute);
+      if (duration > maxDailyMinutes) {
+        setActionMessage({
+          type: 'error',
+          text: `Daily duration exceeds ${Math.floor(maxDailyMinutes / 60)} hours for ${day.dayName}.`,
+        });
+        return;
+      }
+    }
+
+    setScheduleSaving(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/admin/drivers/${scheduleDriver.id}/schedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'setTemplate',
+          days: draftDays.map((day) => ({
+            dayOfWeek: day.dayOfWeek,
+            windows: day.enabled
+              ? [{ start: day.start.trim(), end: day.end.trim(), isActive: true }]
+              : [],
+          })),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Failed to update driver schedule');
+      }
+
+      setActionMessage({
+        type: 'success',
+        text: `Driver schedule updated successfully (#${scheduleDriver.id}).`,
+      });
+      closeSchedule();
+    } catch (e: any) {
+      setActionMessage({
+        type: 'error',
+        text: e?.message || 'Failed to update driver schedule',
+      });
+    } finally {
+      setScheduleSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -367,6 +553,13 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
+                        onClick={() => openSchedule(d)}
+                        className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        title="Manage Schedule"
+                      >
+                        <FileText size={16} />
+                      </button>
+                      <button
                         onClick={() => handleToggleBan(d)}
                         className={`p-1.5 rounded-lg transition-colors ${
                           d.bannedUntil ? 'text-red-500 hover:text-red-600 hover:bg-red-50' : 'text-gray-500 hover:text-green-600 hover:bg-green-50'
@@ -396,7 +589,7 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
               {filteredDrivers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-12 text-center text-gray-500"
                   >
                     <div className="flex flex-col items-center justify-center">
@@ -436,6 +629,183 @@ export default function AdminDriversClient({ initialDrivers, companies }: Props)
           loading={loading}
         />
       )}
+
+      {/* Driver Schedule Modal */}
+      {scheduleDriver && (
+        <DriverScheduleModal
+          driver={scheduleDriver}
+          onClose={closeSchedule}
+          onSave={handleSaveSchedule}
+          loading={scheduleLoading}
+          saving={scheduleSaving}
+          initialDays={scheduleDays}
+          lockStatus={scheduleLockStatus}
+          maxDailyMinutes={scheduleMaxDailyMinutes}
+        />
+      )}
+    </div>
+  );
+}
+
+type DriverScheduleModalProps = {
+  driver: Driver;
+  onClose: () => void;
+  onSave: (days: ScheduleDayDraft[]) => void;
+  loading: boolean;
+  saving: boolean;
+  initialDays: ScheduleDayDraft[];
+  lockStatus: ScheduleLockStatus;
+  maxDailyMinutes: number;
+};
+
+function DriverScheduleModal({
+  driver,
+  onClose,
+  onSave,
+  loading,
+  saving,
+  initialDays,
+  lockStatus,
+  maxDailyMinutes,
+}: DriverScheduleModalProps) {
+  const [draftDays, setDraftDays] = useState<ScheduleDayDraft[]>(initialDays);
+  const editingLocked = Boolean(lockStatus?.locked);
+
+  useEffect(() => {
+    setDraftDays(initialDays);
+  }, [initialDays, driver.id]);
+
+  function updateDay(dayOfWeek: number, patch: Partial<ScheduleDayDraft>) {
+    setDraftDays((prev) =>
+      prev.map((day) => (day.dayOfWeek === dayOfWeek ? { ...day, ...patch } : day))
+    );
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (editingLocked) return;
+    onSave(draftDays);
+  }
+
+  const maxDailyHours = Math.floor(maxDailyMinutes / 60);
+  const maxDailyRemainderMinutes = maxDailyMinutes % 60;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Driver Work Schedule</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {driver.drFname} {driver.drLname} ({driver.drCard})
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+          {lockStatus?.locked && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 flex items-start gap-2">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                {lockStatus.reasonMessage || 'This driver currently has an active/locked work window.'}
+              </span>
+            </div>
+          )}
+
+          <p className="text-xs text-gray-500">
+            Maximum daily duration: <span className="font-semibold">{maxDailyHours}h {maxDailyRemainderMinutes}m</span>
+          </p>
+
+          {loading ? (
+            <div className="py-12 flex items-center justify-center">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <div className="h-4 w-4 rounded-full border-2 border-gray-300 border-t-blue-500 animate-spin" />
+                Loading schedule...
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {draftDays.map((day) => (
+                <div key={day.dayOfWeek} className="rounded-xl border border-gray-200 bg-gray-50/50 p-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="font-medium text-gray-900">{day.dayName}</p>
+                    <label className="inline-flex items-center gap-2 text-xs text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={day.enabled}
+                        onChange={(e) => updateDay(day.dayOfWeek, { enabled: e.target.checked })}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        disabled={saving || editingLocked || loading}
+                      />
+                      Enabled
+                    </label>
+                  </div>
+
+                  {day.enabled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                          Start
+                        </label>
+                        <input
+                          type="time"
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={day.start}
+                          onChange={(e) => updateDay(day.dayOfWeek, { start: e.target.value })}
+                          disabled={saving || editingLocked || loading}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                          End
+                        </label>
+                        <input
+                          type="time"
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          value={day.end}
+                          onChange={(e) => updateDay(day.dayOfWeek, { end: e.target.value })}
+                          disabled={saving || editingLocked || loading}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </form>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-all"
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            onClick={handleSubmit}
+            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-2"
+            disabled={saving || loading || editingLocked}
+          >
+            {saving ? 'Saving...' : (
+              <>
+                <Save size={16} />
+                Save Schedule
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

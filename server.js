@@ -86,10 +86,13 @@ async function canAccessBooking(bookingId, socket) {
 const PICKUP_PROXIMITY_THRESHOLD_METERS = 30;
 const PICKUP_COUNTDOWN_DURATION_SEC = 300;
 
-// Scheduled ride offers (in-app only)
+// Scheduled ride offers (upcoming inbox + push notifications)
 const scheduledOffers = new Map(); // rideId -> offer state
+const scheduledOfferCooldowns = new Map(); // rideId -> next timestamp allowed for rebroadcast
 global.scheduledOffers = scheduledOffers;
-const SCHEDULED_OFFER_TIMEOUT_MS = 15000; // 15 seconds
+global.scheduledOfferCooldowns = scheduledOfferCooldowns;
+const SCHEDULED_OFFER_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
+const SCHEDULED_OFFER_WINDOW_MINUTES = 60;
 const SCHEDULED_MAX_ETA_MINUTES = 30;
 const SCHEDULED_CONFLICT_WINDOW_HOURS = 6;
 const SCHEDULED_IMMEDIATE_WINDOW_MINUTES = 15;
@@ -157,6 +160,57 @@ function isDriverInActiveOffer(driverId) {
     }
   }
   return false;
+}
+
+function getScheduledOfferExpiryMs(offerState) {
+  if (!offerState) return Date.now();
+  return Number(offerState.createdAt || Date.now()) + Number(offerState.timeoutMs || SCHEDULED_OFFER_TIMEOUT_MS);
+}
+
+function buildPendingScheduledOffersForDriver(driverId) {
+  const pending = [];
+  const now = Date.now();
+
+  for (const offerState of scheduledOffers.values()) {
+    if (!offerState || !Array.isArray(offerState.candidates)) continue;
+    const isCandidate = offerState.candidates.some((candidate) => candidate.driverId === driverId);
+    if (!isCandidate) continue;
+    if (offerState.accepted?.has?.(driverId)) continue;
+    if (offerState.rejected?.has?.(driverId)) continue;
+
+    const expiresAt = getScheduledOfferExpiryMs(offerState);
+    if (expiresAt <= now) continue;
+
+    pending.push({
+      rideId: offerState.rideId,
+      pickupTime: offerState.pickupTime,
+      createdAt: offerState.createdAt,
+      timeoutMs: offerState.timeoutMs,
+      expiresAt,
+      timeLeftMs: Math.max(0, expiresAt - now),
+      rideData: offerState.rideData || null
+    });
+  }
+
+  pending.sort((a, b) => a.expiresAt - b.expiresAt);
+  return pending;
+}
+
+function emitScheduledUpcomingOffersUpdate(targetDriverIds = null) {
+  const io = global.io;
+  if (!io) return;
+
+  const driverIds = targetDriverIds && targetDriverIds.length
+    ? Array.from(new Set(targetDriverIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)))
+    : Array.from(new Set(Array.from(scheduledOffers.values()).flatMap((offerState) => (offerState?.candidates || []).map((candidate) => candidate.driverId))));
+
+  for (const driverId of driverIds) {
+    const pendingOffers = buildPendingScheduledOffersForDriver(driverId);
+    io.to(`driver_${driverId}`).emit('scheduledUpcomingOffersUpdate', {
+      pendingCount: pendingOffers.length,
+      pendingOffers
+    });
+  }
 }
 
 async function getMergedBanUntil(driverId, proposedUntil) {
@@ -571,6 +625,14 @@ function getRideDurationMinutes(ride) {
   return 30;
 }
 
+function computeRideEndTime(pickupTime, durationMin, distanceKm) {
+  if (!pickupTime) return null;
+  const duration = Number.isFinite(durationMin)
+    ? Number(durationMin)
+    : (Number.isFinite(distanceKm) ? Math.max(1, Math.ceil(Number(distanceKm) * 2)) : 30);
+  return new Date(pickupTime.getTime() + duration * 60000);
+}
+
 async function filterConflictingDrivers(candidates, ride) {
   if (!candidates.length) return candidates;
 
@@ -681,18 +743,92 @@ async function filterConflictingDrivers(candidates, ride) {
 async function buildScheduledCandidates(ride) {
   if (!ride || !ride.startLatLon) return [];
 
-  const rawDrivers = Array.from(connectedDrivers.entries())
-    .filter(([, driverData]) =>
-      driverData?.location &&
-      typeof driverData.location.lat === 'number' &&
-      typeof driverData.location.lng === 'number'
-    )
-    .map(([driverId, driverData]) => ({
-      driverId: Number(driverId),
-      location: driverData.location,
-      vehicleTypeId: driverData.vehicleTypeId ? Number(driverData.vehicleTypeId) : null
-    }));
+  const excludedDriverIds = new Set(
+    Array.from(global.rejectedRides?.get?.(ride.id) || []).map((id) => Number(id))
+  );
 
+  let strategyDriverIds = [];
+  try {
+    const vsResp = await fetch('http://localhost:3000/api/vehicle-selection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        pickupLat: ride.startLatLon.lat,
+        pickupLon: ride.startLatLon.lon,
+        vehicleTypeId: ride.vehicleTypeId,
+        maxVehicles: 3,
+        excludedDriverIds: Array.from(excludedDriverIds),
+        scheduledPickupTime: ride.pickupTime ? new Date(ride.pickupTime).toISOString() : undefined
+      })
+    });
+
+    if (vsResp.ok) {
+      const vsData = await vsResp.json();
+      if (Array.isArray(vsData?.scores)) {
+        strategyDriverIds = vsData.scores
+          .map((score) => Number(score?.driverId))
+          .filter((id) => Number.isFinite(id) && id > 0);
+      }
+    } else {
+      console.warn(`vehicle-selection returned non-OK while building scheduled candidates for ride ${ride.id}:`, vsResp.status);
+    }
+  } catch (error) {
+    console.error(`Error calling vehicle-selection for scheduled ride ${ride.id}:`, error);
+  }
+
+  const uniqueStrategyDriverIds = Array.from(new Set(strategyDriverIds));
+  if (!uniqueStrategyDriverIds.length) {
+    return [];
+  }
+
+  const rawDriversMap = new Map();
+
+  uniqueStrategyDriverIds.forEach((driverId) => {
+    const connected = connectedDrivers.get(driverId);
+    if (connected?.location && typeof connected.location.lat === 'number' && typeof connected.location.lng === 'number') {
+      rawDriversMap.set(driverId, {
+        driverId,
+        location: connected.location,
+        vehicleTypeId: connected.vehicleTypeId ? Number(connected.vehicleTypeId) : null,
+        connected: true
+      });
+    }
+  });
+
+  const missingLocationDriverIds = uniqueStrategyDriverIds.filter((driverId) => !rawDriversMap.has(driverId));
+  if (missingLocationDriverIds.length) {
+    try {
+      const fallbackDrivers = await prisma.comDriver.findMany({
+        where: {
+          id: { in: missingLocationDriverIds },
+          lastLocation: { not: null }
+        },
+        select: {
+          id: true,
+          lastLocation: true
+        }
+      });
+
+      fallbackDrivers.forEach((driver) => {
+        if (rawDriversMap.has(driver.id)) return;
+        if (!Array.isArray(driver.lastLocation) || driver.lastLocation.length < 2) return;
+        const [lat, lng] = driver.lastLocation;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        rawDriversMap.set(driver.id, {
+          driverId: driver.id,
+          location: { lat, lng },
+          vehicleTypeId: null,
+          connected: Boolean(connectedDrivers.get(driver.id))
+        });
+      });
+    } catch (error) {
+      console.error(`Error loading fallback locations for scheduled ride ${ride.id}:`, error);
+    }
+  }
+
+  const rawDrivers = Array.from(rawDriversMap.values());
   if (rawDrivers.length === 0) return [];
 
   const driverIds = rawDrivers.map((d) => d.driverId);
@@ -703,15 +839,15 @@ async function buildScheduledCandidates(ride) {
       id: { in: driverIds },
       isActive: true,
       car: { not: null },
-      currentRideId: null,
-      isBusy: false,
       isOnline: true,
       OR: [{ bannedUntil: null }, { bannedUntil: { lte: now } }]
     },
     select: {
       id: true,
       car: true,
-      rating: true
+      rating: true,
+      currentRideId: true,
+      isBusy: true
     }
   });
 
@@ -733,6 +869,57 @@ async function buildScheduledCandidates(ride) {
   for (const raw of rawDrivers) {
     const driver = driverRecordMap.get(raw.driverId);
     if (!driver || !driver.car) continue;
+
+    const hasOngoingImmediateRide = Boolean(driver.currentRideId);
+    if (hasOngoingImmediateRide) {
+      try {
+        const currentRide = await prisma.ride.findUnique({
+          where: { id: driver.currentRideId },
+          select: {
+            id: true,
+            scheduled: true,
+            status: true,
+            endLatLon: true,
+            pickupTime: true,
+            distanceKm: true,
+            durationMin: true
+          }
+        });
+
+        if (!currentRide) {
+          continue;
+        }
+
+        if (!currentRide.scheduled && ['DISPATCHED', 'ONGOING', 'IN_PROGRESS', 'PICKED_UP', 'CONFIRMED'].includes(String(currentRide.status || '').toUpperCase())) {
+          const currentRideEnd = computeRideEndTime(
+            currentRide.pickupTime ? new Date(currentRide.pickupTime) : null,
+            currentRide.durationMin,
+            currentRide.distanceKm
+          );
+
+          if (!currentRideEnd) {
+            continue;
+          }
+
+          const scheduledStart = new Date(ride.pickupTime);
+          const gapMinutes = (scheduledStart.getTime() - currentRideEnd.getTime()) / 60000;
+          if (gapMinutes < -5) {
+            continue;
+          }
+
+          if (currentRide.endLatLon && typeof currentRide.endLatLon.lat === 'number' && typeof currentRide.endLatLon.lon === 'number') {
+            raw.location = {
+              lat: currentRide.endLatLon.lat,
+              lng: currentRide.endLatLon.lon
+            };
+          }
+        }
+      } catch (error) {
+        console.error(`Error evaluating current ride for scheduled candidate ${raw.driverId}:`, error);
+        continue;
+      }
+    }
+
     const vehicle = vehicleMap.get(driver.car);
     const resolvedVehicleTypeId = resolveVehicleTypeId(raw.vehicleTypeId, vehicle?.vehicleType, ride.vehicleTypeId);
     if (!resolvedVehicleTypeId || !allowedTypes.includes(resolvedVehicleTypeId)) continue;
@@ -781,7 +968,17 @@ async function buildScheduledCandidates(ride) {
 
   if (!eligibleBySchedule.length) return [];
 
-  return filterConflictingDrivers(eligibleBySchedule, ride);
+  const conflictedFiltered = await filterConflictingDrivers(eligibleBySchedule, ride);
+  const strategyOrder = new Map(uniqueStrategyDriverIds.map((id, index) => [id, index]));
+  conflictedFiltered.sort((a, b) => {
+    const orderA = strategyOrder.has(a.driverId) ? strategyOrder.get(a.driverId) : Number.MAX_SAFE_INTEGER;
+    const orderB = strategyOrder.has(b.driverId) ? strategyOrder.get(b.driverId) : Number.MAX_SAFE_INTEGER;
+    if (orderA !== orderB) return orderA - orderB;
+    if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+    return a.distanceKm - b.distanceKm;
+  });
+
+  return conflictedFiltered;
 }
 
 function selectBestScheduledCandidate(candidates, rideVehicleTypeId) {
@@ -882,20 +1079,42 @@ async function broadcastScheduledRideOffer(ride) {
     return;
   }
 
-  try {
-    await prisma.ride.update({
-      where: { id: ride.id },
-      data: { driverQueue: [] }
-    });
-  } catch (error) {
-    console.warn(`Failed to reset driverQueue for scheduled ride ${ride.id}:`, error);
+  const existingCooldown = scheduledOfferCooldowns.get(ride.id);
+  if (existingCooldown && existingCooldown > Date.now()) {
+    return;
   }
+
+  const previousQueueIds = normalizeDriverQueue(ride.driverQueue);
 
   const candidates = await buildScheduledCandidates(ride);
   if (!candidates.length) {
     console.log(`No eligible drivers for scheduled ride ${ride.id}`);
     return;
   }
+
+  const mergedQueueIds = Array.from(new Set([...previousQueueIds, ...candidates.map((candidate) => candidate.driverId)]));
+
+  try {
+    await prisma.ride.update({
+      where: { id: ride.id },
+      data: {
+        driverQueue: mergedQueueIds,
+        driverId: null,
+        car: null
+      }
+    });
+    ride.driverQueue = mergedQueueIds;
+    ride.driverId = null;
+    ride.car = null;
+  } catch (error) {
+    console.warn(`Failed to persist scheduled offer queue for ride ${ride.id}:`, error);
+  }
+
+  const nowMs = Date.now();
+  const rideData = {
+    ...buildRidePayload(ride),
+    scheduledOfferOnly: true
+  };
 
   const offerState = {
     rideId: ride.id,
@@ -904,27 +1123,31 @@ async function broadcastScheduledRideOffer(ride) {
     candidates,
     accepted: new Map(),
     rejected: new Set(),
-    createdAt: Date.now(),
+    createdAt: nowMs,
     timeoutMs: SCHEDULED_OFFER_TIMEOUT_MS,
-    timerId: null
+    timerId: null,
+    rideData
   };
 
   scheduledOffers.set(ride.id, offerState);
 
-  const io = global.io;
-  if (io) {
-    for (const candidate of candidates) {
-      io.to(`driver_${candidate.driverId}`).emit('rideOffer', {
-        type: 'scheduledRide',
-        offerType: 'scheduled',
-        scheduled: true,
-        rideId: ride.id,
-        rideData: {
-          ...buildRidePayload(ride)
-        },
-        timestamp: Date.now(),
-        timeoutMs: SCHEDULED_OFFER_TIMEOUT_MS
-      });
+  emitScheduledUpcomingOffersUpdate(candidates.map((candidate) => candidate.driverId));
+
+  for (const candidate of candidates) {
+    try {
+      await sendPushToDriver(
+        candidate.driverId,
+        'Scheduled ride offer',
+        'A new scheduled ride offer is available in upcoming rides. You have 3 minutes to respond.',
+        {
+          type: 'scheduledRideOffer',
+          rideId: ride.id,
+          expiresAt: new Date(nowMs + SCHEDULED_OFFER_TIMEOUT_MS).toISOString(),
+          pickupTime: ride.pickupTime ? new Date(ride.pickupTime).toISOString() : null
+        }
+      );
+    } catch (error) {
+      console.error(`Error sending scheduled ride offer push to driver ${candidate.driverId}:`, error);
     }
   }
 
@@ -988,6 +1211,8 @@ async function finalizeScheduledOffer(rideId) {
 
   const accepted = Array.from(offerState.accepted.values());
   if (!accepted.length) {
+    scheduledOfferCooldowns.set(rideId, Date.now() + 60 * 1000);
+    emitScheduledUpcomingOffersUpdate(offerState.candidates.map((candidate) => candidate.driverId));
     console.log(`No drivers accepted scheduled ride ${rideId}`);
     return;
   }
@@ -1039,8 +1264,7 @@ async function finalizeScheduledOffer(rideId) {
       });
 
       if (!driver || !driver.isActive) continue;
-      if (!driver.isOnline || driver.isBusy) continue;
-      if (driver.currentRideId && driver.currentRideId !== rideId) continue;
+      if (!driver.isOnline) continue;
       if (driver.bannedUntil && driver.bannedUntil > now) continue;
       if (!connectedDrivers.has(candidate.driverId)) continue;
 
@@ -1093,6 +1317,8 @@ async function finalizeScheduledOffer(rideId) {
       });
     }
   }
+
+  emitScheduledUpcomingOffersUpdate(offerState.candidates.map((candidate) => candidate.driverId));
 }
 
 async function dispatchScheduledRide(ride, minutesToPickup) {
@@ -1544,6 +1770,7 @@ function clearScheduledOfferState(rideId, reason) {
     clearTimeout(offerState.timerId);
   }
   scheduledOffers.delete(rideId);
+  emitScheduledUpcomingOffersUpdate(offerState.candidates.map((candidate) => candidate.driverId));
   const io = global.io;
   if (io && offerState?.candidates?.length) {
     offerState.candidates.forEach((candidate) => {
@@ -2215,12 +2442,28 @@ async function checkForNewRides() {
           scheduledDispatchLeadMinutes = await getScheduledDispatchLeadMinutes(ride);
         }
 
-        if (minutesToPickup !== null && minutesToPickup > scheduledDispatchLeadMinutes) {
+        const withinScheduledOfferWindow =
+          minutesToPickup !== null &&
+          minutesToPickup <= SCHEDULED_OFFER_WINDOW_MINUTES &&
+          minutesToPickup > scheduledDispatchLeadMinutes;
+
+        if (withinScheduledOfferWindow) {
           if (scheduledOffers.has(ride.id)) {
             continue;
           }
 
           if (!ride.driverId) {
+            await broadcastScheduledRideOffer(ride);
+          }
+          continue;
+        }
+
+        if (minutesToPickup !== null && minutesToPickup > scheduledDispatchLeadMinutes) {
+          if (scheduledOffers.has(ride.id)) {
+            continue;
+          }
+
+          if (!ride.driverId && minutesToPickup > SCHEDULED_OFFER_WINDOW_MINUTES) {
             const assigned = await assignScheduledRideFromQueue(ride);
             if (assigned) {
               const updatedRide = await prisma.ride.findUnique({
@@ -2252,7 +2495,7 @@ async function checkForNewRides() {
             }
           }
 
-          if (!ride.driverId) {
+          if (!ride.driverId && minutesToPickup <= SCHEDULED_OFFER_WINDOW_MINUTES) {
             await broadcastScheduledRideOffer(ride);
           }
           continue;
@@ -2275,8 +2518,12 @@ async function checkForNewRides() {
         }
 
         if (ride.scheduled && minutesToPickup !== null && minutesToPickup <= scheduledDispatchLeadMinutes) {
-          // If we have queued acceptances, refresh driverId before fallback assignment
-          if (!ride.driverId && normalizeDriverQueue(ride.driverQueue).length > 0) {
+          // Use persisted queue before fallback assignment only outside the upcoming-offer window
+          if (
+            !ride.driverId &&
+            minutesToPickup > SCHEDULED_OFFER_WINDOW_MINUTES &&
+            normalizeDriverQueue(ride.driverQueue).length > 0
+          ) {
             const reassigned = await assignScheduledRideFromQueue(ride);
             if (reassigned) {
               const updatedRide = await prisma.ride.findUnique({
@@ -2607,6 +2854,7 @@ app.prepare().then(() => {
           });
           invalidateDriverScheduleCache(driverId);
           console.log(`Driver ${driverId} status updated to online`);
+          emitScheduledUpcomingOffersUpdate([driverId]);
         } catch (error) {
           console.error('Error updating driver status:', error);
         }
@@ -2795,6 +3043,7 @@ app.prepare().then(() => {
           }
 
           socket.emit('scheduledOfferAcknowledged', { rideId: data.rideId });
+          emitScheduledUpcomingOffersUpdate([driverId]);
           return;
         }
 
@@ -2985,6 +3234,7 @@ app.prepare().then(() => {
         if (scheduledOffer) {
           scheduledOffer.rejected.add(driverId);
           socket.emit('rideOfferRejected', { rideId: data.rideId });
+          emitScheduledUpcomingOffersUpdate([driverId]);
           return;
         }
         // Clear currentRideId and ban driver for 2 minutes
@@ -3080,6 +3330,7 @@ app.prepare().then(() => {
         if (scheduledOffer) {
           scheduledOffer.rejected.add(driverId);
           socket.emit('rideOfferTimeout', { rideId: data.rideId });
+          emitScheduledUpcomingOffersUpdate([driverId]);
           return;
         }
         // Reset driver status and ban for 2 minutes

@@ -120,16 +120,6 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { online, busy, busyMode } = body;
 
-    if (online === true) {
-      const schedule = await getDriverScheduleSnapshot(prisma, decoded.driverId, new Date());
-      if (!schedule?.eligible) {
-        return NextResponse.json({
-          error: 'Driver cannot go online outside configured schedule',
-          schedule
-        }, { status: 409 });
-      }
-    }
-
     if (online !== undefined && typeof online !== 'boolean') {
       return NextResponse.json({ error: 'Invalid online status' }, { status: 400 });
     }
@@ -168,7 +158,16 @@ export async function POST(request: NextRequest) {
 
     const schedule = await getDriverScheduleSnapshot(prisma, decoded.driverId, new Date());
 
-    return NextResponse.json({ success: true, schedule });
+    return NextResponse.json({
+      success: true,
+      schedule,
+      scheduleWarning: online === true && !schedule?.eligible
+        ? {
+            code: 'OUTSIDE_SCHEDULE',
+            message: 'Driver is outside configured work schedule. Online mode is still allowed.'
+          }
+        : null
+    });
   } catch (error) {
     console.error('Toggle driver online error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

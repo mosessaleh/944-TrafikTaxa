@@ -12,6 +12,8 @@ import { authorizeCardPayment } from '@/lib/payment-processor';
 import { notifyBookingConfirmedUnified } from '@/lib/notification-service';
 
 // Validation schema for booking creation
+const BOOKING_SLOT_MINUTES = 15;
+
 const createBookingSchema = z.object({
   riderName: z.string()
     .min(2, "Rider name must be at least 2 characters")
@@ -72,6 +74,14 @@ const createBookingSchema = z.object({
     const minScheduled = new Date(now.getTime() + 60 * 60 * 1000);
     if (date <= minScheduled || date > maxFuture) {
       addPickupError("For scheduled bookings, pickup time must be at least 1 hour from now and within 90 days");
+    }
+
+    if (date.getSeconds() !== 0 || date.getMilliseconds() !== 0) {
+      addPickupError(`Scheduled pickup time must align with ${BOOKING_SLOT_MINUTES}-minute slots`);
+    }
+
+    if (date.getMinutes() % BOOKING_SLOT_MINUTES !== 0) {
+      addPickupError(`Scheduled pickup time must align with ${BOOKING_SLOT_MINUTES}-minute slots`);
     }
   } else {
     // For immediate bookings: must be in the future (no 1-hour requirement) and within 90 days
@@ -271,14 +281,6 @@ export async function POST(request: NextRequest) {
     };
 
     const validatedData = createBookingSchema.parse(sanitizedData);
-
-    // Temporarily disable scheduled rides
-    if (validatedData.scheduled) {
-      return NextResponse.json(
-        { ok: false, error: 'الرحلات المجدولة متوقفة مؤقتاً. الرجاء اختيار رحلة فورية.' },
-        { status: 403 }
-      );
-    }
 
     // Verify vehicle type exists and is active
     const vehicleType = await prisma.vehicleType.findUnique({

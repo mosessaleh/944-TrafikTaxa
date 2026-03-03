@@ -198,14 +198,21 @@ export async function POST(request: NextRequest) {
 
     const driverIds = availableDrivers.map((d) => d.driverId);
     const now = new Date();
+    const allowBusyDriversForScheduled = Boolean(scheduledPickupTime);
+
+    const driverAvailabilityFilter = allowBusyDriversForScheduled
+      ? {}
+      : {
+          currentRideId: null,
+          isBusy: false
+        };
 
     const driverRecords: any[] = await (prisma as any).comDriver.findMany({
       where: {
         id: { in: driverIds },
         isActive: true,
         car: { not: null },
-        currentRideId: null,
-        isBusy: false,
+        ...driverAvailabilityFilter,
         OR: [{ bannedUntil: null }, { bannedUntil: { lte: now } }]
       },
       select: {
