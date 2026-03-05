@@ -161,6 +161,10 @@ model Settings {
   // Global discounts
   discountPercentage      Float @default(0)    // Percentage discount applied to all bookings
   maxDiscountAmount       Float @default(0)    // Maximum discount amount per booking
+  // Booking minimum controls
+  minScheduledLeadMinutes Int   @default(60)   // Minimum lead time for scheduled rides (minutes)
+  minScheduledPrice       Int   @default(0)    // Minimum required fare for scheduled rides (DKK)
+  minImmediatePrice       Int   @default(0)    // Enforced minimum fare for immediate rides (DKK)
 }
 
 model Ride {

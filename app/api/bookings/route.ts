@@ -11,6 +11,25 @@ import { calculateDistance } from '@/lib/distance';
 import { authorizeCardPayment } from '@/lib/payment-processor';
 import { notifyBookingConfirmedUnified } from '@/lib/notification-service';
 
+type SettingsMinControls = {
+  minScheduledLeadMinutes: number;
+  minScheduledPrice: number;
+};
+
+function normalizeMinInt(value: unknown, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.round(parsed));
+}
+
+async function getSettingsMinimumControls(): Promise<SettingsMinControls> {
+  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  return {
+    minScheduledLeadMinutes: normalizeMinInt((settings as any)?.minScheduledLeadMinutes, 60),
+    minScheduledPrice: normalizeMinInt((settings as any)?.minScheduledPrice, 0)
+  };
+}
+
 // Validation schema for booking creation
 const BOOKING_SLOT_MINUTES = 15;
 
@@ -70,10 +89,9 @@ const createBookingSchema = z.object({
   }
 
   if (data.scheduled) {
-    // For scheduled bookings: at least 1 hour from now, and within 90 days
-    const minScheduled = new Date(now.getTime() + 60 * 60 * 1000);
-    if (date <= minScheduled || date > maxFuture) {
-      addPickupError("For scheduled bookings, pickup time must be at least 1 hour from now and within 90 days");
+    // For scheduled bookings: lead time is validated in POST against admin setting
+    if (date <= now || date > maxFuture) {
+      addPickupError("For scheduled bookings, pickup time must be in the future and within 90 days");
     }
 
     if (date.getSeconds() !== 0 || date.getMilliseconds() !== 0) {
@@ -281,6 +299,21 @@ export async function POST(request: NextRequest) {
     };
 
     const validatedData = createBookingSchema.parse(sanitizedData);
+    const settingsMinControls = await getSettingsMinimumControls();
+
+    if (validatedData.scheduled) {
+      const pickupDate = new Date(validatedData.pickupTime);
+      const minScheduledDate = new Date(Date.now() + settingsMinControls.minScheduledLeadMinutes * 60 * 1000);
+      if (pickupDate <= minScheduledDate) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Scheduled booking must be at least ${settingsMinControls.minScheduledLeadMinutes} minutes from now`
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     // Verify vehicle type exists and is active
     const vehicleType = await prisma.vehicleType.findUnique({
@@ -383,7 +416,23 @@ export async function POST(request: NextRequest) {
 
     // Calculate price
     const pickupTime = new Date(validatedData.pickupTime);
-    const price = await computePrice(distanceKm, durationMin, pickupTime, validatedData.vehicleTypeId);
+    const price = await computePrice(
+      distanceKm,
+      durationMin,
+      pickupTime,
+      validatedData.vehicleTypeId,
+      { isScheduled: validatedData.scheduled }
+    );
+
+    if (validatedData.scheduled && price < settingsMinControls.minScheduledPrice) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Scheduled booking minimum fare is ${settingsMinControls.minScheduledPrice} DKK`
+        },
+        { status: 400 }
+      );
+    }
 
     // Get selected payment method for booking association
     let selectedPaymentMethodId: number | null = null;

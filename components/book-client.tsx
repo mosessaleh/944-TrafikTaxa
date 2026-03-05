@@ -27,6 +27,10 @@ const messages = {
 const BOOKING_SLOT_MINUTES = 15;
 const MIN_SCHEDULED_LEAD_MS = 60 * 60 * 1000;
 
+type PublicSettings = {
+  minScheduledLeadMinutes?: number;
+};
+
 function pad2(value: number) {
   return String(value).padStart(2, '0');
 }
@@ -47,12 +51,22 @@ function roundUpToNext15Minutes(date: Date) {
 }
 
 function normalizeScheduledLocalInput(rawValue?: string | null) {
+  return normalizeScheduledLocalInputWithLead(rawValue, MIN_SCHEDULED_LEAD_MS);
+}
+
+function normalizeScheduledLocalInputWithLead(rawValue: string | null | undefined, leadMs: number) {
   const base = rawValue ? new Date(rawValue) : new Date();
   const safeBase = Number.isNaN(base.getTime()) ? new Date() : base;
   const rounded = roundUpToNext15Minutes(safeBase);
-  const minAllowed = roundUpToNext15Minutes(new Date(Date.now() + MIN_SCHEDULED_LEAD_MS));
+  const minAllowed = roundUpToNext15Minutes(new Date(Date.now() + leadMs));
   const normalized = rounded < minAllowed ? minAllowed : rounded;
   return toLocalDateTimeInputValue(normalized);
+}
+
+function getScheduledLeadMsFromSettings(settings?: PublicSettings | null) {
+  const mins = Number(settings?.minScheduledLeadMinutes ?? 60);
+  if (!Number.isFinite(mins) || mins < 0) return MIN_SCHEDULED_LEAD_MS;
+  return Math.round(mins) * 60 * 1000;
 }
  
 function Field({label, children}:{label:string; children:React.ReactNode}){
@@ -228,6 +242,23 @@ export default function BookClient(){
   const { data: vehicleData } = useSWR('/api/vehicle-types', (url) =>
     fetch(url).then(r => r.json()).then(j => j?.ok ? j.items || [] : [])
   );
+
+  const { data: settingsData } = useSWR('/api/settings', (url) =>
+    fetch(url).then(r => r.json()).then(j => j?.ok ? j.settings || null : null)
+  );
+  const publicSettings: PublicSettings | null = settingsData || null;
+
+  useEffect(() => {
+    if (whenType !== 'later') return;
+    const leadMs = getScheduledLeadMsFromSettings(publicSettings);
+    setWhen((prev) => {
+      const rounded = roundUpToNext15Minutes(new Date(prev || new Date()));
+      const minAllowed = roundUpToNext15Minutes(new Date(Date.now() + leadMs));
+      const normalized = rounded < minAllowed ? minAllowed : rounded;
+      return toLocalDateTimeInputValue(normalized);
+    });
+  }, [whenType, publicSettings?.minScheduledLeadMinutes]);
+
   const vehicleTypes = vehicleData || [];
   useEffect(() => {
     if (vehicleTypes.length && vehicleId == null) setVehicleId(vehicleTypes[0].id);
@@ -252,13 +283,15 @@ export default function BookClient(){
     dropoffLon: dropoffSel?.lon ?? null,
     when: whenType === 'now' ? new Date().toISOString() : new Date(when).toISOString(),
     passengers: 1,
-    vehicleTypeId: vehicleId || undefined
+    vehicleTypeId: vehicleId || undefined,
+    scheduled: whenType === 'later'
   }), [pickupSel, dropoffSel, stopSel, showStop, whenType, when, vehicleId]);
 
-  const minScheduledDateTime = useMemo(
-    () => normalizeScheduledLocalInput(),
-    [whenType]
-  );
+  const minScheduledDateTime = useMemo(() => {
+    const leadMs = getScheduledLeadMsFromSettings(publicSettings);
+    const minAllowed = roundUpToNext15Minutes(new Date(Date.now() + leadMs));
+    return toLocalDateTimeInputValue(minAllowed);
+  }, [whenType, publicSettings?.minScheduledLeadMinutes]);
 
     // Initialize Google Maps
     const initializeMap = async () => {
@@ -1050,7 +1083,13 @@ export default function BookClient(){
         vehicleTypeId: vehicleId!,
         scheduled: whenType === 'later',
         pickupTime: whenType === 'later'
-          ? new Date(normalizeScheduledLocalInput(when)).toISOString()
+          ? (() => {
+              const leadMs = getScheduledLeadMsFromSettings(publicSettings);
+              const rounded = roundUpToNext15Minutes(new Date(when));
+              const minAllowed = roundUpToNext15Minutes(new Date(Date.now() + leadMs));
+              const normalized = rounded < minAllowed ? minAllowed : rounded;
+              return normalized.toISOString();
+            })()
           : new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes from now
         longWaitAccepted: longWaitWarning.show ? longWaitAccepted : undefined
         // paymentMethod will be selected on payment page
@@ -1520,10 +1559,12 @@ export default function BookClient(){
                           min={minScheduledDateTime}
                           step={BOOKING_SLOT_MINUTES * 60}
                           onChange={e => {
-                            setWhen(normalizeScheduledLocalInput(e.target.value));
+                            const leadMs = getScheduledLeadMsFromSettings(publicSettings);
+                            setWhen(normalizeScheduledLocalInputWithLead(e.target.value, leadMs));
                           }}
                           onBlur={() => {
-                            setWhen((previous) => normalizeScheduledLocalInput(previous));
+                            const leadMs = getScheduledLeadMsFromSettings(publicSettings);
+                            setWhen((previous) => normalizeScheduledLocalInputWithLead(previous, leadMs));
                           }}
                           className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                         />

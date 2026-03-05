@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { safeEstimateDistance } from '@/lib/geocode-safe';
 import { computePriceWithDetails } from '@/lib/price';
 import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
+import { prisma } from '@/lib/db';
 
 const Schema = z.object({
   pickupAddress: z.string().min(1),
@@ -16,7 +17,8 @@ const Schema = z.object({
   stopLon: z.number().optional().nullable(),
   dropoffLat: z.number().optional().nullable(),
   dropoffLon: z.number().optional().nullable(),
-  vehicleTypeId: z.number().int().optional()
+  vehicleTypeId: z.number().int().optional(),
+  scheduled: z.boolean().optional()
 });
 
 export async function POST(req: Request){
@@ -49,7 +51,22 @@ export async function POST(req: Request){
       durationMin = result.durationMin;
     }
     const at = new Date(parsed.when);
-    const priceDetails = await computePriceWithDetails(distanceKm, durationMin, at, parsed.vehicleTypeId);
+    const isScheduled = Boolean(parsed.scheduled);
+    const priceDetails = await computePriceWithDetails(distanceKm, durationMin, at, parsed.vehicleTypeId, { isScheduled });
+
+    if (isScheduled) {
+      const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+      const minScheduledPrice = Math.max(0, Math.round(Number((settings as any)?.minScheduledPrice || 0)));
+      if (priceDetails.finalPrice < minScheduledPrice) {
+        return NextResponse.json({
+          ok: false,
+          error: `Scheduled booking minimum fare is ${minScheduledPrice} DKK`,
+          minScheduledPrice,
+          calculatedPrice: priceDetails.finalPrice
+        }, { status: 400 });
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       distanceKm,

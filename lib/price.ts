@@ -2,6 +2,17 @@ import { prisma } from '@/lib/db';
 import { CacheManager } from '@/lib/cache';
 import Holidays from 'date-holidays';
 
+type PriceOptions = {
+  isScheduled?: boolean;
+  enforceMinimum?: boolean;
+};
+
+function normalizeMinimumDkk(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n);
+}
+
 function isHoliday(at: Date){
   // Check weekend (Saturday = 6, Sunday = 0)
   const dayOfWeek = at.getDay();
@@ -43,17 +54,31 @@ export async function computeBase(distanceKm:number, durationMin:number, at: Dat
   return Math.round(price);
 }
 
-export async function computePrice(distanceKm:number, durationMin:number, at: Date, vehicleTypeId?: number){
+export async function computePrice(
+  distanceKm:number,
+  durationMin:number,
+  at: Date,
+  vehicleTypeId?: number,
+  options?: PriceOptions
+){
+  const isScheduled = Boolean(options?.isScheduled);
+  const enforceMinimum = options?.enforceMinimum !== false;
+
   // Check cache first
   if (vehicleTypeId) {
-    const cachedPrice = CacheManager.getPriceCache(distanceKm, durationMin, vehicleTypeId);
+    const cachedPrice = CacheManager.getPriceCache(distanceKm, durationMin, vehicleTypeId, isScheduled);
     if (cachedPrice !== null) {
       return cachedPrice;
     }
   }
 
   const base = await computeBase(distanceKm, durationMin, at);
-  if (!vehicleTypeId) return base;
+  if (!vehicleTypeId) {
+    if (!enforceMinimum || isScheduled) return base;
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    const minImmediatePrice = normalizeMinimumDkk((settings as any)?.minImmediatePrice);
+    return Math.max(base, minImmediatePrice);
+  }
 
   const vt = await prisma.vehicleType.findUnique({ where: { id: vehicleTypeId }, select: { active: true, multiplier: true } });
   if (!vt || !vt.active) throw new Error('Vehicle type not available');
@@ -72,15 +97,36 @@ export async function computePrice(distanceKm:number, durationMin:number, at: Da
     finalPrice = Math.round(finalPrice - discountAmount);
   }
 
+  if (enforceMinimum && !isScheduled) {
+    const minImmediatePrice = normalizeMinimumDkk((settings as any)?.minImmediatePrice);
+    finalPrice = Math.max(finalPrice, minImmediatePrice);
+  }
+
   // Cache the result
-  CacheManager.setPriceCache(distanceKm, durationMin, vehicleTypeId, finalPrice);
+  CacheManager.setPriceCache(distanceKm, durationMin, vehicleTypeId, finalPrice, isScheduled);
 
   return finalPrice;
 }
 
-export async function computePriceWithDetails(distanceKm:number, durationMin:number, at: Date, vehicleTypeId?: number){
+export async function computePriceWithDetails(
+  distanceKm:number,
+  durationMin:number,
+  at: Date,
+  vehicleTypeId?: number,
+  options?: PriceOptions
+){
+  const isScheduled = Boolean(options?.isScheduled);
+  const enforceMinimum = options?.enforceMinimum !== false;
+
   const base = await computeBase(distanceKm, durationMin, at);
-  if (!vehicleTypeId) return { originalPrice: base, finalPrice: base, discountAmount: 0 };
+  if (!vehicleTypeId) {
+    const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+    const minImmediatePrice = enforceMinimum && !isScheduled
+      ? normalizeMinimumDkk((settings as any)?.minImmediatePrice)
+      : 0;
+    const finalPrice = enforceMinimum && !isScheduled ? Math.max(base, minImmediatePrice) : base;
+    return { originalPrice: base, finalPrice, discountAmount: 0 };
+  }
 
   const vt = await prisma.vehicleType.findUnique({ where: { id: vehicleTypeId }, select: { active: true, multiplier: true } });
   if (!vt || !vt.active) throw new Error('Vehicle type not available');
@@ -97,7 +143,12 @@ export async function computePriceWithDetails(distanceKm:number, durationMin:num
       settings.maxDiscountAmount || 0
     );
   }
-  const finalPrice = Math.round(priceAfterMultiplier - discountAmount);
+
+  let finalPrice = Math.round(priceAfterMultiplier - discountAmount);
+  if (enforceMinimum && !isScheduled) {
+    const minImmediatePrice = normalizeMinimumDkk((settings as any)?.minImmediatePrice);
+    finalPrice = Math.max(finalPrice, minImmediatePrice);
+  }
 
   return {
     originalPrice: priceAfterMultiplier,

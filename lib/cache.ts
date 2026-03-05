@@ -78,13 +78,24 @@ class CacheManagerClass {
   }
 
   // Price Calculation Cache
-  static setPriceCache(distance: number, duration: number, vehicleTypeId: number, price: number): void {
-    const key = `price:${distance.toFixed(2)}:${duration}:${vehicleTypeId}`;
+  static setPriceCache(
+    distance: number,
+    duration: number,
+    vehicleTypeId: number,
+    price: number,
+    isScheduled: boolean = false
+  ): void {
+    const key = `price:${distance.toFixed(2)}:${duration}:${vehicleTypeId}:${isScheduled ? 'scheduled' : 'immediate'}`;
     priceCache.set(key, { price, timestamp: Date.now() });
   }
 
-  static getPriceCache(distance: number, duration: number, vehicleTypeId: number): number | null {
-    const key = `price:${distance.toFixed(2)}:${duration}:${vehicleTypeId}`;
+  static getPriceCache(
+    distance: number,
+    duration: number,
+    vehicleTypeId: number,
+    isScheduled: boolean = false
+  ): number | null {
+    const key = `price:${distance.toFixed(2)}:${duration}:${vehicleTypeId}:${isScheduled ? 'scheduled' : 'immediate'}`;
     const cached = priceCache.get(key) as PriceCacheEntry | undefined;
     return cached ? cached.price : null;
   }
