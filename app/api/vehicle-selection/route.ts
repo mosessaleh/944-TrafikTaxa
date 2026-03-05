@@ -70,6 +70,16 @@ const ALLOWED_TYPES: Record<number, number[]> = {
   4: [4]
 };
 
+function isInternalAuthorized(request: NextRequest) {
+  const expectedApiKey = String(process.env.INTERNAL_API_KEY || '').trim();
+  if (!expectedApiKey) {
+    return process.env.NODE_ENV !== 'production';
+  }
+
+  const providedApiKey = String(request.headers.get('x-internal-api-key') || '').trim();
+  return providedApiKey.length > 0 && providedApiKey === expectedApiKey;
+}
+
 function estimateEtaMinutes(distanceKm: number) {
   return Math.ceil((distanceKm / SPEED_KMH) * 60);
 }
@@ -144,6 +154,16 @@ function sortByClosest(candidates: CandidateDriver[]) {
 
 export async function POST(request: NextRequest) {
   try {
+    if (!isInternalAuthorized(request)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Forbidden'
+        },
+        { status: 403 }
+      );
+    }
+
     const body: VehicleSelectionRequest = await request.json();
     const {
       pickupLat,

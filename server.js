@@ -15,6 +15,7 @@ const {
   canDriverReceiveRide,
   invalidateDriverScheduleCache
 } = require('./lib/driver-schedule');
+const Holidays = require('date-holidays');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
@@ -93,6 +94,12 @@ global.scheduledOffers = scheduledOffers;
 global.scheduledOfferCooldowns = scheduledOfferCooldowns;
 const SCHEDULED_OFFER_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 const SCHEDULED_OFFER_WINDOW_MINUTES = 60;
+const SCHEDULED_STAGE2_MAX_WINDOW_MINUTES = 24 * 60;
+const SCHEDULED_STAGE2_OFFER_TIMEOUT_MS = 3 * 60 * 1000;
+const SCHEDULED_STAGE2_MAX_ETA_MINUTES = 20;
+const SCHEDULED_STAGE3_OFFER_TIMEOUT_MS = 10 * 60 * 1000;
+const SCHEDULED_STAGE3_POSTAL_PREFIX_LEN = 4;
+const SCHEDULED_STAGE3_FALLBACK_DISTANCE_PENALTY = 9999;
 const SCHEDULED_MAX_ETA_MINUTES = 30;
 const SCHEDULED_CONFLICT_WINDOW_HOURS = 6;
 const SCHEDULED_IMMEDIATE_WINDOW_MINUTES = 15;
@@ -107,6 +114,13 @@ const SCHEDULED_LATE_RATING_PENALTY = 0.01;
 const SHIFT_WARNING_THRESHOLD_HOURS = 11;
 const SHIFT_ENFORCEMENT_GRACE_HOURS = 1;
 const SHIFT_SUSPENSION_DAYS = 3;
+
+const SCHEDULED_STAGE2_RATE_THRESHOLDS = {
+  1: { day: 400, night: 500, holiday: 600 }, // Sedan
+  2: { day: 450, night: 550, holiday: 650 }, // 7-seat
+  3: { day: 600, night: 650, holiday: 750 }, // Van
+  4: { day: 750, night: 850, holiday: 900 } // Limo
+};
 
 const VEHICLE_TYPE_MAP = {
   SEDAN5: 1,
@@ -167,13 +181,26 @@ function getScheduledOfferExpiryMs(offerState) {
   return Number(offerState.createdAt || Date.now()) + Number(offerState.timeoutMs || SCHEDULED_OFFER_TIMEOUT_MS);
 }
 
+function getScheduledOfferIsEligibleForDriver(offerState, driverId) {
+  if (!offerState || !Number.isFinite(Number(driverId))) return false;
+
+  if (Number(offerState.stage) === 3) {
+    const activeDriverId = Number(offerState.activeDriverId);
+    return Number.isFinite(activeDriverId) && activeDriverId > 0 && activeDriverId === Number(driverId);
+  }
+
+  return Array.isArray(offerState.candidates)
+    ? offerState.candidates.some((candidate) => Number(candidate?.driverId) === Number(driverId))
+    : false;
+}
+
 function buildPendingScheduledOffersForDriver(driverId) {
   const pending = [];
   const now = Date.now();
 
   for (const offerState of scheduledOffers.values()) {
     if (!offerState || !Array.isArray(offerState.candidates)) continue;
-    const isCandidate = offerState.candidates.some((candidate) => candidate.driverId === driverId);
+    const isCandidate = getScheduledOfferIsEligibleForDriver(offerState, driverId);
     if (!isCandidate) continue;
     if (offerState.accepted?.has?.(driverId)) continue;
     if (offerState.rejected?.has?.(driverId)) continue;
@@ -183,6 +210,7 @@ function buildPendingScheduledOffersForDriver(driverId) {
 
     pending.push({
       rideId: offerState.rideId,
+      stage: Number(offerState.stage || 1),
       pickupTime: offerState.pickupTime,
       createdAt: offerState.createdAt,
       timeoutMs: offerState.timeoutMs,
@@ -477,7 +505,8 @@ async function getAvailableVehiclesForRide(ride) {
     const response = await fetch(`http://localhost:3000/api/vehicle-selection`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
       },
       body: JSON.stringify({
         pickupLat: rideDetails.startLatLon.lat,
@@ -599,6 +628,126 @@ function calculateDistanceKm(lat1, lon1, lat2, lon2) {
 
 function estimateEtaMinutesFromDistance(distanceKm) {
   return Math.max(1, Math.ceil(distanceKm * 2));
+}
+
+function normalizePostalCode(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const digits = raw.match(/\d+/g);
+  if (!digits) return raw.toUpperCase();
+  return digits.join('');
+}
+
+function getPostalPrefix(value, len = SCHEDULED_STAGE3_POSTAL_PREFIX_LEN) {
+  const normalized = normalizePostalCode(value);
+  if (!normalized) return '';
+  return normalized.slice(0, Math.max(1, Number(len) || SCHEDULED_STAGE3_POSTAL_PREFIX_LEN));
+}
+
+function parsePostalCodeFromAddress(address) {
+  const raw = String(address || '');
+  if (!raw) return '';
+  const match = raw.match(/\b\d{4,6}\b/);
+  return match ? normalizePostalCode(match[0]) : '';
+}
+
+function scorePostalProximity(driverPostalCode, ridePostalCode) {
+  const driverNorm = normalizePostalCode(driverPostalCode);
+  const rideNorm = normalizePostalCode(ridePostalCode);
+  if (!driverNorm || !rideNorm) {
+    return {
+      score: SCHEDULED_STAGE3_FALLBACK_DISTANCE_PENALTY,
+      exact: false,
+      prefixMatch: false
+    };
+  }
+
+  if (driverNorm === rideNorm) {
+    return {
+      score: 0,
+      exact: true,
+      prefixMatch: true
+    };
+  }
+
+  const driverPrefix = getPostalPrefix(driverNorm);
+  const ridePrefix = getPostalPrefix(rideNorm);
+  const prefixMatch = Boolean(driverPrefix && ridePrefix && driverPrefix === ridePrefix);
+
+  const driverNum = Number(driverNorm);
+  const rideNum = Number(rideNorm);
+  const numericDiff = Number.isFinite(driverNum) && Number.isFinite(rideNum)
+    ? Math.abs(driverNum - rideNum)
+    : SCHEDULED_STAGE3_FALLBACK_DISTANCE_PENALTY;
+
+  return {
+    score: prefixMatch ? numericDiff : numericDiff + 5000,
+    exact: false,
+    prefixMatch
+  };
+}
+
+function isHolidayDate(at) {
+  if (!(at instanceof Date) || Number.isNaN(at.getTime())) return false;
+
+  const dayOfWeek = at.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return true;
+
+  try {
+    const hd = new Holidays('DK');
+    const holidays = hd.getHolidays(at.getFullYear());
+    const ymd = at.toISOString().slice(0, 10);
+    if (holidays.some((h) => String(h?.date || '').slice(0, 10) === ymd)) return true;
+  } catch (error) {
+    console.error('Error checking Danish holidays for scheduled stage2:', error);
+  }
+
+  const ymd = at.toISOString().slice(0, 10);
+  const list = (process.env.HOLIDAYS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.includes(ymd);
+}
+
+function getScheduledHourlyRateThreshold(vehicleTypeId, at) {
+  const thresholds = SCHEDULED_STAGE2_RATE_THRESHOLDS[Number(vehicleTypeId)] || SCHEDULED_STAGE2_RATE_THRESHOLDS[1];
+  const holiday = isHolidayDate(at);
+  const hour = at.getHours();
+  const night = hour < 6 || hour >= 18;
+
+  if (holiday) return thresholds.holiday;
+  if (night) return thresholds.night;
+  return thresholds.day;
+}
+
+function isScheduledStage2Profitable({ vehicleTypeId, ridePrice, totalMinutes, at }) {
+  const safePrice = Number(ridePrice || 0);
+  const safeMinutes = Number(totalMinutes || 0);
+  if (safePrice <= 0 || safeMinutes <= 0) {
+    return {
+      eligible: false,
+      threshold: getScheduledHourlyRateThreshold(vehicleTypeId, at),
+      pricePerHour: 0
+    };
+  }
+
+  const totalHours = safeMinutes / 60;
+  if (totalHours <= 0) {
+    return {
+      eligible: false,
+      threshold: getScheduledHourlyRateThreshold(vehicleTypeId, at),
+      pricePerHour: 0
+    };
+  }
+
+  const pricePerHour = safePrice / totalHours;
+  const threshold = getScheduledHourlyRateThreshold(vehicleTypeId, at);
+  return {
+    eligible: pricePerHour >= threshold,
+    threshold,
+    pricePerHour
+  };
 }
 
 function getAllowedTypes(vehicleTypeId) {
@@ -752,7 +901,8 @@ async function buildScheduledCandidates(ride) {
     const vsResp = await fetch('http://localhost:3000/api/vehicle-selection', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
       },
       body: JSON.stringify({
         pickupLat: ride.startLatLon.lat,
@@ -1008,6 +1158,796 @@ function selectBestScheduledCandidate(candidates, rideVehicleTypeId) {
   });
 
   return selectionPool[0] || null;
+}
+
+async function buildScheduledStage2Candidates(ride) {
+  if (!ride || !ride.startLatLon) return [];
+
+  const excludedDriverIds = new Set(
+    Array.from(global.rejectedRides?.get?.(ride.id) || []).map((id) => Number(id))
+  );
+
+  let strategyDriverIds = [];
+  try {
+    const vsResp = await fetch('http://localhost:3000/api/vehicle-selection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
+      },
+      body: JSON.stringify({
+        pickupLat: ride.startLatLon.lat,
+        pickupLon: ride.startLatLon.lon,
+        vehicleTypeId: ride.vehicleTypeId,
+        maxVehicles: 30,
+        excludedDriverIds: Array.from(excludedDriverIds),
+        scheduledPickupTime: ride.pickupTime ? new Date(ride.pickupTime).toISOString() : undefined
+      })
+    });
+
+    if (vsResp.ok) {
+      const vsData = await vsResp.json();
+      if (Array.isArray(vsData?.scores)) {
+        strategyDriverIds = vsData.scores
+          .map((score) => Number(score?.driverId))
+          .filter((id) => Number.isFinite(id) && id > 0);
+      }
+    }
+  } catch (error) {
+    console.error(`Error loading stage2 candidates from vehicle-selection for ride ${ride?.id}:`, error);
+  }
+
+  const uniqueDriverIds = Array.from(new Set(strategyDriverIds));
+  if (!uniqueDriverIds.length) return [];
+
+  const now = new Date();
+
+  const driverRecords = await prisma.comDriver.findMany({
+    where: {
+      id: { in: uniqueDriverIds },
+      isActive: true,
+      isOnline: true,
+      car: { not: null },
+      OR: [{ bannedUntil: null }, { bannedUntil: { lte: now } }]
+    },
+    select: {
+      id: true,
+      car: true,
+      rating: true
+    }
+  });
+
+  if (!driverRecords.length) return [];
+
+  const driverMap = new Map(driverRecords.map((d) => [d.id, d]));
+
+  const rawDriversMap = new Map();
+  uniqueDriverIds.forEach((driverId) => {
+    const connected = connectedDrivers.get(driverId);
+    if (connected?.location && typeof connected.location.lat === 'number' && typeof connected.location.lng === 'number') {
+      rawDriversMap.set(driverId, {
+        driverId,
+        location: connected.location,
+        connected: true
+      });
+    }
+  });
+
+  const missingIds = uniqueDriverIds.filter((id) => !rawDriversMap.has(id));
+  if (missingIds.length) {
+    try {
+      const fallback = await prisma.comDriver.findMany({
+        where: {
+          id: { in: missingIds },
+          lastLocation: { not: null }
+        },
+        select: { id: true, lastLocation: true }
+      });
+
+      fallback.forEach((driver) => {
+        if (rawDriversMap.has(driver.id)) return;
+        if (!Array.isArray(driver.lastLocation) || driver.lastLocation.length < 2) return;
+        const [lat, lng] = driver.lastLocation;
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        rawDriversMap.set(driver.id, {
+          driverId: driver.id,
+          location: { lat, lng },
+          connected: Boolean(connectedDrivers.get(driver.id))
+        });
+      });
+    } catch (error) {
+      console.error(`Error loading fallback locations for stage2 ride ${ride?.id}:`, error);
+    }
+  }
+
+  const rawDrivers = Array.from(rawDriversMap.values());
+  if (!rawDrivers.length) return [];
+
+  const allowedTypes = getAllowedTypes(ride.vehicleTypeId);
+  const vehicles = await prisma.comVehicles.findMany({
+    where: { regNumber: { in: driverRecords.map((d) => d.car).filter(Boolean) } },
+    select: { id: true, regNumber: true, vehicleType: true }
+  });
+  const vehicleMap = new Map(vehicles.map((v) => [v.regNumber, v]));
+
+  const stageAt = ride.pickupTime ? new Date(ride.pickupTime) : new Date();
+  const durationMin = getRideDurationMinutes(ride);
+  const candidates = [];
+
+  for (const raw of rawDrivers) {
+    const driver = driverMap.get(raw.driverId);
+    if (!driver || !driver.car) continue;
+
+    const vehicle = vehicleMap.get(driver.car);
+    const resolvedVehicleTypeId = resolveVehicleTypeId(null, vehicle?.vehicleType, ride.vehicleTypeId);
+    if (!resolvedVehicleTypeId || !allowedTypes.includes(resolvedVehicleTypeId)) continue;
+
+    const schedule = await canDriverReceiveRide(prisma, driver.id, {
+      strict: true,
+      now: stageAt
+    });
+    if (!schedule?.eligible) continue;
+
+    const distanceKm = calculateDistanceKm(
+      ride.startLatLon.lat,
+      ride.startLatLon.lon,
+      raw.location.lat,
+      raw.location.lng
+    );
+    const etaMinutes = estimateEtaMinutesFromDistance(distanceKm);
+    if (!Number.isFinite(etaMinutes) || etaMinutes <= 0 || etaMinutes > SCHEDULED_STAGE2_MAX_ETA_MINUTES) continue;
+
+    const totalMinutes = etaMinutes + durationMin;
+    const profitability = isScheduledStage2Profitable({
+      vehicleTypeId: resolvedVehicleTypeId,
+      ridePrice: Number(ride.price || 0),
+      totalMinutes,
+      at: stageAt
+    });
+
+    if (!profitability.eligible) {
+      continue;
+    }
+
+    candidates.push({
+      driverId: driver.id,
+      car: driver.car,
+      rating: Number(driver.rating || 0),
+      vehicleTypeId: resolvedVehicleTypeId,
+      location: raw.location,
+      distanceKm,
+      etaMinutes,
+      totalMinutes,
+      pricePerHour: profitability.pricePerHour,
+      threshold: profitability.threshold,
+      chainPriority: false,
+      chainRideId: null,
+      chainGapMinutes: null,
+      chainDistanceKm: null,
+      chainEtaMinutes: null
+    });
+  }
+
+  candidates.sort((a, b) => {
+    if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+    return a.distanceKm - b.distanceKm;
+  });
+
+  return candidates;
+}
+
+async function buildScheduledStage3Candidates(ride) {
+  if (!ride || !ride.startLatLon || !ride.pickupTime) return [];
+
+  const excludedDriverIds = new Set(
+    Array.from(global.rejectedRides?.get?.(ride.id) || []).map((id) => Number(id))
+  );
+
+  const ridePostalCode = parsePostalCodeFromAddress(ride.pickupAddress);
+
+  let strategyDriverIds = [];
+  try {
+    const vsResp = await fetch('http://localhost:3000/api/vehicle-selection', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
+      },
+      body: JSON.stringify({
+        pickupLat: ride.startLatLon.lat,
+        pickupLon: ride.startLatLon.lon,
+        vehicleTypeId: ride.vehicleTypeId,
+        maxVehicles: 200,
+        excludedDriverIds: Array.from(excludedDriverIds),
+        scheduledPickupTime: ride.pickupTime ? new Date(ride.pickupTime).toISOString() : undefined
+      })
+    });
+
+    if (vsResp.ok) {
+      const vsData = await vsResp.json();
+      if (Array.isArray(vsData?.scores)) {
+        strategyDriverIds = vsData.scores
+          .map((score) => Number(score?.driverId))
+          .filter((id) => Number.isFinite(id) && id > 0);
+      }
+    }
+  } catch (error) {
+    console.error(`Error loading stage3 candidates from vehicle-selection for ride ${ride?.id}:`, error);
+  }
+
+  const uniqueDriverIds = Array.from(new Set(strategyDriverIds));
+  if (!uniqueDriverIds.length) return [];
+
+  const now = new Date();
+  const allowedTypes = getAllowedTypes(ride.vehicleTypeId);
+
+  const driverRecords = await prisma.comDriver.findMany({
+    where: {
+      id: { in: uniqueDriverIds },
+      isActive: true,
+      isOnline: true,
+      car: { not: null },
+      OR: [{ bannedUntil: null }, { bannedUntil: { lte: now } }]
+    },
+    select: {
+      id: true,
+      car: true,
+      rating: true,
+      drAddress: true,
+      createdAt: true
+    }
+  });
+
+  if (!driverRecords.length) return [];
+
+  const vehicleRows = await prisma.comVehicles.findMany({
+    where: {
+      regNumber: {
+        in: driverRecords.map((d) => d.car).filter(Boolean)
+      }
+    },
+    select: {
+      regNumber: true,
+      vehicleType: true
+    }
+  });
+
+  const vehicleMap = new Map(vehicleRows.map((v) => [v.regNumber, v]));
+  const strategyOrder = new Map(uniqueDriverIds.map((id, idx) => [id, idx]));
+  const rideAt = new Date(ride.pickupTime);
+
+  const candidates = [];
+
+  for (const driver of driverRecords) {
+    const resolvedVehicleTypeId = resolveVehicleTypeId(
+      null,
+      vehicleMap.get(driver.car)?.vehicleType,
+      ride.vehicleTypeId
+    );
+
+    if (!resolvedVehicleTypeId || !allowedTypes.includes(resolvedVehicleTypeId)) continue;
+
+    const schedule = await canDriverReceiveRide(prisma, driver.id, {
+      strict: true,
+      now: rideAt
+    });
+    if (!schedule?.eligible) {
+      continue;
+    }
+
+    const driverPostalCode = parsePostalCodeFromAddress(driver.drAddress || '');
+    const postalScore = scorePostalProximity(driverPostalCode, ridePostalCode);
+    const strategyIndex = strategyOrder.has(driver.id)
+      ? strategyOrder.get(driver.id)
+      : Number.MAX_SAFE_INTEGER;
+
+    const completedRides = await prisma.ride.count({
+      where: {
+        driverId: driver.id,
+        status: 'COMPLETED'
+      }
+    });
+
+    candidates.push({
+      driverId: driver.id,
+      car: driver.car,
+      rating: Number(driver.rating || 0),
+      vehicleTypeId: resolvedVehicleTypeId,
+      strategyIndex,
+      homeAddress: driver.drAddress || '',
+      postalCode: driverPostalCode,
+      postalExact: postalScore.exact,
+      postalPrefixMatch: postalScore.prefixMatch,
+      postalDistanceScore: postalScore.score,
+      completedRides,
+      experienceScore: Math.floor(Number(completedRides || 0) / 100) * 3,
+      joinedAtMs: driver.createdAt ? new Date(driver.createdAt).getTime() : 0
+    });
+  }
+
+  candidates.sort((a, b) => {
+    if (a.postalExact !== b.postalExact) return a.postalExact ? -1 : 1;
+    if (a.postalPrefixMatch !== b.postalPrefixMatch) return a.postalPrefixMatch ? -1 : 1;
+    if (a.postalDistanceScore !== b.postalDistanceScore) return a.postalDistanceScore - b.postalDistanceScore;
+    if (a.rating !== b.rating) return b.rating - a.rating;
+    if (a.experienceScore !== b.experienceScore) return b.experienceScore - a.experienceScore;
+    if (a.vehicleTypeId !== b.vehicleTypeId) {
+      const aExact = a.vehicleTypeId === Number(ride.vehicleTypeId);
+      const bExact = b.vehicleTypeId === Number(ride.vehicleTypeId);
+      if (aExact !== bExact) return aExact ? -1 : 1;
+    }
+    if (a.strategyIndex !== b.strategyIndex) return a.strategyIndex - b.strategyIndex;
+    return b.completedRides - a.completedRides;
+  });
+
+  return candidates;
+}
+
+async function advanceScheduledStage3Offer(rideId, reason = 'advance') {
+  const offerState = scheduledOffers.get(rideId);
+  if (!offerState || offerState.stage !== 3) return;
+
+  if (offerState.timerId) {
+    clearTimeout(offerState.timerId);
+    offerState.timerId = null;
+  }
+
+  while (offerState.currentIndex < offerState.candidates.length) {
+    const candidate = offerState.candidates[offerState.currentIndex];
+
+    if (offerState.accepted?.has?.(candidate.driverId)) {
+      const ride = await prisma.ride.findUnique({
+        where: { id: rideId },
+        select: {
+          id: true,
+          status: true,
+          driverId: true,
+          pickupTime: true,
+          pickupAddress: true,
+          dropoffAddress: true,
+          stopAddress: true,
+          price: true,
+          distanceKm: true,
+          startLatLon: true,
+          stopLatLon: true,
+          endLatLon: true,
+          vehicleTypeId: true,
+          riderName: true
+        }
+      });
+
+      if (!ride || ride.status !== 'CONFIRMED' || ride.driverId) {
+        scheduledOffers.delete(rideId);
+        emitScheduledUpcomingOffersUpdate([candidate.driverId]);
+        return;
+      }
+
+      const now = new Date();
+      const selectedDriver = await prisma.comDriver.findUnique({
+        where: { id: candidate.driverId },
+        select: {
+          id: true,
+          car: true,
+          drFname: true,
+          drLname: true,
+          isOnline: true,
+          bannedUntil: true,
+          isActive: true
+        }
+      });
+
+      if (!selectedDriver || !selectedDriver.isActive || !selectedDriver.isOnline || (selectedDriver.bannedUntil && selectedDriver.bannedUntil > now)) {
+        offerState.accepted.delete(candidate.driverId);
+        offerState.rejected.add(candidate.driverId);
+        offerState.currentIndex += 1;
+        continue;
+      }
+
+      await prisma.ride.update({
+        where: { id: rideId },
+        data: {
+          driverId: selectedDriver.id,
+          car: selectedDriver.car || candidate.car || null,
+          driverQueue: offerState.candidates.map((c) => c.driverId)
+        }
+      });
+
+      const rideData = buildRidePayload(ride);
+      const io = global.io;
+
+      for (const stagedCandidate of offerState.candidates) {
+        const isSelected = stagedCandidate.driverId === selectedDriver.id;
+        if (io) {
+          io.to(`driver_${stagedCandidate.driverId}`).emit('scheduledOfferResult', {
+            rideId,
+            selected: isSelected,
+            pickupTime: ride.pickupTime,
+            rideData,
+            stage: 3
+          });
+        }
+
+        if (offerState.accepted?.has?.(stagedCandidate.driverId)) {
+          try {
+            await sendPushToDriver(
+              stagedCandidate.driverId,
+              isSelected ? 'Scheduled ride assigned' : 'Scheduled ride not assigned',
+              isSelected
+                ? 'You were selected for this scheduled ride.'
+                : 'Another driver was selected for this scheduled ride.',
+              {
+                type: 'scheduledRideOfferResult',
+                stage: 3,
+                rideId,
+                selected: isSelected,
+                pickupTime: ride.pickupTime ? new Date(ride.pickupTime).toISOString() : null
+              }
+            );
+          } catch (error) {
+            console.error(`Error sending scheduled stage3 result push to driver ${stagedCandidate.driverId}:`, error);
+          }
+        }
+      }
+
+      scheduledOffers.delete(rideId);
+      emitScheduledUpcomingOffersUpdate(offerState.candidates.map((c) => c.driverId));
+      return;
+    }
+
+    if (offerState.rejected?.has?.(candidate.driverId)) {
+      offerState.currentIndex += 1;
+      continue;
+    }
+
+    const driver = await prisma.comDriver.findUnique({
+      where: { id: candidate.driverId },
+      select: {
+        id: true,
+        isOnline: true,
+        isActive: true,
+        bannedUntil: true
+      }
+    });
+
+    const now = new Date();
+    if (!driver || !driver.isActive || !driver.isOnline || (driver.bannedUntil && driver.bannedUntil > now)) {
+      offerState.rejected.add(candidate.driverId);
+      offerState.currentIndex += 1;
+      continue;
+    }
+
+    offerState.activeDriverId = candidate.driverId;
+    offerState.createdAt = Date.now();
+    offerState.timeoutMs = SCHEDULED_STAGE3_OFFER_TIMEOUT_MS;
+
+    emitScheduledUpcomingOffersUpdate(offerState.candidates.map((c) => c.driverId));
+
+    try {
+      await sendPushToDriver(
+        candidate.driverId,
+        'Scheduled ride opportunity',
+        'A scheduled ride opportunity is available in upcoming rides. You have 10 minutes to answer.',
+        {
+          type: 'scheduledRideOffer',
+          stage: 3,
+          rideId,
+          expiresAt: new Date(offerState.createdAt + SCHEDULED_STAGE3_OFFER_TIMEOUT_MS).toISOString(),
+          pickupTime: offerState.pickupTime ? new Date(offerState.pickupTime).toISOString() : null
+        }
+      );
+    } catch (error) {
+      console.error(`Error sending stage3 scheduled push to driver ${candidate.driverId}:`, error);
+    }
+
+    offerState.timerId = setTimeout(() => {
+      const current = scheduledOffers.get(rideId);
+      if (!current || current.stage !== 3) return;
+      const activeId = Number(current.activeDriverId);
+      if (Number.isFinite(activeId) && activeId > 0 && !current.accepted.has(activeId)) {
+        current.rejected.add(activeId);
+      }
+      current.currentIndex = Number(current.currentIndex || 0) + 1;
+      advanceScheduledStage3Offer(rideId, 'timeout').catch((error) => {
+        console.error(`Error advancing stage3 offer after timeout for ride ${rideId}:`, error);
+      });
+    }, SCHEDULED_STAGE3_OFFER_TIMEOUT_MS);
+
+    return;
+  }
+
+  scheduledOfferCooldowns.set(rideId, Date.now() + 60 * 1000);
+  scheduledOffers.delete(rideId);
+  emitScheduledUpcomingOffersUpdate(offerState.candidates.map((c) => c.driverId));
+  console.log(`No drivers accepted scheduled stage3 ride ${rideId} (reason: ${reason})`);
+}
+
+async function broadcastScheduledRideOfferStage3(ride) {
+  if (!ride || !ride.startLatLon || !ride.pickupTime) return;
+  if (scheduledOffers.has(ride.id)) return;
+
+  const existingCooldown = scheduledOfferCooldowns.get(ride.id);
+  if (existingCooldown && existingCooldown > Date.now()) {
+    return;
+  }
+
+  const candidates = await buildScheduledStage3Candidates(ride);
+  if (!candidates.length) {
+    console.log(`No eligible stage3 drivers for scheduled ride ${ride.id}`);
+    return;
+  }
+
+  try {
+    await prisma.ride.update({
+      where: { id: ride.id },
+      data: {
+        driverQueue: candidates.map((c) => c.driverId),
+        driverId: null,
+        car: null
+      }
+    });
+  } catch (error) {
+    console.warn(`Failed to persist stage3 offer queue for ride ${ride.id}:`, error);
+  }
+
+  const nowMs = Date.now();
+  const rideData = {
+    ...buildRidePayload(ride),
+    scheduledOfferOnly: true,
+    stage: 3
+  };
+
+  const offerState = {
+    stage: 3,
+    rideId: ride.id,
+    pickupTime: ride.pickupTime,
+    vehicleTypeId: ride.vehicleTypeId,
+    candidates,
+    accepted: new Map(),
+    rejected: new Set(),
+    createdAt: nowMs,
+    timeoutMs: SCHEDULED_STAGE3_OFFER_TIMEOUT_MS,
+    timerId: null,
+    rideData,
+    currentIndex: 0,
+    activeDriverId: null
+  };
+
+  scheduledOffers.set(ride.id, offerState);
+
+  await advanceScheduledStage3Offer(ride.id, 'start');
+}
+
+async function finalizeScheduledStage2Offer(rideId) {
+  const offerState = scheduledOffers.get(rideId);
+  if (!offerState || offerState.stage !== 2) return;
+
+  if (offerState.timerId) {
+    clearTimeout(offerState.timerId);
+  }
+
+  scheduledOffers.delete(rideId);
+
+  const accepted = Array.from(offerState.accepted.values());
+  if (!accepted.length) {
+    scheduledOfferCooldowns.set(rideId, Date.now() + 60 * 1000);
+    emitScheduledUpcomingOffersUpdate(offerState.candidates.map((candidate) => candidate.driverId));
+    console.log(`No drivers accepted scheduled stage2 ride ${rideId}`);
+    return;
+  }
+
+  const ride = await prisma.ride.findUnique({
+    where: { id: rideId },
+    select: {
+      id: true,
+      status: true,
+      driverId: true,
+      pickupTime: true,
+      pickupAddress: true,
+      dropoffAddress: true,
+      stopAddress: true,
+      price: true,
+      distanceKm: true,
+      startLatLon: true,
+      stopLatLon: true,
+      endLatLon: true,
+      vehicleTypeId: true,
+      riderName: true
+    }
+  });
+
+  if (!ride || ride.status !== 'CONFIRMED' || ride.driverId) {
+    console.log(`Scheduled stage2 ride ${rideId} no longer available for assignment`);
+    return;
+  }
+
+  const now = new Date();
+  const scheduleAt = ride.pickupTime ? new Date(ride.pickupTime) : now;
+  const eligibleAccepted = [];
+  const driverInfoMap = new Map();
+
+  for (const candidate of accepted) {
+    try {
+      const driver = await prisma.comDriver.findUnique({
+        where: { id: candidate.driverId },
+        select: {
+          id: true,
+          car: true,
+          drFname: true,
+          drLname: true,
+          isOnline: true,
+          bannedUntil: true,
+          isActive: true
+        }
+      });
+
+      if (!driver || !driver.isActive) continue;
+      if (!driver.isOnline) continue;
+      if (driver.bannedUntil && driver.bannedUntil > now) continue;
+
+      const schedule = await canDriverReceiveRide(prisma, candidate.driverId, {
+        strict: true,
+        now: scheduleAt
+      });
+      if (!schedule?.eligible) continue;
+
+      const location = await resolveDriverLocation(candidate.driverId);
+      if (!location || !ride.startLatLon) continue;
+
+      const distanceKm = calculateDistanceKm(
+        ride.startLatLon.lat,
+        ride.startLatLon.lon,
+        location.lat,
+        location.lng
+      );
+      const etaMinutes = estimateEtaMinutesFromDistance(distanceKm);
+
+      eligibleAccepted.push({
+        ...candidate,
+        distanceKm,
+        etaMinutes
+      });
+      driverInfoMap.set(candidate.driverId, driver);
+    } catch (error) {
+      console.error(`Error validating stage2 accepted driver ${candidate.driverId}:`, error);
+    }
+  }
+
+  if (!eligibleAccepted.length) {
+    console.log(`No eligible accepted drivers for scheduled stage2 ride ${rideId}`);
+    return;
+  }
+
+  eligibleAccepted.sort((a, b) => {
+    if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
+    return a.distanceKm - b.distanceKm;
+  });
+
+  const selected = eligibleAccepted[0];
+  const selectedDriver = driverInfoMap.get(selected.driverId);
+
+  await prisma.ride.update({
+    where: { id: rideId },
+    data: {
+      driverId: selected.driverId,
+      car: selectedDriver?.car || selected.car || null,
+      driverQueue: eligibleAccepted.map((c) => c.driverId)
+    }
+  });
+
+  const io = global.io;
+  const rideData = buildRidePayload(ride);
+  for (const candidate of accepted) {
+    const isSelected = candidate.driverId === selected.driverId;
+    if (io) {
+      io.to(`driver_${candidate.driverId}`).emit('scheduledOfferResult', {
+        rideId,
+        selected: isSelected,
+        pickupTime: ride.pickupTime,
+        rideData,
+        stage: 2
+      });
+    }
+
+    try {
+      await sendPushToDriver(
+        candidate.driverId,
+        isSelected ? 'Scheduled ride assigned' : 'Scheduled ride not assigned',
+        isSelected
+          ? 'You were selected for this scheduled ride.'
+          : 'Another driver was selected for this scheduled ride.',
+        {
+          type: 'scheduledRideOfferResult',
+          stage: 2,
+          rideId,
+          selected: isSelected,
+          pickupTime: ride.pickupTime ? new Date(ride.pickupTime).toISOString() : null
+        }
+      );
+    } catch (error) {
+      console.error(`Error sending scheduled stage2 result push to driver ${candidate.driverId}:`, error);
+    }
+  }
+
+  emitScheduledUpcomingOffersUpdate(offerState.candidates.map((candidate) => candidate.driverId));
+}
+
+async function broadcastScheduledRideOfferStage2(ride) {
+  if (!ride || !ride.startLatLon || !ride.pickupTime) return;
+  if (scheduledOffers.has(ride.id)) return;
+
+  const existingCooldown = scheduledOfferCooldowns.get(ride.id);
+  if (existingCooldown && existingCooldown > Date.now()) {
+    return;
+  }
+
+  const candidates = await buildScheduledStage2Candidates(ride);
+  if (!candidates.length) {
+    console.log(`No eligible stage2 drivers for scheduled ride ${ride.id}`);
+    return;
+  }
+
+  const nowMs = Date.now();
+  const rideData = {
+    ...buildRidePayload(ride),
+    scheduledOfferOnly: true,
+    stage: 2
+  };
+
+  const offerState = {
+    stage: 2,
+    rideId: ride.id,
+    pickupTime: ride.pickupTime,
+    vehicleTypeId: ride.vehicleTypeId,
+    candidates,
+    accepted: new Map(),
+    rejected: new Set(),
+    createdAt: nowMs,
+    timeoutMs: SCHEDULED_STAGE2_OFFER_TIMEOUT_MS,
+    timerId: null,
+    rideData
+  };
+
+  scheduledOffers.set(ride.id, offerState);
+
+  try {
+    await prisma.ride.update({
+      where: { id: ride.id },
+      data: {
+        driverQueue: Array.from(new Set(candidates.map((c) => c.driverId))),
+        driverId: null,
+        car: null
+      }
+    });
+  } catch (error) {
+    console.warn(`Failed to persist stage2 offer queue for ride ${ride.id}:`, error);
+  }
+
+  emitScheduledUpcomingOffersUpdate(candidates.map((candidate) => candidate.driverId));
+
+  for (const candidate of candidates) {
+    try {
+      await sendPushToDriver(
+        candidate.driverId,
+        'Scheduled ride request',
+        'A scheduled ride request is available. Please answer Yes/No within 3 minutes.',
+        {
+          type: 'scheduledRideOffer',
+          stage: 2,
+          rideId: ride.id,
+          expiresAt: new Date(nowMs + SCHEDULED_STAGE2_OFFER_TIMEOUT_MS).toISOString(),
+          pickupTime: ride.pickupTime ? new Date(ride.pickupTime).toISOString() : null
+        }
+      );
+    } catch (error) {
+      console.error(`Error sending stage2 scheduled push to driver ${candidate.driverId}:`, error);
+    }
+  }
+
+  offerState.timerId = setTimeout(() => {
+    finalizeScheduledStage2Offer(ride.id).catch((error) => {
+      console.error(`Error finalizing stage2 scheduled offer for ride ${ride.id}:`, error);
+    });
+  }, SCHEDULED_STAGE2_OFFER_TIMEOUT_MS);
 }
 
 async function assignScheduledRideFromQueue(ride) {
@@ -2447,6 +3387,37 @@ async function checkForNewRides() {
           minutesToPickup <= SCHEDULED_OFFER_WINDOW_MINUTES &&
           minutesToPickup > scheduledDispatchLeadMinutes;
 
+        const withinScheduledStage2Window =
+          minutesToPickup !== null &&
+          minutesToPickup > SCHEDULED_OFFER_WINDOW_MINUTES &&
+          minutesToPickup <= SCHEDULED_STAGE2_MAX_WINDOW_MINUTES;
+
+        const withinScheduledStage3Window =
+          minutesToPickup !== null &&
+          minutesToPickup > SCHEDULED_STAGE2_MAX_WINDOW_MINUTES;
+
+        if (withinScheduledStage3Window) {
+          if (scheduledOffers.has(ride.id)) {
+            continue;
+          }
+
+          if (!ride.driverId) {
+            await broadcastScheduledRideOfferStage3(ride);
+          }
+          continue;
+        }
+
+        if (withinScheduledStage2Window) {
+          if (scheduledOffers.has(ride.id)) {
+            continue;
+          }
+
+          if (!ride.driverId) {
+            await broadcastScheduledRideOfferStage2(ride);
+          }
+          continue;
+        }
+
         if (withinScheduledOfferWindow) {
           if (scheduledOffers.has(ride.id)) {
             continue;
@@ -3013,6 +3984,37 @@ app.prepare().then(() => {
             return;
           }
 
+          if (Number(scheduledOffer.stage) === 3) {
+            const activeDriverId = Number(scheduledOffer.activeDriverId);
+            if (!Number.isFinite(activeDriverId) || activeDriverId !== driverId) {
+              socket.emit('rideAcceptFailed', {
+                rideId: data.rideId,
+                reason: 'Scheduled offer is currently assigned to another driver',
+                stage: 3
+              });
+              return;
+            }
+          }
+
+          const scheduledCheckAt = scheduledOffer.pickupTime
+            ? new Date(scheduledOffer.pickupTime)
+            : new Date();
+          const scheduledEligibility = await canDriverReceiveRide(prisma, driverId, {
+            strict: true,
+            now: scheduledCheckAt
+          });
+          if (!scheduledEligibility?.eligible) {
+            socket.emit('rideAcceptFailed', {
+              rideId: data.rideId,
+              reason: 'Driver is outside configured work schedule'
+            });
+            return;
+          }
+
+          if (scheduledOffer.rejected?.has?.(driverId)) {
+            scheduledOffer.rejected.delete(driverId);
+          }
+
           scheduledOffer.accepted.set(driverId, {
             driverId,
             distanceKm: candidate.distanceKm,
@@ -3022,7 +4024,12 @@ app.prepare().then(() => {
             car: candidate.car,
             chainPriority: Boolean(candidate.chainPriority),
             chainGapMinutes: candidate.chainGapMinutes ?? null,
-            chainEtaMinutes: candidate.chainEtaMinutes ?? null
+            chainEtaMinutes: candidate.chainEtaMinutes ?? null,
+            threshold: Number.isFinite(candidate.threshold) ? candidate.threshold : null,
+            pricePerHour: Number.isFinite(candidate.pricePerHour) ? candidate.pricePerHour : null,
+            totalMinutes: Number.isFinite(candidate.totalMinutes) ? candidate.totalMinutes : null,
+            stage: Number(scheduledOffer.stage || 1),
+            acceptedAt: Date.now()
           });
 
           try {
@@ -3042,8 +4049,17 @@ app.prepare().then(() => {
             console.error(`Failed to persist scheduled acceptance for ride ${data.rideId}:`, error);
           }
 
-          socket.emit('scheduledOfferAcknowledged', { rideId: data.rideId });
+          socket.emit('scheduledOfferAcknowledged', {
+            rideId: data.rideId,
+            stage: Number(scheduledOffer.stage || 1)
+          });
           emitScheduledUpcomingOffersUpdate([driverId]);
+
+          if (Number(scheduledOffer.stage) === 3) {
+            advanceScheduledStage3Offer(data.rideId, 'accepted').catch((error) => {
+              console.error(`Error advancing stage3 offer after acceptance for ride ${data.rideId}:`, error);
+            });
+          }
           return;
         }
 
@@ -3114,26 +4130,55 @@ app.prepare().then(() => {
           }
         }
 
-        // Assign ride to driver
-        await prisma.ride.update({
-          where: { id: data.rideId },
-          data: {
-            driverId,
-            car: driver.car || null,
-            status: 'DISPATCHED',
-            acceptedAt: new Date()
-          }
-        });
+        // Assign ride + driver atomically to reduce race conditions
+        const txNow = new Date();
+        try {
+          await prisma.$transaction(async (tx) => {
+            const rideUpdated = await tx.ride.updateMany({
+              where: {
+                id: data.rideId,
+                status: 'CONFIRMED',
+                driverId: null
+              },
+              data: {
+                driverId,
+                car: driver.car || null,
+                status: 'DISPATCHED',
+                acceptedAt: txNow
+              }
+            });
 
-        // Update driver status
-        await prisma.comDriver.update({
-          where: { id: driverId },
-          data: {
-            currentRideId: data.rideId,
-            rideAccepted: 1,
-            isBusy: true
+            if (rideUpdated.count !== 1) {
+              throw new Error('RIDE_NOT_AVAILABLE');
+            }
+
+            const driverUpdated = await tx.comDriver.updateMany({
+              where: {
+                id: driverId,
+                isOnline: true,
+                isBusy: false,
+                currentRideId: null,
+                OR: [{ bannedUntil: null }, { bannedUntil: { lte: txNow } }]
+              },
+              data: {
+                currentRideId: data.rideId,
+                rideAccepted: 1,
+                isBusy: true
+              }
+            });
+
+            if (driverUpdated.count !== 1) {
+              throw new Error('DRIVER_NOT_AVAILABLE');
+            }
+          });
+        } catch (txError) {
+          const txMessage = String(txError?.message || '');
+          if (txMessage === 'RIDE_NOT_AVAILABLE' || txMessage === 'DRIVER_NOT_AVAILABLE') {
+            socket.emit('rideAcceptFailed', { rideId: data.rideId, reason: 'Ride not available' });
+            return;
           }
-        });
+          throw txError;
+        }
 
         // Clear active offer
         global.activeOffers.delete(data.rideId);
@@ -3232,8 +4277,31 @@ app.prepare().then(() => {
       try {
         const scheduledOffer = scheduledOffers.get(data.rideId);
         if (scheduledOffer) {
+          const isStage3 = Number(scheduledOffer.stage) === 3;
+          if (isStage3) {
+            const activeDriverId = Number(scheduledOffer.activeDriverId);
+            if (Number.isFinite(activeDriverId) && activeDriverId > 0 && activeDriverId !== driverId) {
+              return;
+            }
+          }
+
+          if (scheduledOffer.accepted?.has?.(driverId)) {
+            scheduledOffer.accepted.delete(driverId);
+          }
           scheduledOffer.rejected.add(driverId);
-          socket.emit('rideOfferRejected', { rideId: data.rideId });
+
+          if (isStage3) {
+            scheduledOffer.currentIndex = Math.max(Number(scheduledOffer.currentIndex || 0) + 1, 1);
+            scheduledOffer.activeDriverId = null;
+            advanceScheduledStage3Offer(data.rideId, 'rejected').catch((error) => {
+              console.error(`Error advancing stage3 offer after rejection for ride ${data.rideId}:`, error);
+            });
+          }
+
+          socket.emit('rideOfferRejected', {
+            rideId: data.rideId,
+            stage: Number(scheduledOffer.stage || 1)
+          });
           emitScheduledUpcomingOffersUpdate([driverId]);
           return;
         }
@@ -3328,8 +4396,31 @@ app.prepare().then(() => {
       try {
         const scheduledOffer = scheduledOffers.get(data.rideId);
         if (scheduledOffer) {
+          const isStage3 = Number(scheduledOffer.stage) === 3;
+          if (isStage3) {
+            const activeDriverId = Number(scheduledOffer.activeDriverId);
+            if (Number.isFinite(activeDriverId) && activeDriverId > 0 && activeDriverId !== driverId) {
+              return;
+            }
+          }
+
+          if (scheduledOffer.accepted?.has?.(driverId)) {
+            scheduledOffer.accepted.delete(driverId);
+          }
           scheduledOffer.rejected.add(driverId);
-          socket.emit('rideOfferTimeout', { rideId: data.rideId });
+
+          if (isStage3) {
+            scheduledOffer.currentIndex = Math.max(Number(scheduledOffer.currentIndex || 0) + 1, 1);
+            scheduledOffer.activeDriverId = null;
+            advanceScheduledStage3Offer(data.rideId, 'timeout').catch((error) => {
+              console.error(`Error advancing stage3 offer after timeout for ride ${data.rideId}:`, error);
+            });
+          }
+
+          socket.emit('rideOfferTimeout', {
+            rideId: data.rideId,
+            stage: Number(scheduledOffer.stage || 1)
+          });
           emitScheduledUpcomingOffersUpdate([driverId]);
           return;
         }

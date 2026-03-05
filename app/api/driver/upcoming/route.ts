@@ -15,6 +15,19 @@ function getScheduledOfferExpiryMs(offerState: any) {
   return createdAtMs + timeoutMs;
 }
 
+function getScheduledOfferIsEligibleForDriver(offerState: any, driverId: number) {
+  if (!offerState || !Number.isFinite(Number(driverId))) return false;
+
+  if (Number(offerState?.stage) === 3) {
+    const activeDriverId = Number(offerState?.activeDriverId);
+    return Number.isFinite(activeDriverId) && activeDriverId > 0 && activeDriverId === Number(driverId);
+  }
+
+  return Array.isArray(offerState?.candidates)
+    ? offerState.candidates.some((candidate: any) => Number(candidate?.driverId) === Number(driverId))
+    : false;
+}
+
 function buildPendingScheduledOffersForDriver(driverId: number) {
   const offersMap = (global as any).scheduledOffers;
   if (!(offersMap instanceof Map)) {
@@ -27,7 +40,7 @@ function buildPendingScheduledOffersForDriver(driverId: number) {
   for (const offerState of offersMap.values()) {
     if (!offerState || !Array.isArray(offerState.candidates)) continue;
 
-    const isCandidate = offerState.candidates.some((candidate: any) => Number(candidate?.driverId) === driverId);
+    const isCandidate = getScheduledOfferIsEligibleForDriver(offerState, driverId);
     if (!isCandidate) continue;
 
     if (offerState.accepted?.has?.(driverId)) continue;
@@ -38,6 +51,7 @@ function buildPendingScheduledOffersForDriver(driverId: number) {
 
     pending.push({
       rideId: Number(offerState.rideId),
+      stage: Number(offerState.stage || 1),
       pickupTime: offerState.pickupTime || null,
       createdAt: Number(offerState.createdAt || now),
       timeoutMs: Number(offerState.timeoutMs || SCHEDULED_OFFER_TIMEOUT_MS),

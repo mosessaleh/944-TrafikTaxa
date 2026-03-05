@@ -51,12 +51,13 @@ export async function GET(request: Request) {
       console.log('Available-vehicles: Using strategy with params:', { pickupLat, pickupLon, vehicleTypeId });
       console.log('Available-vehicles: Using strategy with params:', { pickupLat, pickupLon, vehicleTypeId });
       try {
-        const strategyResponse = await fetch(
+      const strategyResponse = await fetch(
           `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
             },
             body: JSON.stringify({
               pickupLat: parseFloat(pickupLat),
@@ -68,6 +69,12 @@ export async function GET(request: Request) {
         );
 
         console.log('Available-vehicles: Strategy response status:', strategyResponse.status);
+        if (strategyResponse.status === 403) {
+          return NextResponse.json({
+            ok: false,
+            error: 'Vehicle selection strategy unavailable (internal authorization failed)'
+          }, { status: 500 });
+        }
         if (strategyResponse.ok) {
           const strategyData = await strategyResponse.json();
           console.log('Available-vehicles: Strategy data:', { ok: strategyData.ok, vehiclesCount: strategyData.vehicles?.length });

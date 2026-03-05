@@ -598,7 +598,10 @@ export async function POST(request: NextRequest) {
               try {
                 const vsResp = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
+                  },
                   body: JSON.stringify({
                     pickupLat: startLatLon.lat,
                     pickupLon: startLatLon.lon,

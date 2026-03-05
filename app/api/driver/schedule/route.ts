@@ -344,6 +344,8 @@ export async function POST(req: NextRequest) {
 
       let startMinute: number | null = null;
       let endMinute: number | null = null;
+      let customStartMinute: number | null = null;
+      let customEndMinute: number | null = null;
       if (type === 'CUSTOM') {
         startMinute = Number.isInteger(body?.startMinute)
           ? Number(body.startMinute)
@@ -352,13 +354,31 @@ export async function POST(req: NextRequest) {
           ? Number(body.endMinute)
           : parseTimeToMinute(String(body?.end || '').trim());
 
-        if (!Number.isInteger(startMinute) || !Number.isInteger(endMinute) || startMinute === endMinute) {
+        const parsedStartMinute = startMinute;
+        const parsedEndMinute = endMinute;
+
+        if (parsedStartMinute === null || parsedEndMinute === null) {
           return buildError('CUSTOM exception requires valid start/end values');
         }
 
+        if (
+          !Number.isInteger(parsedStartMinute) ||
+          !Number.isInteger(parsedEndMinute) ||
+          parsedStartMinute < 0 ||
+          parsedStartMinute > 1439 ||
+          parsedEndMinute < 0 ||
+          parsedEndMinute > 1439 ||
+          parsedStartMinute === parsedEndMinute
+        ) {
+          return buildError('CUSTOM exception requires valid start/end values');
+        }
+
+        customStartMinute = Number(parsedStartMinute);
+        customEndMinute = Number(parsedEndMinute);
+
         const preferences = await getDriverSchedulePreferences(prisma, driver.id);
         const maxDailyMinutes = Math.min(11 * 60, Number(preferences?.maxDailyMinutes) || 11 * 60);
-        const durationMinutes = windowDurationMinutes(startMinute as number, endMinute as number);
+        const durationMinutes = windowDurationMinutes(customStartMinute, customEndMinute);
         if (durationMinutes > maxDailyMinutes) {
           return buildError(`CUSTOM exception exceeds daily maximum (${maxDailyMinutes} minutes)`);
         }
@@ -367,8 +387,8 @@ export async function POST(req: NextRequest) {
       await upsertDriverScheduleException(prisma, driver.id, {
         date,
         type,
-        startMinute,
-        endMinute,
+        startMinute: type === 'CUSTOM' ? customStartMinute : null,
+        endMinute: type === 'CUSTOM' ? customEndMinute : null,
         note: body?.note || null
       });
 
