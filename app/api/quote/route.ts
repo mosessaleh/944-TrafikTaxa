@@ -21,6 +21,17 @@ const Schema = z.object({
   scheduled: z.boolean().optional()
 });
 
+function normalizeBooleanFlag(value: unknown, fallback = true) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
 export async function POST(req: Request){
   try{ await limitOrThrow('quote:'+clientIpKey(req), { points: 8, durationSec: 60 }); }
   catch(e:any){ return NextResponse.json({ ok:false, error:'Too many requests, try again later.' }, { status: e?.status||429 }); }
@@ -52,6 +63,32 @@ export async function POST(req: Request){
     }
     const at = new Date(parsed.when);
     const isScheduled = Boolean(parsed.scheduled);
+
+    const bookingModeRows = await prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
+      'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
+    ).catch(() => []);
+
+    const bookingMode = Array.isArray(bookingModeRows) && bookingModeRows.length > 0
+      ? bookingModeRows[0]
+      : null;
+
+    const allowImmediateBooking = normalizeBooleanFlag(bookingMode?.allowImmediateBooking, true);
+    const allowScheduledBooking = normalizeBooleanFlag(bookingMode?.allowScheduledBooking, true);
+
+    if (!isScheduled && !allowImmediateBooking) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Immediate booking is currently disabled by admin'
+      }, { status: 403 });
+    }
+
+    if (isScheduled && !allowScheduledBooking) {
+      return NextResponse.json({
+        ok: false,
+        error: 'Scheduled booking is currently disabled by admin'
+      }, { status: 403 });
+    }
+
     const priceDetails = await computePriceWithDetails(distanceKm, durationMin, at, parsed.vehicleTypeId, { isScheduled });
 
     if (isScheduled) {

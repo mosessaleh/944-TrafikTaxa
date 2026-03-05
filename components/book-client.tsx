@@ -29,6 +29,8 @@ const MIN_SCHEDULED_LEAD_MS = 60 * 60 * 1000;
 
 type PublicSettings = {
   minScheduledLeadMinutes?: number;
+  allowImmediateBooking?: boolean;
+  allowScheduledBooking?: boolean;
 };
 
 function pad2(value: number) {
@@ -247,6 +249,19 @@ export default function BookClient(){
     fetch(url).then(r => r.json()).then(j => j?.ok ? j.settings || null : null)
   );
   const publicSettings: PublicSettings | null = settingsData || null;
+  const allowImmediateBooking = publicSettings?.allowImmediateBooking !== false;
+  const allowScheduledBooking = publicSettings?.allowScheduledBooking !== false;
+  const selectedBookingModeEnabled = whenType === 'now' ? allowImmediateBooking : allowScheduledBooking;
+
+  useEffect(() => {
+    if (whenType === 'now' && !allowImmediateBooking && allowScheduledBooking) {
+      setWhenType('later');
+      return;
+    }
+    if (whenType === 'later' && !allowScheduledBooking && allowImmediateBooking) {
+      setWhenType('now');
+    }
+  }, [whenType, allowImmediateBooking, allowScheduledBooking]);
 
   useEffect(() => {
     if (whenType !== 'later') return;
@@ -763,8 +778,21 @@ export default function BookClient(){
 
   useEffect(() => {
     if(qTimer.current) clearTimeout(qTimer.current);
-    const ready = bothSelected && !!vehicleId;
-    if(!ready){ setQuote(null); setQErr(null); return; }
+    const hasEnoughDataForPricing = bothSelected && !!vehicleId;
+    const ready = hasEnoughDataForPricing && selectedBookingModeEnabled;
+    if(!ready){
+      setQuote(null);
+      if (hasEnoughDataForPricing && !selectedBookingModeEnabled) {
+        setQErr(
+          whenType === 'now'
+            ? 'Immediate booking is currently disabled by admin.'
+            : 'Scheduled booking is currently disabled by admin.'
+        );
+      } else {
+        setQErr(null);
+      }
+      return;
+    }
 
     qTimer.current = setTimeout(async() => {
       try{
@@ -792,7 +820,7 @@ export default function BookClient(){
       }
     }, 200);
     return () => { if(qTimer.current) clearTimeout(qTimer.current); };
-  }, [bothSelected, quotePayload, vehicleId]);
+  }, [bothSelected, quotePayload, vehicleId, selectedBookingModeEnabled, whenType]);
 
   // Calculate nearest vehicle arrival time when pickup is selected
   useEffect(() => {
@@ -1066,6 +1094,15 @@ export default function BookClient(){
   async function handleBookAndConfirm(){
     if(!quote || !me) return;
 
+    if ((whenType === 'now' && !allowImmediateBooking) || (whenType === 'later' && !allowScheduledBooking)) {
+      alert(
+        whenType === 'now'
+          ? 'Immediate booking is currently disabled by admin.'
+          : 'Scheduled booking is currently disabled by admin.'
+      );
+      return;
+    }
+
     setBookingLoading(true);
     try{
       const bookingData = {
@@ -1272,6 +1309,42 @@ export default function BookClient(){
                 <h3 className="text-sm font-semibold text-rose-800">{t('book.auth_error')}</h3>
                 <p className="text-xs sm:text-sm text-rose-700 mt-1">
                   {t('book.auth_error_desc')}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!allowImmediateBooking && !allowScheduledBooking && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 flex items-start gap-3">
+              <div className="text-2xl leading-none">🛑</div>
+              <div>
+                <h3 className="text-sm font-semibold text-rose-800">Bookings are temporarily unavailable</h3>
+                <p className="text-xs sm:text-sm text-rose-700 mt-1">
+                  Immediate and scheduled bookings are currently disabled by admin.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {allowImmediateBooking && !allowScheduledBooking && whenType === 'later' && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+              <div className="text-2xl leading-none">⚠️</div>
+              <div>
+                <h3 className="text-sm font-semibold text-amber-800">Scheduled booking is disabled</h3>
+                <p className="text-xs sm:text-sm text-amber-700 mt-1">
+                  Please switch to immediate booking.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!allowImmediateBooking && allowScheduledBooking && whenType === 'now' && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+              <div className="text-2xl leading-none">⚠️</div>
+              <div>
+                <h3 className="text-sm font-semibold text-amber-800">Immediate booking is disabled</h3>
+                <p className="text-xs sm:text-sm text-amber-700 mt-1">
+                  Please switch to scheduled booking.
                 </p>
               </div>
             </div>
@@ -1543,8 +1616,8 @@ export default function BookClient(){
                         onChange={e => setWhenType(e.target.value as 'now' | 'later')}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/50 transition-all duration-150 hover:shadow-md text-sm"
                       >
-                        <option value="now">🕐 {language === 'dk' ? 'Nu' : 'Now'}</option>
-                        <option value="later">📅 {t('book.schedule_later')}</option>
+                        <option value="now" disabled={!allowImmediateBooking}>🕐 {language === 'dk' ? 'Nu' : 'Now'}</option>
+                        <option value="later" disabled={!allowScheduledBooking}>📅 {t('book.schedule_later')}</option>
                       </select>
                     </div>
                     {whenType === 'later' && (
@@ -1629,6 +1702,8 @@ export default function BookClient(){
                         qLoading ||
                         !bothSelected ||
                         !vehicleId ||
+                        !selectedBookingModeEnabled ||
+                        (!allowImmediateBooking && !allowScheduledBooking) ||
                         bookingLoading ||
                         (longWaitWarning.show && !longWaitAccepted) ||
                         !pickupSel?.lat ||
@@ -1645,6 +1720,8 @@ export default function BookClient(){
                         qLoading ||
                         !bothSelected ||
                         !vehicleId ||
+                        !selectedBookingModeEnabled ||
+                        (!allowImmediateBooking && !allowScheduledBooking) ||
                         bookingLoading
                           ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                           : 'bg-slate-900 text-white shadow-md hover:shadow-lg hover:bg-black'

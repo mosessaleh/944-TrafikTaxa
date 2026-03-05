@@ -30,7 +30,9 @@ const Schema = z.object({
   immediateCancellationFee: z.number().min(0),
   minScheduledLeadMinutes: z.number().int().min(0).max(90 * 24 * 60),
   minScheduledPrice: z.number().int().min(0),
-  minImmediatePrice: z.number().int().min(0)
+  minImmediatePrice: z.number().int().min(0),
+  allowImmediateBooking: z.boolean(),
+  allowScheduledBooking: z.boolean()
 });
 
 const PaymentMethodSchema = z.object({
@@ -66,8 +68,19 @@ const SchedulePolicySchema = z.object({
   }
 });
 
-const SETTINGS_SCHEMA_VERSION = 1;
+const SETTINGS_SCHEMA_VERSION = 2;
 let ensureSettingsSchemaPromise: Promise<void> | null = null;
+
+function normalizeBooleanFlag(value: unknown, fallback = true) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+}
 
 async function ensureSettingsColumns() {
   const globalSchemaVersionKey = '__adminSettingsSchemaVersion';
@@ -86,7 +99,13 @@ async function ensureSettingsColumns() {
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE()
           AND TABLE_NAME = 'Settings'
-          AND COLUMN_NAME IN ('minScheduledLeadMinutes', 'minScheduledPrice', 'minImmediatePrice')
+          AND COLUMN_NAME IN (
+            'minScheduledLeadMinutes',
+            'minScheduledPrice',
+            'minImmediatePrice',
+            'allowImmediateBooking',
+            'allowScheduledBooking'
+          )
       `
     );
 
@@ -108,6 +127,14 @@ async function ensureSettingsColumns() {
       {
         name: 'minImmediatePrice',
         sql: 'ALTER TABLE `Settings` ADD COLUMN `minImmediatePrice` INT NOT NULL DEFAULT 0'
+      },
+      {
+        name: 'allowImmediateBooking',
+        sql: 'ALTER TABLE `Settings` ADD COLUMN `allowImmediateBooking` TINYINT(1) NOT NULL DEFAULT 1'
+      },
+      {
+        name: 'allowScheduledBooking',
+        sql: 'ALTER TABLE `Settings` ADD COLUMN `allowScheduledBooking` TINYINT(1) NOT NULL DEFAULT 1'
       }
     ].filter((column) => !existingColumns.has(column.name));
 
@@ -140,7 +167,7 @@ export async function GET(){
   try {
     await ensureSettingsColumns();
 
-    const [s, schedulePolicy, paymentMethods] = await Promise.all([
+    const [s, schedulePolicy, paymentMethods, bookingModeRows] = await Promise.all([
       prisma.settings.upsert({
         where: { id: 1 },
         update: {},
@@ -169,12 +196,31 @@ export async function GET(){
         // Keep settings page working even if PaymentMethod table/client is unavailable
         console.warn('[admin/settings] payment methods unavailable:', error?.message || error);
         return [];
-      })
+      }),
+      prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
+        'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
+      ).catch(() => [])
     ]);
+
+    const bookingMode = Array.isArray(bookingModeRows) && bookingModeRows.length > 0
+      ? bookingModeRows[0]
+      : null;
+
+    const settings = {
+      ...s,
+      allowImmediateBooking: normalizeBooleanFlag(
+        bookingMode?.allowImmediateBooking ?? (s as any)?.allowImmediateBooking,
+        true
+      ),
+      allowScheduledBooking: normalizeBooleanFlag(
+        bookingMode?.allowScheduledBooking ?? (s as any)?.allowScheduledBooking,
+        true
+      )
+    };
 
     return NextResponse.json({
       ok:true,
-      settings: s,
+      settings,
       paymentMethods,
       schedulePolicy,
       legalMaxDailyMinutes: LEGAL_MAX_DAILY_MINUTES
@@ -206,12 +252,32 @@ export async function POST(req: Request){
     // Handle settings update
     if (body.settings) {
       const settingsData = Schema.parse(body.settings);
+      const {
+        allowImmediateBooking,
+        allowScheduledBooking,
+        ...coreSettingsData
+      } = settingsData;
+
       const s = await prisma.settings.upsert({
         where: { id: 1 },
-        update: settingsData,
-        create: settingsData
+        update: coreSettingsData,
+        create: coreSettingsData
       });
-      return NextResponse.json({ ok:true, settings: s });
+
+      await prisma.$executeRawUnsafe(
+        'UPDATE `Settings` SET `allowImmediateBooking` = ?, `allowScheduledBooking` = ? WHERE `id` = 1',
+        allowImmediateBooking ? 1 : 0,
+        allowScheduledBooking ? 1 : 0
+      );
+
+      return NextResponse.json({
+        ok:true,
+        settings: {
+          ...s,
+          allowImmediateBooking,
+          allowScheduledBooking
+        }
+      });
     }
 
     // Handle payment method update

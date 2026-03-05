@@ -39,6 +39,8 @@ export default function AdminSettingsClient(){
     const payload:any = Object.fromEntries(fd.entries());
     // cast numbers
     ['dayBase','dayPerKm','dayPerMin','nightBase','nightPerKm','nightPerMin','scheduledCancellationFee1','scheduledCancellationFee2','scheduledCancellationFee3','immediateCancellationFee','discountPercentage','maxDiscountAmount','minScheduledLeadMinutes','minScheduledPrice','minImmediatePrice'].forEach(k=> payload[k]=Number(payload[k]));
+    payload.allowImmediateBooking = String(payload.allowImmediateBooking) === 'true';
+    payload.allowScheduledBooking = String(payload.allowScheduledBooking) === 'true';
     // Send in the expected shape for the API: { settings: { ... } }
     const res = await f('/api/admin/settings',{
       method:'POST',
@@ -186,7 +188,7 @@ export default function AdminSettingsClient(){
               icon={<Clock size={18} className="text-gray-500" />}
             >
               <div className="bg-violet-50 border border-violet-200 rounded-lg p-4">
-                <div className="grid md:grid-cols-3 gap-4">
+                <div className="grid md:grid-cols-2 xl:grid-cols-5 gap-4">
                   <Field label="Min scheduled lead (minutes)" icon={<Clock size={14} />}>
                       <input name="minScheduledLeadMinutes" type="number" step="1" min="0" defaultValue={s.minScheduledLeadMinutes ?? 60} className={inputClass} />
                   </Field>
@@ -196,9 +198,29 @@ export default function AdminSettingsClient(){
                   <Field label="Min immediate fare (DKK, enforced)" icon={<DollarSign size={14} />}>
                       <input name="minImmediatePrice" type="number" step="1" min="0" defaultValue={s.minImmediatePrice ?? 0} className={inputClass} />
                   </Field>
+                  <Field label="Immediate booking" icon={<Car size={14} />}>
+                      <select
+                        name="allowImmediateBooking"
+                        defaultValue={String(Boolean(s.allowImmediateBooking ?? true))}
+                        className={inputClass}
+                      >
+                        <option value="true">Enabled</option>
+                        <option value="false">Disabled</option>
+                      </select>
+                  </Field>
+                  <Field label="Scheduled booking" icon={<Clock size={14} />}>
+                      <select
+                        name="allowScheduledBooking"
+                        defaultValue={String(Boolean(s.allowScheduledBooking ?? true))}
+                        className={inputClass}
+                      >
+                        <option value="true">Enabled</option>
+                        <option value="false">Disabled</option>
+                      </select>
+                  </Field>
                 </div>
                 <p className="text-xs text-violet-700 mt-3">
-                  Scheduled bookings must respect minimum lead time and minimum fare. Immediate bookings are automatically raised to the configured minimum fare.
+                  Scheduled bookings must respect minimum lead time and minimum fare. Immediate bookings are automatically raised to the configured minimum fare. You can also fully enable/disable immediate and scheduled booking modes.
                 </p>
               </div>
             </SectionCard>

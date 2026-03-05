@@ -14,6 +14,8 @@ import { notifyBookingConfirmedUnified } from '@/lib/notification-service';
 type SettingsMinControls = {
   minScheduledLeadMinutes: number;
   minScheduledPrice: number;
+  allowImmediateBooking: boolean;
+  allowScheduledBooking: boolean;
 };
 
 function normalizeMinInt(value: unknown, fallback = 0) {
@@ -22,11 +24,37 @@ function normalizeMinInt(value: unknown, fallback = 0) {
   return Math.max(0, Math.round(parsed));
 }
 
+function normalizeBooleanFlag(value: unknown, fallback = true) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
 async function getSettingsMinimumControls(): Promise<SettingsMinControls> {
-  const settings = await prisma.settings.findUnique({ where: { id: 1 } });
+  const [settings, bookingModeRows] = await Promise.all([
+    prisma.settings.findUnique({ where: { id: 1 } }),
+    prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
+      'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
+    ).catch(() => [])
+  ]);
+
+  const bookingMode = Array.isArray(bookingModeRows) && bookingModeRows.length > 0
+    ? bookingModeRows[0]
+    : null;
+
+  const allowImmediateBookingRaw = bookingMode?.allowImmediateBooking ?? (settings as any)?.allowImmediateBooking;
+  const allowScheduledBookingRaw = bookingMode?.allowScheduledBooking ?? (settings as any)?.allowScheduledBooking;
+
   return {
     minScheduledLeadMinutes: normalizeMinInt((settings as any)?.minScheduledLeadMinutes, 60),
-    minScheduledPrice: normalizeMinInt((settings as any)?.minScheduledPrice, 0)
+    minScheduledPrice: normalizeMinInt((settings as any)?.minScheduledPrice, 0),
+    allowImmediateBooking: normalizeBooleanFlag(allowImmediateBookingRaw, true),
+    allowScheduledBooking: normalizeBooleanFlag(allowScheduledBookingRaw, true)
   };
 }
 
@@ -300,6 +328,26 @@ export async function POST(request: NextRequest) {
 
     const validatedData = createBookingSchema.parse(sanitizedData);
     const settingsMinControls = await getSettingsMinimumControls();
+
+    if (!validatedData.scheduled && !settingsMinControls.allowImmediateBooking) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Immediate booking is currently disabled by admin'
+        },
+        { status: 403 }
+      );
+    }
+
+    if (validatedData.scheduled && !settingsMinControls.allowScheduledBooking) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Scheduled booking is currently disabled by admin'
+        },
+        { status: 403 }
+      );
+    }
 
     if (validatedData.scheduled) {
       const pickupDate = new Date(validatedData.pickupTime);
