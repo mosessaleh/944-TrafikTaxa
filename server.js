@@ -1283,7 +1283,9 @@ async function buildScheduledStage2Candidates(ride) {
     if (!resolvedVehicleTypeId || !allowedTypes.includes(resolvedVehicleTypeId)) continue;
 
     const schedule = await canDriverReceiveRide(prisma, driver.id, {
-      strict: true,
+      // Stage 2 targets future scheduled rides; validate shift window at pickup time
+      // without applying current worked-minutes caps to future timestamps.
+      strict: false,
       now: stageAt
     });
     if (!schedule?.eligible) continue;
@@ -1428,7 +1430,9 @@ async function buildScheduledStage3Candidates(ride) {
     if (!resolvedVehicleTypeId || !allowedTypes.includes(resolvedVehicleTypeId)) continue;
 
     const schedule = await canDriverReceiveRide(prisma, driver.id, {
-      strict: true,
+      // Stage 3 (>24h) should check schedule window alignment at pickup time,
+      // not strict current accumulated limits against a future timestamp.
+      strict: false,
       now: rideAt
     });
     if (!schedule?.eligible) {
@@ -1785,7 +1789,8 @@ async function finalizeScheduledStage2Offer(rideId) {
       if (driver.bannedUntil && driver.bannedUntil > now) continue;
 
       const schedule = await canDriverReceiveRide(prisma, candidate.driverId, {
-        strict: true,
+        // Final stage-2 selection still validates pickup-time schedule window only.
+        strict: false,
         now: scheduleAt
       });
       if (!schedule?.eligible) continue;
@@ -4000,7 +4005,8 @@ app.prepare().then(() => {
             ? new Date(scheduledOffer.pickupTime)
             : new Date();
           const scheduledEligibility = await canDriverReceiveRide(prisma, driverId, {
-            strict: true,
+            // Scheduled offer acceptance validates pickup-time window membership.
+            strict: false,
             now: scheduledCheckAt
           });
           if (!scheduledEligibility?.eligible) {
