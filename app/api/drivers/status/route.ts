@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/auth';
 
 export async function GET() {
   try {
+    try {
+      await requireAdmin();
+    } catch (authError: any) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: authError?.status || 401 });
+    }
+
     // Get all drivers with their status
     const drivers = await prisma.comDriver.findMany({
       select: {

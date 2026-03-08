@@ -5,6 +5,9 @@ import { chargeSavedPaymentMethod, PaymentResult } from '@/lib/payment-processor
 import { notifyUserInvoiceReady } from '@/lib/notify';
 import { getSocketServer } from '@/lib/socket-server';
 import { sendPushToUser } from '@/lib/notification-service';
+import { getAuthSecret } from '@/lib/auth';
+
+const JWT_SECRET = getAuthSecret();
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -22,7 +25,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     let driver;
     try {
-      const decoded: any = verify(token, process.env.AUTH_SECRET || 'change_me_dev_secret');
+      const decoded: any = verify(token, JWT_SECRET);
 
       if (!decoded.driverId || decoded.type !== 'driver') {
         return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 });
@@ -125,35 +128,35 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 14); // 14 days payment term
 
-      const invoice = await prisma.invoice.create({
-        data: {
-          invoiceNumber,
-          userId: ride.userId,
-          rideId: ride.id,
-          dueDate,
-          paymentStatus: paymentResult?.success ? 'PAID' : 'UNPAID',
-          paymentMethod: ride.paymentMethod || 'card',
-          paymentRef: paymentResult?.transactionId,
-          paymentDate: paymentResult?.success ? new Date() : null,
-          paymentAmount: ride.price / 100, // Convert from øre to DKK
-        }
-      });
+        const invoice = await prisma.invoice.create({
+          data: {
+            invoiceNumber,
+            userId: ride.userId,
+            rideId: ride.id,
+            dueDate,
+            paymentStatus: paymentResult?.success ? 'PAID' : 'UNPAID',
+            paymentMethod: ride.paymentMethod || 'card',
+            paymentRef: paymentResult?.transactionId,
+            paymentDate: paymentResult?.success ? new Date() : null,
+            paymentAmount: ride.price,
+          }
+        });
 
       // Notify user that invoice is ready
       if (ride.user.email) {
         try {
-          await notifyUserInvoiceReady(ride.user.email, ride.user.firstName, {
-            bookingId: ride.id,
-            price: (ride.price / 100).toFixed(2)
-          }, invoice.id);
-        } catch (notifyError) {
-          console.error('Failed to notify user about invoice:', notifyError);
+            await notifyUserInvoiceReady(ride.user.email, ride.user.firstName, {
+              bookingId: ride.id,
+              price: Number(ride.price).toFixed(2)
+            }, invoice.id);
+          } catch (notifyError) {
+            console.error('Failed to notify user about invoice:', notifyError);
+          }
         }
-      }
 
       // Send push notification based on payment method
       if (paymentResult?.success) {
-        await sendPushToUser(ride.userId, 'Ride Completed', `Your ride #${rideId} has been completed. Payment of ${(ride.price / 100).toFixed(2)} DKK has been charged to your card.`, {
+        await sendPushToUser(ride.userId, 'Ride Completed', `Your ride #${rideId} has been completed. Payment of ${Number(ride.price).toFixed(2)} DKK has been charged to your card.`, {
           bookingId: rideId,
           invoiceId: invoice.id,
         });

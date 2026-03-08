@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/auth';
 
 const ReduceRatingSchema = z.object({
   amount: z.number().positive('Amount must be positive'),
@@ -8,6 +9,12 @@ const ReduceRatingSchema = z.object({
 
 export async function POST(req: NextRequest, { params }: { params: { driverId: string } }) {
   try {
+    try {
+      await requireAdmin();
+    } catch (authError: any) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: authError?.status || 401 });
+    }
+
     const driverId = parseInt(params.driverId);
     if (isNaN(driverId)) {
       return NextResponse.json({ ok: false, error: 'Invalid driver ID' }, { status: 400 });

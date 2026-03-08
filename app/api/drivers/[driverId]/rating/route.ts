@@ -1,11 +1,18 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireAdmin } from '@/lib/auth';
 
 export async function POST(
   req: Request,
   { params }: { params: { driverId: string } }
 ) {
   try {
+    try {
+      await requireAdmin();
+    } catch (authError: any) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: authError?.status || 401 });
+    }
+
     const driverId = parseInt(params.driverId);
     if (isNaN(driverId)) {
       return NextResponse.json({ error: 'Invalid driver ID' }, { status: 400 });
@@ -14,7 +21,7 @@ export async function POST(
     const body = await req.json();
     const { deduct } = body;
 
-    if (typeof deduct !== 'number') {
+    if (typeof deduct !== 'number' || !Number.isFinite(deduct) || deduct <= 0 || deduct > 1) {
       return NextResponse.json({ error: 'Invalid deduct value' }, { status: 400 });
     }
 

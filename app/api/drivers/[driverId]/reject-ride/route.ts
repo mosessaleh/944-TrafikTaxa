@@ -1,20 +1,34 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { getUserFromCookie, requireDriverByJWT } from '@/lib/auth';
 
 export async function POST(req: Request, { params }: { params: { driverId: string } }) {
   try {
+    const authHeader = req.headers.get('authorization') || '';
+    let isAdmin = false;
+    let authedDriverId: number | null = null;
+
     const u = await getUserFromCookie();
-    if (!u) return NextResponse.json({ ok: false }, { status: 401 });
+    if (u && ((u as any).role === 'ADMIN' || (u as any).type === 'admin')) {
+      isAdmin = true;
+    } else if (authHeader.startsWith('Bearer ')) {
+      try {
+        const driver = await requireDriverByJWT(req);
+        authedDriverId = driver.id;
+      } catch {
+        return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+      }
+    } else {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
 
     const driverId = parseInt(params.driverId);
     if (isNaN(driverId)) {
       return NextResponse.json({ ok: false, error: 'Invalid driver ID' }, { status: 400 });
     }
 
-    // Check if user is the driver or admin
-    const isAdmin = (u as any).role === 'ADMIN' || (u as any).type === 'admin';
-    if (!isAdmin && u.id !== driverId) {
+    // Check if caller is the same driver or admin
+    if (!isAdmin && authedDriverId !== driverId) {
       return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
     }
 

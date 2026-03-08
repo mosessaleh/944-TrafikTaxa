@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { clearSessionCookie } from '@/lib/auth';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import { getAuthSecret } from '@/lib/auth';
 
 const prisma = new PrismaClient();
-const JWT_SECRET = process.env.AUTH_SECRET || process.env.JWT_SECRET || 'change_me_dev_secret';
+const JWT_SECRET = getAuthSecret();
 
 function extractDriverIdFromToken(token: string): number | null {
   const decoded = jwt.verify(token, JWT_SECRET) as { driverId?: number; id?: number; type?: string };

@@ -2,15 +2,28 @@ import { cookies } from 'next/headers';
 import { prisma } from '@/lib/db';
 import { sign, verify } from 'jsonwebtoken';
 import { comparePassword as cmp, hashPassword as hsh } from '@/lib/crypto';
+import { randomBytes } from 'crypto';
 
-  const SECRET =
-  process.env.AUTH_SECRET ||
-  process.env.JWT_SECRET ||
-  (process.env.NODE_ENV === 'production'
-    ? (() => {
-        throw new Error('AUTH_SECRET env var is required in production');
-      })()
-    : 'change_me_dev_secret');
+function resolveAuthSecret() {
+  const configuredSecret = process.env.AUTH_SECRET || process.env.JWT_SECRET;
+  if (configuredSecret && configuredSecret.length >= 32) {
+    return configuredSecret;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('AUTH_SECRET/JWT_SECRET env var is required in production and must be at least 32 characters');
+  }
+
+  const ephemeralSecret = randomBytes(48).toString('hex');
+  console.warn('⚠️ AUTH_SECRET/JWT_SECRET is missing or too short. Using an ephemeral development secret for this process only.');
+  return ephemeralSecret;
+}
+
+const SECRET = resolveAuthSecret();
+
+export function getAuthSecret(){
+  return SECRET;
+}
 
 export function signToken(payload: Record<string, any>){
   return sign(payload, SECRET, { expiresIn: '7d' });

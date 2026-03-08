@@ -1,5 +1,4 @@
-import { randomBytes } from 'crypto';
-import { prisma } from '@/lib/db';
+import { randomBytes, timingSafeEqual } from 'crypto';
 
 /**
  * CSRF Protection Utilities
@@ -9,6 +8,29 @@ import { prisma } from '@/lib/db';
 export interface CSRFTokenData {
   token: string;
   expiresAt: Date;
+}
+
+export const CSRF_COOKIE_NAME = 'csrf_token';
+
+function getCookieValue(cookieHeader: string | null, cookieName: string): string | null {
+  if (!cookieHeader) return null;
+
+  const segments = cookieHeader.split(';');
+  for (const segment of segments) {
+    const [name, ...rest] = segment.trim().split('=');
+    if (name === cookieName) {
+      return decodeURIComponent(rest.join('='));
+    }
+  }
+
+  return null;
+}
+
+function safeCompare(a: string, b: string): boolean {
+  const aBuffer = Buffer.from(a, 'utf8');
+  const bBuffer = Buffer.from(b, 'utf8');
+  if (aBuffer.length !== bBuffer.length) return false;
+  return timingSafeEqual(aBuffer, bBuffer);
 }
 
 // Generate a cryptographically secure CSRF token
@@ -21,32 +43,26 @@ export function validateCSRFToken(storedToken: string, requestToken: string): bo
   if (!storedToken || !requestToken) return false;
 
   // Use constant-time comparison to prevent timing attacks
-  return storedToken === requestToken;
+  return safeCompare(storedToken, requestToken);
 }
 
-// Store CSRF token in database (for server-side validation)
-export async function storeCSRFToken(userId: number, token: string): Promise<void> {
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      // Note: You might want to add a csrfToken field to User model
-      // For now, we'll use a simple approach
-    }
-  });
+// Placeholder API kept for compatibility with any existing imports.
+export async function storeCSRFToken(_userId: number, _token: string): Promise<void> {
+  return;
 }
 
-// Get CSRF token from database
-export async function getCSRFToken(userId: number): Promise<string | null> {
-  // For now, return a dummy token to allow requests
-  // TODO: Implement proper CSRF token storage
-  return 'dummy-csrf-token';
+// Placeholder API kept for compatibility with any existing imports.
+export async function getCSRFToken(_userId: number): Promise<string | null> {
+  return null;
 }
 
 // Middleware function to validate CSRF token
 export async function validateCSRFMiddleware(request: Request, userId: number): Promise<boolean> {
   try {
+    if (!userId || !Number.isFinite(Number(userId))) {
+      return false;
+    }
+
     // Get token from header
     const csrfToken = request.headers.get('x-csrf-token') ||
                       request.headers.get('csrf-token');
@@ -56,9 +72,19 @@ export async function validateCSRFMiddleware(request: Request, userId: number): 
       return false;
     }
 
-    // For now, accept any token (simplified for development)
-    // TODO: Implement proper CSRF token validation
-    return true;
+    // Validate against CSRF cookie (double submit cookie pattern)
+    const cookieToken = getCookieValue(request.headers.get('cookie'), CSRF_COOKIE_NAME);
+    if (!cookieToken) {
+      console.warn('CSRF cookie token missing from request');
+      return false;
+    }
+
+    // Basic shape validation before constant-time compare
+    if (csrfToken.length < 32 || cookieToken.length < 32) {
+      return false;
+    }
+
+    return safeCompare(cookieToken, csrfToken);
   } catch (error) {
     console.error('CSRF validation error:', error);
     return false;

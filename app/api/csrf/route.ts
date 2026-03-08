@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserFromCookie } from '@/lib/auth';
-import { createCSRFTokenResponse } from '@/lib/csrf';
+import { createCSRFTokenResponse, CSRF_COOKIE_NAME } from '@/lib/csrf';
 import { limitCSRFAttempts, clientIpKey } from '@/lib/rate-limit';
 
 /**
@@ -26,10 +26,25 @@ export async function GET(request: Request) {
     // Generate and return CSRF token
     const tokenResponse = createCSRFTokenResponse();
 
-    return NextResponse.json({
+    const isProd = process.env.NODE_ENV === 'production';
+    const envSecure = String(process.env.COOKIE_SECURE || 'false').toLowerCase() === 'true';
+    const secure = isProd ? true : envSecure;
+
+    const response = NextResponse.json({
       success: true,
       ...tokenResponse
     });
+
+    response.cookies.set(CSRF_COOKIE_NAME, tokenResponse.csrfToken, {
+      httpOnly: false,
+      sameSite: 'strict',
+      secure,
+      path: '/',
+      maxAge: 60 * 60,
+      expires: new Date(Date.now() + 60 * 60 * 1000)
+    });
+
+    return response;
 
   } catch (error) {
     console.error('CSRF token generation error:', error);

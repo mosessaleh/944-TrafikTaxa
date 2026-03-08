@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
+import { getAuthSecret } from '@/lib/auth';
 
 const {
   ensureDriverScheduleTables,
@@ -9,6 +10,7 @@ const {
 } = require('@/lib/driver-schedule');
 
 const prisma = new PrismaClient();
+const JWT_SECRET = getAuthSecret();
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,7 +26,7 @@ export async function GET(request: NextRequest) {
     const token = authHeader.substring(7);
     const decoded = jwt.verify(
       token,
-      process.env.AUTH_SECRET || process.env.JWT_SECRET || 'change_me_dev_secret'
+      JWT_SECRET
     ) as { driverId: number };
     console.log('Decoded driverId:', decoded.driverId);
 

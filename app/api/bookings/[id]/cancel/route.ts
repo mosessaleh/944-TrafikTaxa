@@ -111,7 +111,13 @@ export async function POST(
 
     if (booking.scheduled) {
       // Scheduled bookings: time-based cancellation fees with 15-minute grace period
-      if (timeDiffMinutes <= 15) {
+      if (timeDiffMinutes < 0) {
+        // Past pickup time: cannot cancel
+        return NextResponse.json(
+          { ok: false, error: 'Cannot cancel booking after pickup time' },
+          { status: 400 }
+        );
+      } else if (timeDiffMinutes <= 15) {
         // Within 15 minutes: can cancel for free
         cancellationFee = 0;
       } else if (timeDiffHours >= 2) {
@@ -132,7 +138,7 @@ export async function POST(
       }
     } else {
       // Immediate bookings: use database fee (usually 50 DKK)
-      if (booking.status === 'DISPATCHED' || booking.status === 'ONGOING') {
+      if (booking.status === 'DISPATCHED' || booking.status === 'ONGOING' || booking.status === 'IN_PROGRESS' || booking.status === 'PICKED_UP') {
         // Car has been dispatched: use database fee
         cancellationFee = Math.min(settings.immediateCancellationFee, booking.price);
       } else {

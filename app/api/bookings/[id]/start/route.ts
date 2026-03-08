@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { verify } from 'jsonwebtoken';
 import { sendPushToUser } from '@/lib/notification-service';
+import { getAuthSecret } from '@/lib/auth';
+
+const JWT_SECRET = getAuthSecret();
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -19,7 +22,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     let driver;
     try {
-      const decoded: any = verify(token, process.env.AUTH_SECRET || 'change_me_dev_secret');
+      const decoded: any = verify(token, JWT_SECRET);
 
       if (!decoded.driverId || decoded.type !== 'driver') {
         return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 });

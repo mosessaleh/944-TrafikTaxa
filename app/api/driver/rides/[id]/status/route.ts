@@ -5,6 +5,9 @@ import { verify } from 'jsonwebtoken';
 import { chargeSavedPaymentMethod, PaymentResult } from '@/lib/payment-processor';
 import { notifyUserInvoiceReady } from '@/lib/notify';
 import { getSocketServer } from '@/lib/socket-server';
+import { getAuthSecret } from '@/lib/auth';
+
+const JWT_SECRET = getAuthSecret();
 
 const UpdateStatusSchema = z.object({
   status: z.enum(['PICKED_UP', 'COMPLETED']),
@@ -12,6 +15,12 @@ const UpdateStatusSchema = z.object({
   droppedAt: z.string().optional(),
   droppedOnLocation: z.array(z.number()).optional(), // [lat, lon]
 });
+
+const allowedStatusTransitions: Record<string, string[]> = {
+  ONGOING: ['PICKED_UP'],
+  PICKED_UP: ['COMPLETED'],
+  IN_PROGRESS: ['COMPLETED']
+};
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -38,7 +47,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     try {
       const decoded: any = verify(
         token,
-        process.env.AUTH_SECRET || process.env.JWT_SECRET || 'change_me_dev_secret'
+        JWT_SECRET
       );
 
       if (!decoded.driverId || decoded.type !== 'driver') {
@@ -73,6 +82,19 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     if (ride.driverId !== driver.id) {
       return NextResponse.json({ ok: false, error: 'Ride not assigned to this driver' }, { status: 403 });
+    }
+
+    const currentStatus = String(ride.status || '').toUpperCase();
+    const requestedStatus = String(status || '').toUpperCase();
+    const allowedNext = allowedStatusTransitions[currentStatus] || [];
+    if (!allowedNext.includes(requestedStatus)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Invalid status transition from ${currentStatus} to ${requestedStatus}`
+        },
+        { status: 400 }
+      );
     }
 
     // Update the ride status
@@ -177,7 +199,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             paymentMethod: ride.paymentMethod || 'card',
             paymentRef: paymentResult?.transactionId,
             paymentDate: paymentResult?.success ? new Date() : null,
-            paymentAmount: ride.price / 100, // Convert from øre to DKK
+            paymentAmount: ride.price,
           }
         });
 
@@ -186,7 +208,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
           try {
             await notifyUserInvoiceReady(ride.user.email, ride.user.firstName, {
               bookingId: ride.id,
-              price: (ride.price / 100).toFixed(2)
+              price: Number(ride.price).toFixed(2)
             }, invoice.id);
           } catch (notifyError) {
             console.error('Failed to notify user about invoice:', notifyError);

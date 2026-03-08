@@ -1,14 +1,44 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requireDriverByJWT, requireAdmin } from '@/lib/auth';
 
 export async function GET(
   req: Request,
   { params }: { params: { driverId: string } }
 ) {
   try {
+    const authHeader = req.headers.get('authorization') || '';
+    let isAdmin = false;
+    let authedDriverId: number | null = null;
+
+    try {
+      const adminUser = await requireAdmin();
+      if (adminUser) {
+        isAdmin = true;
+      }
+    } catch {
+      // Not admin cookie session; fallback to driver JWT
+    }
+
+    if (!isAdmin) {
+      if (!authHeader.startsWith('Bearer ')) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      try {
+        const driver = await requireDriverByJWT(req);
+        authedDriverId = driver.id;
+      } catch (authError: any) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: authError?.status || 401 });
+      }
+    }
+
     const driverId = parseInt(params.driverId);
     if (isNaN(driverId)) {
       return NextResponse.json({ error: 'Invalid driver ID' }, { status: 400 });
+    }
+
+    if (!isAdmin && authedDriverId !== driverId) {
+      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
     const driver = await prisma.comDriver.findUnique({

@@ -14,6 +14,7 @@ import DriverStatusMonitor from './lib/driver-status-monitor';
 import { sendPushToDriver } from './lib/notification-service';
 import { sendEmail } from './lib/email';
 import { Expo } from 'expo-server-sdk';
+import { getAuthSecret } from './lib/auth';
 
 declare global {
   var rejectedRides: Map<number, Set<number>>;
@@ -28,6 +29,7 @@ const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 const prisma = new PrismaClient();
+const SOCKET_JWT_SECRET = getAuthSecret();
 
 // In-memory storage for rejected rides
 const rejectedRides = new Map(); // rideId -> Set of driverIds who rejected
@@ -197,7 +199,8 @@ async function getAvailableVehiclesForRide(ride: any) {
     const response = await fetch(`http://localhost:3000/api/vehicle-selection`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
       },
       body: JSON.stringify({
         pickupLat: startLatLon.lat,
@@ -1150,7 +1153,7 @@ app.prepare().then(() => {
     }
 
     try {
-      const decoded: any = jwt.verify(authToken, process.env.AUTH_SECRET || 'change_me_dev_secret');
+      const decoded: any = jwt.verify(authToken, SOCKET_JWT_SECRET);
       (socket as any).data = (socket as any).data || {};
       (socket as any).data.userId = decoded?.id ?? decoded?.userId ?? decoded?.sub ?? null;
       (socket as any).data.driverId = decoded?.driverId ?? null;

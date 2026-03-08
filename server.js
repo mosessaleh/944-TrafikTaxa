@@ -3,6 +3,7 @@ const { parse } = require('url');
 const next = require('next');
 const { Server } = require('socket.io');
 const { PrismaClient } = require('@prisma/client');
+const { randomBytes } = require('crypto');
 const { setSocketServer } = require('./lib/socket-server');
 const { connectedDrivers } = require('./lib/connected-drivers');
 const realtimeService = require('./lib/realtime-service');
@@ -21,7 +22,23 @@ const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 const prisma = new PrismaClient();
-const SOCKET_JWT_SECRET = process.env.AUTH_SECRET || process.env.JWT_SECRET || 'change_me_dev_secret';
+
+function resolveSocketJwtSecret() {
+  const configuredSecret = process.env.AUTH_SECRET || process.env.JWT_SECRET;
+  if (configuredSecret && configuredSecret.length >= 32) {
+    return configuredSecret;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('AUTH_SECRET/JWT_SECRET env var is required in production and must be at least 32 characters');
+  }
+
+  const ephemeralSecret = randomBytes(48).toString('hex');
+  console.warn('⚠️ AUTH_SECRET/JWT_SECRET is missing or too short. Using an ephemeral development socket secret for this process only.');
+  return ephemeralSecret;
+}
+
+const SOCKET_JWT_SECRET = resolveSocketJwtSecret();
 
 // In-memory storage for rejected rides
 const rejectedRides = new Map(); // rideId -> Set of driverIds who rejected
@@ -3482,6 +3499,18 @@ async function checkForNewRides() {
         if (ride.driverId) {
           const dispatched = await dispatchScheduledRide(ride, minutesToPickup);
           if (dispatched) {
+            continue;
+          }
+
+          // لا نفك تعيين السائق المقبول للرحلة المجدولة إلا داخل دائرة الخطر
+          // دائرة الخطر هنا: قبل ساعة من وقت الالتقاط (أو إذا وقت الالتقاط غير معروف)
+          const shouldReleaseAssignedDriver =
+            minutesToPickup === null || minutesToPickup <= SCHEDULED_OFFER_WINDOW_MINUTES;
+
+          if (!shouldReleaseAssignedDriver) {
+            console.log(
+              `Keeping scheduled ride ${ride.id} assigned to driver ${ride.driverId} (outside danger window: ${minutesToPickup} min to pickup)`
+            );
             continue;
           }
 

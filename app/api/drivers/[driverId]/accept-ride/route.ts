@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
+import { requireDriverByJWT } from '@/lib/auth';
 
 const AcceptRideSchema = z.object({
   rideId: z.number().int().positive('Invalid ride ID'),
@@ -8,9 +9,20 @@ const AcceptRideSchema = z.object({
 
 export async function POST(req: NextRequest, { params }: { params: { driverId: string } }) {
   try {
+    let driverAuth;
+    try {
+      driverAuth = await requireDriverByJWT(req);
+    } catch (authError: any) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: authError?.status || 401 });
+    }
+
     const driverId = parseInt(params.driverId);
     if (isNaN(driverId)) {
       return NextResponse.json({ ok: false, error: 'Invalid driver ID' }, { status: 400 });
+    }
+
+    if (driverAuth.id !== driverId) {
+      return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
     }
 
     const { rideId } = AcceptRideSchema.parse(await req.json());

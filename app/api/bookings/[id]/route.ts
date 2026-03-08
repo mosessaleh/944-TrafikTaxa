@@ -7,6 +7,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const u = await getUserFromCookie();
     if (!u) return NextResponse.json({ ok: false }, { status: 401 });
 
+    if (u.type !== 'user') {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const bookingId = parseInt(params.id);
     if (isNaN(bookingId)) {
       return NextResponse.json({ ok: false, error: 'Invalid booking ID' }, { status: 400 });
@@ -15,8 +19,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const body = await req.json();
     const { explanation } = body;
 
+    if (typeof explanation !== 'string' || !explanation.trim() || explanation.length > 500) {
+      return NextResponse.json({ ok: false, error: 'Invalid explanation' }, { status: 400 });
+    }
+
     // Check if user is admin or owns the booking
-    const isAdmin = (u as any).role === 'ADMIN' || (u as any).type === 'admin';
+    const isAdmin = (u as any).role === 'ADMIN';
     const booking = await prisma.ride.findUnique({
       where: { id: bookingId },
       select: { userId: true }
@@ -48,24 +56,22 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const u = await getUserFromCookie();
     if (!u) return NextResponse.json({ ok: false }, { status: 401 });
 
+    if (u.type !== 'user') {
+      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
+    }
+
     const bookingId = parseInt(params.id);
     if (isNaN(bookingId)) {
       return NextResponse.json({ ok: false, error: 'Invalid booking ID' }, { status: 400 });
     }
 
-    // Check if user is admin or force access is requested
-    const url = new URL(req.url);
-    const forceAccess = url.searchParams.get('force') === 'true';
-    const isAdmin = (u as any).role === 'ADMIN' || (u as any).type === 'admin';
+    // Check if user is admin
+    const isAdmin = (u as any).role === 'ADMIN';
 
     const booking = await prisma.ride.findUnique({
-      where: (isAdmin || forceAccess) ? { id: bookingId } : { id: bookingId, userId: u.id },
+      where: isAdmin ? { id: bookingId } : { id: bookingId, userId: u.id },
       include: { vehicleType: true }
     });
-
-    if (forceAccess) {
-      console.warn('Force access enabled for booking API', bookingId, '- use only for development!');
-    }
 
     if (!booking) {
       return NextResponse.json({ ok: false, error: 'Booking not found' }, { status: 404 });

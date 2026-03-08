@@ -14,7 +14,13 @@ function emailTpl(subject:string, body:string){
 
 export async function POST(req: NextRequest){
   console.log(`📨 Driver booking update request received at ${new Date().toISOString()}`);
-  console.log(`Request headers:`, Object.fromEntries(req.headers.entries()));
+  const safeHeaderSnapshot = {
+    origin: req.headers.get('origin') || null,
+    referer: req.headers.get('referer') || null,
+    userAgent: req.headers.get('user-agent') || null,
+    contentType: req.headers.get('content-type') || null
+  };
+  console.log(`Request headers (safe):`, safeHeaderSnapshot);
 
   // Validate request origin for driver API
   const originCheck = validateDriverApiOrigin(req);

@@ -2,19 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { sendPushToUser } from '@/lib/notification-service';
+import { requireDriverByJWT } from '@/lib/auth';
 
 const AcceptRideSchema = z.object({
-  driverId: z.number().int().positive('Invalid driver ID'),
+  driverId: z.number().int().positive('Invalid driver ID').optional(),
 });
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    let authenticatedDriver;
+    try {
+      authenticatedDriver = await requireDriverByJWT(req);
+    } catch (authError: any) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: authError?.status || 401 });
+    }
+
     const rideId = parseInt(params.id);
     if (isNaN(rideId)) {
       return NextResponse.json({ ok: false, error: 'Invalid ride ID' }, { status: 400 });
     }
 
-    const { driverId } = AcceptRideSchema.parse(await req.json());
+    const { driverId: requestedDriverId } = AcceptRideSchema.parse(await req.json());
+    if (requestedDriverId && requestedDriverId !== authenticatedDriver.id) {
+      return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
+    }
+
+    const driverId = authenticatedDriver.id;
 
     // Check if ride exists and is available
     const ride = await prisma.ride.findUnique({

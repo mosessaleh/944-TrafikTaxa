@@ -5,6 +5,8 @@ import { notifyUserInvoiceReady } from '@/lib/notify';
 import { authorizeCardPayment } from '@/lib/payment-processor';
 import { sendEmail } from '@/lib/email';
 
+const ALLOWED_PAYMENT_METHODS = new Set(['invoice', 'card', 'cash', 'paypal', 'revolut', 'crypto']);
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -31,6 +33,10 @@ export async function POST(
       return NextResponse.json({ error: 'Payment method required' }, { status: 400 });
     }
 
+    if (!ALLOWED_PAYMENT_METHODS.has(String(paymentMethod))) {
+      return NextResponse.json({ error: 'Unsupported payment method' }, { status: 400 });
+    }
+
     // 4. Check booking exists
     const booking = await prisma.ride.findUnique({
       where: { id: bookingId },
@@ -42,8 +48,41 @@ export async function POST(
     }
 
     // 5. Check authorization
-    if (booking.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
+    const isAdmin = me.type === 'user' && (me as any).role === 'ADMIN';
+    if (booking.userId !== me.id && !isAdmin) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    }
+
+    const statusUpper = String(booking.status || '').toUpperCase();
+    const immutableStatuses = new Set([
+      'CANCELED',
+      'COMPLETED',
+      'REFUNDED',
+      'DELIVERED',
+      'PICKED_UP',
+      'ONGOING',
+      'DISPATCHED',
+      'IN_PROGRESS'
+    ]);
+
+    if (immutableStatuses.has(statusUpper)) {
+      return NextResponse.json({
+        error: 'Cannot change payment method for this booking status'
+      }, { status: 400 });
+    }
+
+    if (paymentMethod === 'invoice' && booking.paymentMethod === 'invoice') {
+      return NextResponse.json({ error: 'Invoice payment already configured for this booking' }, { status: 409 });
+    }
+
+    if (paymentMethod === 'card' && booking.paymentMethod === 'card') {
+      return NextResponse.json({ error: 'Card payment already configured for this booking' }, { status: 409 });
+    }
+
+    if (booking.paymentMethod && booking.paymentMethod !== paymentMethod && !isAdmin) {
+      return NextResponse.json({
+        error: 'Payment method cannot be changed after selection'
+      }, { status: 409 });
     }
 
     // 6. Handle different payment methods
@@ -51,7 +90,7 @@ export async function POST(
     
     if (paymentMethod === 'invoice') {
       // Check invoice permissions
-      if (!(me as any).canPayByInvoice && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
+      if (!(me as any).canPayByInvoice && !isAdmin) {
         return NextResponse.json({
           error: 'Invoice payment not available for your account'
         }, { status: 403 });
@@ -88,14 +127,19 @@ export async function POST(
       console.log(`[DEBUG] Invoice ${invoiceNumber} created for booking ${bookingId}`);
 
       // Update booking
+      const invoiceUpdateData: any = {
+        paymentMethod: 'invoice',
+        paymentStatus: 'PENDING_PAYMENT'
+      };
+
+      if (statusUpper === 'PENDING') {
+        invoiceUpdateData.status = 'CONFIRMED';
+        invoiceUpdateData.explanation = 'Waiting to send a car';
+      }
+
       updatedBooking = await prisma.ride.update({
         where: { id: bookingId },
-        data: {
-          paymentMethod: 'invoice',
-          status: 'CONFIRMED',
-          paymentStatus: 'PENDING_PAYMENT',
-          explanation: 'Waiting to send a car'
-        },
+        data: invoiceUpdateData,
         include: {
           vehicleType: {
             select: {
@@ -162,15 +206,20 @@ export async function POST(
 
       // Update booking with payment method and status
       try {
+        const cardUpdateData: any = {
+          paymentMethod: 'card',
+          paymentStatus: 'PENDING_PAYMENT',
+          savedPaymentMethodId: defaultCard.id,
+          explanation: `Payment authorized - Transaction: ${authResult.transactionId}`
+        };
+
+        if (statusUpper === 'PENDING') {
+          cardUpdateData.status = 'CONFIRMED';
+        }
+
         updatedBooking = await prisma.ride.update({
           where: { id: bookingId },
-          data: {
-            paymentMethod: 'card',
-            status: 'CONFIRMED',
-            paymentStatus: 'PENDING_PAYMENT',
-            savedPaymentMethodId: defaultCard.id,
-            explanation: `Payment authorized - Transaction: ${authResult.transactionId}`
-          },
+          data: cardUpdateData,
           include: {
             vehicleType: {
               select: {
@@ -212,7 +261,7 @@ export async function POST(
               </ul>
             </div>
 
-            <p><strong>Important:</strong> Your card has been charged for the payment amount.</p>
+            <p><strong>Important:</strong> Your card has been authorized for this amount and will be captured after trip completion.</p>
 
             <p>If you have any questions, please contact our support team.</p>
 
@@ -226,6 +275,12 @@ export async function POST(
       }
 
     } else {
+      if (paymentMethod === 'card') {
+        return NextResponse.json({
+          error: 'Card payment method cannot be reassigned through this endpoint'
+        }, { status: 400 });
+      }
+
       // Other payment methods (paypal, revolut, etc.)
       updatedBooking = await prisma.ride.update({
         where: { id: bookingId },

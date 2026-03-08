@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import { Expo } from 'expo-server-sdk';
+import { getAuthSecret } from '@/lib/auth';
 
 const prisma = new PrismaClient();
-const JWT_SECRET = process.env.AUTH_SECRET || process.env.JWT_SECRET || 'change_me_dev_secret';
+const JWT_SECRET = getAuthSecret();
 
 export async function POST(request: NextRequest) {
   try {

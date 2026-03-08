@@ -321,12 +321,16 @@ export async function POST(request: Request) {
     });
 
     // === STEP 2: Update booking status ===
-    console.log("card/confirm: Updating booking status to CONFIRMED and PAID");
-    console.log(`[DEBUG] Updating booking ${booking.id} status to CONFIRMED and paymentStatus to PAID in card/confirm`);
+    const currentStatus = String(booking.status || '').toUpperCase();
+    const activeBookingStatuses = ['PENDING', 'PROGRESSING', 'CONFIRMED', 'DISPATCHED', 'ONGOING', 'PICKED_UP', 'IN_PROGRESS'];
+    const targetStatus = activeBookingStatuses.includes(currentStatus) ? 'CONFIRMED' : booking.status;
+
+    console.log("card/confirm: Updating booking payment status to PAID");
+    console.log(`[DEBUG] Updating booking ${booking.id} paymentStatus to PAID, status from ${booking.status} to ${targetStatus}`);
     const updatedBooking = await prisma.ride.update({
       where: { id: booking.id },
       data: {
-        status: 'CONFIRMED',
+        status: targetStatus,
         paymentStatus: 'PAID',
         paymentMethod: 'card'
       },
@@ -347,7 +351,7 @@ export async function POST(request: Request) {
         }
       }
     });
-    console.log(`[DEBUG] Booking ${updatedBooking.id} status updated to CONFIRMED in card/confirm`);
+    console.log(`[DEBUG] Booking ${updatedBooking.id} status updated to ${updatedBooking.status} in card/confirm`);
     console.log("card/confirm: Booking status updated successfully");
 
     // === STEP 2.5: Trigger dispatcher to send ride offers ===

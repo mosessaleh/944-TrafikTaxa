@@ -652,7 +652,7 @@ async function updateTripPaymentSuccess(
       await prisma.cardPayment.create({
         data: {
           userId: null, // Will be set if we have user context
-          amountDkk: paymentData.amount / 100, // Convert from øre to DKK
+          amountDkk: paymentData.amount,
           status: 'paid'
         }
       });
