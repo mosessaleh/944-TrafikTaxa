@@ -46,6 +46,7 @@ const LONG_WINDOW_MINUTES = 20;
 const DISTANCE_MATRIX_LIMIT = 6;
 // الحد الأقصى المسموح لزمن الانتقال بين نهاية رحلة مجدولة وبداية أخرى ليتم اعتباره مرشح تتابع
 const CHAIN_MAX_TRAVEL_MINUTES = 25;
+const CHAIN_MAX_GAP_MINUTES = 30;
 const CHAIN_LOOKBACK_HOURS = 6;
 const CHAIN_LOOKAHEAD_HOURS = 6;
 
@@ -521,7 +522,11 @@ export async function POST(request: NextRequest) {
               const distanceKmToNew = calculateDistance(pickupLat, pickupLon, endLoc.lat, endLoc.lon);
               const etaMinutes = estimateEtaMinutes(distanceKmToNew);
               const gapMinutes = (targetPickup.getTime() - endAt.getTime()) / 60000;
-              if (etaMinutes <= CHAIN_MAX_TRAVEL_MINUTES && gapMinutes >= -5) {
+              const maxTravelMinutesForGap = Math.min(
+                CHAIN_MAX_TRAVEL_MINUTES,
+                Math.max(1, Math.ceil(gapMinutes))
+              );
+              if (gapMinutes >= 0 && gapMinutes <= CHAIN_MAX_GAP_MINUTES && etaMinutes <= maxTravelMinutesForGap) {
                 return {
                   driverId: ride.driverId as number,
                   etaMinutes,

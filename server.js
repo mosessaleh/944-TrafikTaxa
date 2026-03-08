@@ -120,7 +120,7 @@ const SCHEDULED_STAGE3_FALLBACK_DISTANCE_PENALTY = 9999;
 const SCHEDULED_MAX_ETA_MINUTES = 30;
 const SCHEDULED_CONFLICT_WINDOW_HOURS = 6;
 const SCHEDULED_IMMEDIATE_WINDOW_MINUTES = 15;
-const SCHEDULED_CHAIN_MAX_GAP_MINUTES = 15;
+const SCHEDULED_CHAIN_MAX_GAP_MINUTES = 30;
 const SCHEDULED_CHAIN_MAX_TRAVEL_MINUTES = 25; // حد أقصى زمن انتقال بين نهاية الرحلة الحالية وبداية المؤجلة التالية (دقائق)
 const SCHEDULED_PICKUP_BUFFER_MINUTES = 7;
 const SCHEDULED_LATE_BUFFER_MINUTES = SCHEDULED_PICKUP_BUFFER_MINUTES;
@@ -864,7 +864,7 @@ async function filterConflictingDrivers(candidates, ride) {
 
       if (existing.scheduled && end <= scheduledStart) {
         const gapMinutes = (scheduledStart.getTime() - end.getTime()) / 60000;
-        if (gapMinutes <= SCHEDULED_CHAIN_MAX_GAP_MINUTES) {
+        if (gapMinutes >= 0 && gapMinutes <= SCHEDULED_CHAIN_MAX_GAP_MINUTES) {
           const endLatLon = existing.endLatLon;
           const startLatLon = ride.startLatLon;
           if (endLatLon && startLatLon) {
@@ -875,7 +875,11 @@ async function filterConflictingDrivers(candidates, ride) {
               startLatLon.lon
             );
             const etaMinutes = estimateEtaMinutesFromDistance(distanceKm);
-            if (etaMinutes <= SCHEDULED_CHAIN_MAX_TRAVEL_MINUTES) {
+            const maxTravelMinutesForGap = Math.min(
+              SCHEDULED_CHAIN_MAX_TRAVEL_MINUTES,
+              Math.max(1, Math.ceil(gapMinutes))
+            );
+            if (etaMinutes <= maxTravelMinutesForGap) {
               const shouldReplace =
                 !bestChain ||
                 etaMinutes < bestChain.etaMinutes ||
@@ -1163,6 +1167,18 @@ async function buildScheduledCandidates(ride) {
   const conflictedFiltered = await filterConflictingDrivers(eligibleBySchedule, ride);
   const strategyOrder = new Map(uniqueStrategyDriverIds.map((id, index) => [id, index]));
   conflictedFiltered.sort((a, b) => {
+    const aPriority = Boolean(a.chainPriority);
+    const bPriority = Boolean(b.chainPriority);
+    if (aPriority !== bPriority) return aPriority ? -1 : 1;
+
+    const aChainEta = Number.isFinite(a.chainEtaMinutes) ? a.chainEtaMinutes : Number.POSITIVE_INFINITY;
+    const bChainEta = Number.isFinite(b.chainEtaMinutes) ? b.chainEtaMinutes : Number.POSITIVE_INFINITY;
+    if (aChainEta !== bChainEta) return aChainEta - bChainEta;
+
+    const aGap = Number.isFinite(a.chainGapMinutes) ? a.chainGapMinutes : Number.POSITIVE_INFINITY;
+    const bGap = Number.isFinite(b.chainGapMinutes) ? b.chainGapMinutes : Number.POSITIVE_INFINITY;
+    if (aGap !== bGap) return aGap - bGap;
+
     const orderA = strategyOrder.has(a.driverId) ? strategyOrder.get(a.driverId) : Number.MAX_SAFE_INTEGER;
     const orderB = strategyOrder.has(b.driverId) ? strategyOrder.get(b.driverId) : Number.MAX_SAFE_INTEGER;
     if (orderA !== orderB) return orderA - orderB;
@@ -1372,12 +1388,19 @@ async function buildScheduledStage2Candidates(ride) {
     });
   }
 
-  candidates.sort((a, b) => {
+  const conflictFiltered = await filterConflictingDrivers(candidates, ride);
+  conflictFiltered.sort((a, b) => {
+    const aPriority = Boolean(a.chainPriority);
+    const bPriority = Boolean(b.chainPriority);
+    if (aPriority !== bPriority) return aPriority ? -1 : 1;
+    const aGap = Number.isFinite(a.chainGapMinutes) ? a.chainGapMinutes : Number.POSITIVE_INFINITY;
+    const bGap = Number.isFinite(b.chainGapMinutes) ? b.chainGapMinutes : Number.POSITIVE_INFINITY;
+    if (aGap !== bGap) return aGap - bGap;
     if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
     return a.distanceKm - b.distanceKm;
   });
 
-  return candidates;
+  return conflictFiltered;
 }
 
 async function buildScheduledStage3Candidates(ride) {
@@ -1511,7 +1534,17 @@ async function buildScheduledStage3Candidates(ride) {
     });
   }
 
-  candidates.sort((a, b) => {
+  const chainAwareCandidates = await filterConflictingDrivers(candidates, ride);
+  chainAwareCandidates.sort((a, b) => {
+    const aPriority = Boolean(a.chainPriority);
+    const bPriority = Boolean(b.chainPriority);
+    if (aPriority !== bPriority) return aPriority ? -1 : 1;
+    const aChainEta = Number.isFinite(a.chainEtaMinutes) ? a.chainEtaMinutes : Number.POSITIVE_INFINITY;
+    const bChainEta = Number.isFinite(b.chainEtaMinutes) ? b.chainEtaMinutes : Number.POSITIVE_INFINITY;
+    if (aChainEta !== bChainEta) return aChainEta - bChainEta;
+    const aGap = Number.isFinite(a.chainGapMinutes) ? a.chainGapMinutes : Number.POSITIVE_INFINITY;
+    const bGap = Number.isFinite(b.chainGapMinutes) ? b.chainGapMinutes : Number.POSITIVE_INFINITY;
+    if (aGap !== bGap) return aGap - bGap;
     if (a.postalExact !== b.postalExact) return a.postalExact ? -1 : 1;
     if (a.postalPrefixMatch !== b.postalPrefixMatch) return a.postalPrefixMatch ? -1 : 1;
     if (a.postalDistanceScore !== b.postalDistanceScore) return a.postalDistanceScore - b.postalDistanceScore;
@@ -1526,7 +1559,7 @@ async function buildScheduledStage3Candidates(ride) {
     return b.completedRides - a.completedRides;
   });
 
-  return candidates;
+  return chainAwareCandidates;
 }
 
 async function advanceScheduledStage3Offer(rideId, reason = 'advance') {
@@ -1872,12 +1905,11 @@ async function finalizeScheduledStage2Offer(rideId) {
     return;
   }
 
-  eligibleAccepted.sort((a, b) => {
-    if (a.etaMinutes !== b.etaMinutes) return a.etaMinutes - b.etaMinutes;
-    return a.distanceKm - b.distanceKm;
-  });
-
-  const selected = eligibleAccepted[0];
+  const selected = selectBestScheduledCandidate(eligibleAccepted, ride.vehicleTypeId);
+  if (!selected) {
+    console.log(`No suitable accepted driver found for scheduled stage2 ride ${rideId}`);
+    return;
+  }
   const selectedDriver = driverInfoMap.get(selected.driverId);
 
   await prisma.ride.update({
