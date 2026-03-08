@@ -27,10 +27,13 @@ export async function GET(request: NextRequest) {
     const decoded = jwt.verify(
       token,
       JWT_SECRET
-    ) as { driverId: number };
-    console.log('Decoded driverId:', decoded.driverId);
+    ) as { driverId?: number; id?: number; type?: string };
 
-    const driverId = decoded.driverId;
+    const driverId = Number(decoded?.driverId ?? decoded?.id);
+    if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    console.log('Decoded driverId:', driverId);
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') || 'month'; // day, week, month
 

@@ -73,11 +73,13 @@ export async function middleware(req: NextRequest) {
   // Rate limiting for sensitive endpoints
   const sensitiveEndpoints = [
     '/api/auth/login',
+    '/api/auth/driver-login',
     '/api/auth/register',
     '/api/auth/forgot-password',
     '/api/auth/reset-password',
     '/api/auth/verify',
-    '/api/auth/resend-code'
+    '/api/auth/resend-code',
+    '/api/driver/login'
   ];
 
   if (sensitiveEndpoints.some(endpoint => pathname.startsWith(endpoint))) {

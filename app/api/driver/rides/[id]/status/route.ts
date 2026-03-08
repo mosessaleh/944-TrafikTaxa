@@ -17,6 +17,7 @@ const UpdateStatusSchema = z.object({
 });
 
 const allowedStatusTransitions: Record<string, string[]> = {
+  DISPATCHED: ['PICKED_UP'],
   ONGOING: ['PICKED_UP'],
   PICKED_UP: ['COMPLETED'],
   IN_PROGRESS: ['COMPLETED']

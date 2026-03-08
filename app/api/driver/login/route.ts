@@ -28,13 +28,17 @@ export async function POST(request: NextRequest) {
     await ensureDriverScheduleTables(prisma);
 
     const { username, password, startKM } = await request.json();
-    console.log('Driver login attempt:', { username, startKM }); // Log username and startKM, not password
+    const normalizedUsername = String(username || '').trim();
+    const normalizedPassword = String(password || '');
+    const parsedStartKM = Number(startKM);
 
-    if (!username || !password || startKM === undefined) {
+    console.log('Driver login attempt:', { username: normalizedUsername, hasStartKM: Number.isFinite(parsedStartKM) });
+
+    if (!normalizedUsername || !normalizedPassword || !Number.isFinite(parsedStartKM) || parsedStartKM < 0) {
       return NextResponse.json(
-        { error: 'Username, password, and startKM are required' },
+        { error: 'Invalid credentials' },
         {
-          status: 400,
+          status: 401,
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -46,7 +50,23 @@ export async function POST(request: NextRequest) {
 
     // Find driver by username
     const driver = await prisma.comDriver.findUnique({
-      where: { drUsername: username },
+      where: { drUsername: normalizedUsername },
+      select: {
+        id: true,
+        drPass: true,
+        drUsername: true,
+        drFname: true,
+        drLname: true,
+        car: true,
+        rating: true,
+        isActive: true,
+        bannedUntil: true,
+        company: {
+          select: {
+            comStatus: true
+          }
+        }
+      }
     });
     console.log('Driver found:', !!driver);
 
@@ -65,8 +85,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check password
-    const isValidPassword = await bcrypt.compare(password, driver.drPass);
-    console.log('Password valid:', isValidPassword);
+    const isValidPassword = await bcrypt.compare(normalizedPassword, driver.drPass);
     if (!isValidPassword) {
       return NextResponse.json(
         { error: 'Invalid credentials' },
@@ -83,11 +102,11 @@ export async function POST(request: NextRequest) {
 
     // Check if driver is active
     console.log('Driver active:', driver.isActive);
-    if (!driver.isActive) {
+    if (!driver.isActive || !driver.company?.comStatus) {
       return NextResponse.json(
-        { error: 'Driver account is not active' },
+        { error: 'Invalid credentials' },
         {
-          status: 403,
+          status: 401,
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -95,6 +114,31 @@ export async function POST(request: NextRequest) {
           },
         }
       );
+    }
+
+    const now = new Date();
+    const bannedUntilDate = driver.bannedUntil ? new Date(driver.bannedUntil as any) : null;
+    const isBanned = !!(bannedUntilDate && bannedUntilDate > now);
+
+    if (isBanned) {
+      const remainingMs = Math.max(0, bannedUntilDate!.getTime() - now.getTime());
+      const remainingHours = remainingMs / (1000 * 60 * 60);
+      if (remainingHours >= 2) {
+        return NextResponse.json(
+          {
+            error: 'Driver account is temporarily suspended',
+            bannedUntil: bannedUntilDate!.toISOString()
+          },
+          {
+            status: 403,
+            headers: {
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Allow-Methods': 'POST, OPTIONS',
+              'Access-Control-Allow-Headers': 'Content-Type',
+            },
+          }
+        );
+      }
     }
 
     const scheduleSnapshot = await getDriverScheduleSnapshot(prisma, driver.id, new Date());
@@ -107,8 +151,8 @@ export async function POST(request: NextRequest) {
     });
 
     if (lastShift && lastShift.endKM !== null) {
-      console.log('Last shift endKM:', lastShift.endKM, 'startKM:', startKM);
-      if (startKM < lastShift.endKM) {
+      console.log('Last shift endKM:', lastShift.endKM, 'startKM:', parsedStartKM);
+      if (parsedStartKM < lastShift.endKM) {
         return NextResponse.json(
           { error: 'There is something incorrect in the kilometers', message: 'There is something incorrect in the kilometers' },
           {
@@ -150,8 +194,8 @@ export async function POST(request: NextRequest) {
           date: now,
           salary: 0, // Will be calculated later
           hourSalary: 0, // Will be calculated later
-          startKM: startKM,
-          endKM: startKM, // Initially same as start
+          startKM: parsedStartKM,
+          endKM: parsedStartKM, // Initially same as start
           deffKM: 0, // Initially 0
         },
       });
@@ -185,6 +229,9 @@ export async function POST(request: NextRequest) {
       },
       shiftId: shift.id,
       shiftStartTime: shift.startVagt ? shift.startVagt.toISOString() : null,
+      bannedUntil: bannedUntilDate ? bannedUntilDate.toISOString() : null,
+      restrictedOffersUntil: isBanned ? bannedUntilDate!.toISOString() : null,
+      restrictedOffers: Boolean(isBanned),
       schedule: scheduleSnapshot,
       loginPolicy: {
         outsideSchedule: isOutsideSchedule,

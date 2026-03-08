@@ -24,10 +24,15 @@ export async function GET(request: NextRequest) {
   const decoded = jwt.verify(
     token,
     JWT_SECRET
-  ) as { driverId: number };
+  ) as { driverId?: number; id?: number; type?: string };
+
+    const driverId = Number(decoded?.driverId ?? decoded?.id);
+    if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const driver = await (prisma as any).comDriver.findUnique({
-      where: { id: decoded.driverId },
+      where: { id: driverId },
       select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true, bannedUntil: true, rating: true },
     });
 
@@ -38,7 +43,7 @@ export async function GET(request: NextRequest) {
     // Check if there is an active shift (not ended yet)
     const activeShift = await prisma.driversvagt.findFirst({
       where: {
-        drId: decoded.driverId,
+        drId: driverId,
         endVagt: null // Shift hasn't ended yet
       },
       orderBy: {
@@ -56,7 +61,7 @@ export async function GET(request: NextRequest) {
 
     const todayStats = await prisma.ride.aggregate({
       where: {
-        driverId: decoded.driverId,
+        driverId,
         status: 'COMPLETED',
         OR: [
           {
@@ -81,7 +86,11 @@ export async function GET(request: NextRequest) {
     const totalRidesToday = todayStats._count?._all ?? 0;
     const earningsToday = todayStats._sum?.price ?? 0;
 
-    const schedule = await getDriverScheduleSnapshot(prisma, decoded.driverId, new Date());
+    const schedule = await getDriverScheduleSnapshot(prisma, driverId, new Date());
+
+    const now = new Date();
+    const restrictedOffers = Boolean(driver.bannedUntil && driver.bannedUntil > now);
+    const restrictedOffersUntil = restrictedOffers ? driver.bannedUntil!.toISOString() : null;
 
     const response = {
       isOnline: isOnline,
@@ -89,6 +98,8 @@ export async function GET(request: NextRequest) {
       currentRideId: driver.currentRideId,
       rideAccepted: driver.rideAccepted,
       bannedUntil: driver.bannedUntil ? driver.bannedUntil.toISOString() : null,
+      restrictedOffers,
+      restrictedOffersUntil,
       hasActiveShift: !!activeShift,
       shiftStartTime: activeShift && activeShift.startVagt ? activeShift.startVagt.toISOString() : null,
       totalRidesToday,
@@ -117,7 +128,12 @@ export async function POST(request: NextRequest) {
   const decoded = jwt.verify(
     token,
     JWT_SECRET
-  ) as { driverId: number };
+  ) as { driverId?: number; id?: number; type?: string };
+
+    const driverId = Number(decoded?.driverId ?? decoded?.id);
+    if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const body = await request.json();
     const { online, busy, busyMode } = body;
@@ -140,25 +156,30 @@ export async function POST(request: NextRequest) {
     if (busyMode !== undefined) updateData.busyMode = busyMode;
 
     const updatedDriver = await (prisma as any).comDriver.update({
-      where: { id: decoded.driverId },
+      where: { id: driverId },
       data: updateData,
       select: { isOnline: true, isBusy: true, currentRideId: true, rideAccepted: true, bannedUntil: true },
     });
 
     // Send real-time update via Socket.IO
     if ((global as any).io) {
-      (global as any).io.to(`driver_${decoded.driverId}`).emit('driverStatusUpdate', {
+      const now = new Date();
+      const restrictedOffers = Boolean(updatedDriver.bannedUntil && updatedDriver.bannedUntil > now);
+      const restrictedOffersUntil = restrictedOffers ? updatedDriver.bannedUntil!.toISOString() : null;
+      (global as any).io.to(`driver_${driverId}`).emit('driverStatusUpdate', {
         currentRideId: updatedDriver.currentRideId,
         isBusy: updatedDriver.isBusy,
         rideAccepted: updatedDriver.rideAccepted,
         isOnline: updatedDriver.isOnline,
         bannedUntil: updatedDriver.bannedUntil ? updatedDriver.bannedUntil.toISOString() : null,
+        restrictedOffers,
+        restrictedOffersUntil,
         timestamp: Date.now()
       });
-      console.log(`Sent driverStatusUpdate for driver ${decoded.driverId}`);
+      console.log(`Sent driverStatusUpdate for driver ${driverId}`);
     }
 
-    const schedule = await getDriverScheduleSnapshot(prisma, decoded.driverId, new Date());
+    const schedule = await getDriverScheduleSnapshot(prisma, driverId, new Date());
 
     return NextResponse.json({
       success: true,

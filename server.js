@@ -128,9 +128,19 @@ const SCHEDULED_LATE_MAX_STAGE = Math.max(1, SCHEDULED_LATE_BUFFER_MINUTES - 1);
 const SCHEDULED_LATE_REASSIGN_THRESHOLD_MINUTES = 3;
 const SCHEDULED_LATE_PENALTY_MINUTES = 5;
 const SCHEDULED_LATE_RATING_PENALTY = 0.01;
+const DRIVER_BAN_RESTRICT_OFFERS_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 const SHIFT_WARNING_THRESHOLD_HOURS = 11;
 const SHIFT_ENFORCEMENT_GRACE_HOURS = 1;
 const SHIFT_SUSPENSION_DAYS = 3;
+
+function isDriverOfferRestrictedByBan(bannedUntil, now = new Date()) {
+  if (!bannedUntil) return false;
+  const banDate = new Date(bannedUntil);
+  if (Number.isNaN(banDate.getTime())) return false;
+  if (banDate <= now) return false;
+  const remainingMs = banDate.getTime() - now.getTime();
+  return remainingMs <= DRIVER_BAN_RESTRICT_OFFERS_THRESHOLD_MS;
+}
 
 const SCHEDULED_STAGE2_RATE_THRESHOLDS = {
   1: { day: 400, night: 500, holiday: 600 }, // Sedan
@@ -1048,6 +1058,9 @@ async function buildScheduledCandidates(ride) {
             status: true,
             endLatLon: true,
             pickupTime: true,
+            acceptedAt: true,
+            pickedAt: true,
+            createdAt: true,
             distanceKm: true,
             durationMin: true
           }
@@ -1058,20 +1071,32 @@ async function buildScheduledCandidates(ride) {
         }
 
         if (!currentRide.scheduled && ['DISPATCHED', 'ONGOING', 'IN_PROGRESS', 'PICKED_UP', 'CONFIRMED'].includes(String(currentRide.status || '').toUpperCase())) {
+          const currentRideStartReference = currentRide.pickupTime
+            ? new Date(currentRide.pickupTime)
+            : currentRide.pickedAt
+              ? new Date(currentRide.pickedAt)
+              : currentRide.acceptedAt
+                ? new Date(currentRide.acceptedAt)
+                : currentRide.createdAt
+                  ? new Date(currentRide.createdAt)
+                  : new Date();
+
           const currentRideEnd = computeRideEndTime(
-            currentRide.pickupTime ? new Date(currentRide.pickupTime) : null,
+            currentRideStartReference,
             currentRide.durationMin,
             currentRide.distanceKm
           );
 
-          if (!currentRideEnd) {
-            continue;
-          }
+          const scheduledStart = ride.pickupTime ? new Date(ride.pickupTime) : null;
+          const hasValidCurrentRideEnd = Boolean(currentRideEnd && !Number.isNaN(currentRideEnd.getTime()));
+          const hasValidScheduledStart = Boolean(scheduledStart && !Number.isNaN(scheduledStart.getTime()));
 
-          const scheduledStart = new Date(ride.pickupTime);
-          const gapMinutes = (scheduledStart.getTime() - currentRideEnd.getTime()) / 60000;
-          if (gapMinutes < -5) {
-            continue;
+          // لا نحجب ظهور العرض إذا كانت بيانات التوقيت غير مكتملة؛ نُطبق التحقق فقط عند توفر وقت صالح للطرفين.
+          if (hasValidCurrentRideEnd && hasValidScheduledStart) {
+            const gapMinutes = (scheduledStart.getTime() - currentRideEnd.getTime()) / 60000;
+            if (gapMinutes < -5) {
+              continue;
+            }
           }
 
           if (currentRide.endLatLon && typeof currentRide.endLatLon.lat === 'number' && typeof currentRide.endLatLon.lon === 'number') {
@@ -1558,6 +1583,9 @@ async function advanceScheduledStage3Offer(rideId, reason = 'advance') {
       });
 
       if (!selectedDriver || !selectedDriver.isActive || !selectedDriver.isOnline || (selectedDriver.bannedUntil && selectedDriver.bannedUntil > now)) {
+        if (selectedDriver?.bannedUntil && selectedDriver.bannedUntil > now && isDriverOfferRestrictedByBan(selectedDriver.bannedUntil, now)) {
+          console.log(`Stage3 skip driver ${candidate.driverId} due to short active ban restriction until ${selectedDriver.bannedUntil}`);
+        }
         offerState.accepted.delete(candidate.driverId);
         offerState.rejected.add(candidate.driverId);
         offerState.currentIndex += 1;
@@ -1803,7 +1831,12 @@ async function finalizeScheduledStage2Offer(rideId) {
 
       if (!driver || !driver.isActive) continue;
       if (!driver.isOnline) continue;
-      if (driver.bannedUntil && driver.bannedUntil > now) continue;
+      if (driver.bannedUntil && driver.bannedUntil > now) {
+        if (isDriverOfferRestrictedByBan(driver.bannedUntil, now)) {
+          console.log(`Scheduled stage2 skip driver ${candidate.driverId} due to short active ban restriction until ${driver.bannedUntil}`);
+        }
+        continue;
+      }
 
       const schedule = await canDriverReceiveRide(prisma, candidate.driverId, {
         // Final stage-2 selection still validates pickup-time schedule window only.
@@ -2227,7 +2260,12 @@ async function finalizeScheduledOffer(rideId) {
 
       if (!driver || !driver.isActive) continue;
       if (!driver.isOnline) continue;
-      if (driver.bannedUntil && driver.bannedUntil > now) continue;
+      if (driver.bannedUntil && driver.bannedUntil > now) {
+        if (isDriverOfferRestrictedByBan(driver.bannedUntil, now)) {
+          console.log(`Scheduled finalization skip driver ${candidate.driverId} due to short active ban restriction until ${driver.bannedUntil}`);
+        }
+        continue;
+      }
       if (!connectedDrivers.has(candidate.driverId)) continue;
 
       eligibleCandidates.push(candidate);
@@ -2953,8 +2991,12 @@ async function autoAssignRide(ride, vehicleInfo) {
         // Check if driver is banned
         const now = new Date();
         if (driverData.bannedUntil && driverData.bannedUntil > now) {
-          console.log(`Driver ${driver.driverId} is banned until ${driverData.bannedUntil}`);
-          continue; // Driver is banned
+          if (isDriverOfferRestrictedByBan(driverData.bannedUntil, now)) {
+            console.log(`Driver ${driver.driverId} has short ban (${driverData.bannedUntil}) - login allowed but offers restricted`);
+          } else {
+            console.log(`Driver ${driver.driverId} is banned until ${driverData.bannedUntil}`);
+          }
+          continue; // Driver cannot receive immediate offers while ban is active
         }
 
         // Check conditions: currentRideId = null, isOnline = 1, isBusy = 0
@@ -2962,15 +3004,7 @@ async function autoAssignRide(ride, vehicleInfo) {
           continue; // Driver not available
         }
 
-        // Check schedule eligibility for immediate rides
-        const schedule = await canDriverReceiveRide(prisma, driver.driverId, {
-          strict: true,
-          now
-        });
-        if (!schedule?.eligible) {
-          console.log(`Skipping driver ${driver.driverId} - schedule rule: ${schedule?.reason || 'unknown'}`);
-          continue;
-        }
+        // Immediate rides: ignore configured schedule windows; require online + not busy + connected only.
 
         // Check if driver is still connected in socket
         if (!connectedDrivers.has(driver.driverId)) {
@@ -3841,6 +3875,29 @@ app.prepare().then(() => {
         socket.join(`driver_${driverId}`);
         console.log(`Driver ${driverId} joined room with vehicle type ${data.vehicleTypeId}`);
 
+        try {
+          const driverBanStatus = await prisma.comDriver.findUnique({
+            where: { id: driverId },
+            select: { bannedUntil: true }
+          });
+          const now = new Date();
+          const isRestricted = !!(
+            driverBanStatus?.bannedUntil &&
+            driverBanStatus.bannedUntil > now &&
+            isDriverOfferRestrictedByBan(driverBanStatus.bannedUntil, now)
+          );
+          if (isRestricted) {
+            socket.emit('driverStatusUpdate', {
+              restrictedOffers: true,
+              restrictedOffersUntil: driverBanStatus.bannedUntil.toISOString(),
+              bannedUntil: driverBanStatus.bannedUntil.toISOString(),
+              timestamp: Date.now()
+            });
+          }
+        } catch (banStatusError) {
+          console.error('Error checking driver ban status on join:', banStatusError);
+        }
+
         // Add to connected drivers
         connectedDrivers.set(driverId, {
           socketId: socket.id,
@@ -4125,18 +4182,6 @@ app.prepare().then(() => {
 
         if (!driver) {
           socket.emit('rideAcceptFailed', { rideId: data.rideId, reason: 'Driver not found' });
-          return;
-        }
-
-        const schedule = await canDriverReceiveRide(prisma, driverId, {
-          strict: true,
-          now: new Date()
-        });
-        if (!schedule?.eligible) {
-          socket.emit('rideAcceptFailed', {
-            rideId: data.rideId,
-            reason: 'Driver is outside configured work schedule'
-          });
           return;
         }
 
