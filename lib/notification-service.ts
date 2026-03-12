@@ -5,10 +5,11 @@ import {
   notifyUserInvoiceReady,
 } from './notify';
 import { Expo, ExpoPushMessage, ExpoPushTicket, ExpoPushReceipt } from 'expo-server-sdk';
+import { getExpoAccessToken, hasExpoAccessToken } from './security-config';
 
 const prismaAny = prisma as any;
 const expo = new Expo({
-  accessToken: process.env.EXPO_ACCESS_TOKEN,
+  accessToken: getExpoAccessToken(),
 });
 
 const DRIVER_PUSH_CHANNEL_ID = 'driver-rides';
@@ -233,7 +234,7 @@ export async function notifyInvoiceReadyUnified(
 }
 
 // Push Notification Functions
-console.log('Expo client initialized with access token:', process.env.EXPO_ACCESS_TOKEN ? 'set' : 'not set');
+console.log('Expo client initialized with access token:', hasExpoAccessToken() ? 'set' : 'not set');
 
 export async function sendPushNotification(
   pushToken: string,

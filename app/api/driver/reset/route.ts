@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { verify } from 'jsonwebtoken';
 import { prisma } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
+import { requireAuthSecret } from '@/lib/security-config';
 
 const Schema = z.object({ token: z.string().min(10), password: z.string().min(8) });
 
@@ -11,7 +12,7 @@ export async function POST(req: Request){
     const { token, password } = Schema.parse(await req.json());
 
     // Verify token
-    const decoded = verify(token, process.env.AUTH_SECRET || 'fallback_secret') as any;
+    const decoded = verify(token, requireAuthSecret('driver reset route')) as any;
 
     if (decoded.type !== 'driver_password_reset' || !decoded.driverId) {
       return NextResponse.json({ ok: false, error: 'Invalid token type' }, { status: 400 });

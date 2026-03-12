@@ -4,6 +4,7 @@ import { sign } from 'jsonwebtoken';
 import { prisma } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
 import { limitOrThrow, clientIpKey } from '@/lib/rate-limit';
+import { requireAuthSecret } from '@/lib/security-config';
 
 const Schema = z.object({ email: z.string().email() });
 
@@ -26,7 +27,7 @@ export async function POST(req: Request){
       // Create JWT token with user ID and expiry
       const resetToken = sign(
         { userId: u.id, type: 'password_reset' },
-        process.env.AUTH_SECRET || 'fallback_secret',
+        requireAuthSecret('auth request-reset route'),
         { expiresIn: '30m' }
       );
 

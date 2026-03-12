@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { verify } from 'jsonwebtoken';
 import { prisma } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
+import { requireAuthSecret } from '@/lib/security-config';
 
 const Schema = z.object({ token: z.string().min(10), password: z.string().min(8) });
 
@@ -11,7 +12,7 @@ export async function POST(req: Request){
     const { token, password } = Schema.parse(await req.json());
 
     // Verify JWT token
-    const secret = process.env.AUTH_SECRET || 'fallback_secret';
+    const secret = requireAuthSecret('auth reset route');
     let decoded: any;
 
     try {

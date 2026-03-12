@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { requireMotorApiToken } from '@/lib/security-config';
 
 const LookupSchema = z.object({
   regNumber: z.string().regex(/^[A-Z]{2}\d{5}$/, 'Registration number must be in format XX12345'),
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
     const { regNumber } = parsed.data;
 
     // MotorAPI Integration
-    const MOTORAPI_TOKEN = process.env.MOTORAPI_TOKEN || 'ng8iso4m5dtr7s6ku3lz41i7uzlnyk4k';
+    const motorApiToken = requireMotorApiToken('vehicle lookup route');
 
     try {
       console.log('Calling MotorAPI for regNumber:', regNumber);
@@ -26,7 +27,7 @@ export async function POST(req: Request) {
         `https://v1.motorapi.dk/vehicles/${encodeURIComponent(regNumber)}`,
         {
           headers: {
-            "X-AUTH-TOKEN": MOTORAPI_TOKEN,
+            "X-AUTH-TOKEN": motorApiToken,
           },
         }
       );

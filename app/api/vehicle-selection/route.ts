@@ -189,21 +189,82 @@ export async function POST(request: NextRequest) {
 
     const excludedSet = new Set((excludedDriverIds || []).map((id) => Number(id)));
     const connectedDrivers = (global as any).connectedDrivers || new Map();
-    const useDatabaseFallback = false;
+    let useDatabaseFallback = false;
 
-    let availableDrivers: RawDriver[] = (Array.from(connectedDrivers.entries()) as [string, any][])
-      .filter(([driverId, driverData]) =>
-        driverData?.location &&
-        typeof driverData.location.lat === 'number' &&
-        typeof driverData.location.lng === 'number' &&
-        !excludedSet.has(Number(driverId))
-      )
+    const connectedEntries = (Array.from(connectedDrivers.entries()) as [string, any][])
       .map(([driverId, driverData]) => ({
         driverId: Number(driverId),
+        driverData,
+      }))
+      .filter(({ driverId }) => Number.isFinite(driverId) && !excludedSet.has(driverId));
+
+    let availableDrivers: RawDriver[] = connectedEntries
+      .filter(({ driverData }) =>
+        driverData?.location &&
+        typeof driverData.location.lat === 'number' &&
+        typeof driverData.location.lng === 'number'
+      )
+      .map(({ driverId, driverData }) => ({
+        driverId,
         location: driverData.location,
         socketId: driverData.socketId || null,
-        vehicleTypeId: Number(driverData.vehicleTypeId || 0) || null
+        vehicleTypeId: Number(driverData.vehicleTypeId || 0) || null,
       }));
+
+    const missingLiveLocation = connectedEntries
+      .filter(({ driverData }) =>
+        !driverData?.location ||
+        typeof driverData.location.lat !== 'number' ||
+        typeof driverData.location.lng !== 'number'
+      )
+      .map(({ driverId, driverData }) => ({
+        driverId,
+        socketId: driverData?.socketId || null,
+        vehicleTypeId: Number(driverData?.vehicleTypeId || 0) || null,
+      }));
+
+    if (missingLiveLocation.length > 0) {
+      try {
+        const fallbackRows: any[] = await (prisma as any).comDriver.findMany({
+          where: {
+            id: { in: missingLiveLocation.map((driver) => driver.driverId) },
+            lastLocation: { not: null },
+          },
+          select: {
+            id: true,
+            lastLocation: true,
+          },
+        });
+
+        const fallbackLocationMap = new Map<number, { lat: number; lng: number }>();
+        for (const row of fallbackRows) {
+          const lastLocation = row.lastLocation as any;
+          if (!Array.isArray(lastLocation) || lastLocation.length < 2) continue;
+          const lat = Number(lastLocation[0]);
+          const lng = Number(lastLocation[1]);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+          fallbackLocationMap.set(Number(row.id), { lat, lng });
+        }
+
+        if (fallbackLocationMap.size > 0) {
+          useDatabaseFallback = true;
+        }
+
+        for (const driver of missingLiveLocation) {
+          const location = fallbackLocationMap.get(driver.driverId);
+          if (!location) continue;
+
+          availableDrivers.push({
+            driverId: driver.driverId,
+            location,
+            socketId: driver.socketId,
+            vehicleTypeId: driver.vehicleTypeId,
+          });
+        }
+      } catch (fallbackError) {
+        console.error('vehicle-selection: failed to load fallback locations', fallbackError);
+      }
+    }
 
     if (availableDrivers.length === 0) {
       return NextResponse.json({
@@ -483,6 +544,26 @@ export async function POST(request: NextRequest) {
 
         if (filtered.length > 0) {
           selected = sortByClosest(filtered).slice(0, maxVehicles);
+        }
+      }
+    }
+
+    // Backfill to requested count when strict windows produce fewer results.
+    if (selected.length < maxVehicles) {
+      const selectedDriverIds = new Set(selected.map((candidate) => candidate.driverId));
+      const fallbackCandidates = sortByClosest(
+        candidates.filter(
+          (candidate) =>
+            allowedTypes.includes(candidate.vehicleTypeId) &&
+            !selectedDriverIds.has(candidate.driverId)
+        )
+      );
+
+      if (fallbackCandidates.length > 0) {
+        const remainingSlots = Math.max(0, maxVehicles - selected.length);
+        selected = [...selected, ...fallbackCandidates.slice(0, remainingSlots)];
+        if (selectionMode === 'none') {
+          selectionMode = 'closest';
         }
       }
     }
