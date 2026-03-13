@@ -3143,11 +3143,23 @@ async function reassignRide(rideId) {
     }
 
     console.log(`Reassigning ride ${rideId} to another driver`);
-    const vehicleInfo = await getAvailableVehiclesForRide(ride);
+    let vehicleInfo = await getAvailableVehiclesForRide(ride);
+
+    // If all currently excluded drivers were already tried, refresh candidates from strategy
+    // to get the latest locations instead of waiting for rejection TTL expiry.
+    const rejectedDrivers = global.rejectedRides?.get(rideId);
+    if (vehicleInfo.length === 0 && rejectedDrivers && rejectedDrivers.size > 0) {
+      console.log(
+        `Ride ${rideId} exhausted current candidate list (${rejectedDrivers.size} rejected/timed out) - refreshing strategy candidates`
+      );
+      global.rejectedRides.delete(rideId);
+      vehicleInfo = await getAvailableVehiclesForRide(ride);
+    }
+
     if (vehicleInfo.length > 0) {
       await autoAssignRide(ride, vehicleInfo);
     } else {
-      console.log(`No alternative drivers available for ride ${rideId}`);
+      console.log(`No alternative drivers available for ride ${rideId} after strategy refresh`);
     }
   } catch (error) {
     console.error(`Error reassigning ride ${rideId}:`, error);
@@ -3633,9 +3645,9 @@ async function checkForNewRides() {
         // Check if this ride was rejected by any driver
         const rejectedDrivers = global.rejectedRides?.get(ride.id);
         if (rejectedDrivers && rejectedDrivers.size > 0) {
-          console.log(`Ride ${ride.id} was rejected by drivers: ${Array.from(rejectedDrivers).join(', ')}`);
-          // Skip this ride for now to avoid re-offering to rejected drivers
-          continue;
+          console.log(
+            `Ride ${ride.id} has temporary rejected/timed-out drivers: ${Array.from(rejectedDrivers).join(', ')}`
+          );
         }
 
         // Additional check: verify no driver is currently busy with this ride
@@ -3653,7 +3665,18 @@ async function checkForNewRides() {
         }
         // Get available vehicles for this ride
         try {
-          const vehicleInfo = await getAvailableVehiclesForRide(ride);
+          let vehicleInfo = await getAvailableVehiclesForRide(ride);
+
+          // Immediate rides: once the current strategy candidate list is exhausted,
+          // refresh from strategy to use latest driver coordinates.
+          if (!ride.scheduled && vehicleInfo.length === 0 && rejectedDrivers && rejectedDrivers.size > 0) {
+            console.log(
+              `Ride ${ride.id} exhausted current strategy candidates (${rejectedDrivers.size}) - requesting fresh candidates`
+            );
+            global.rejectedRides.delete(ride.id);
+            vehicleInfo = await getAvailableVehiclesForRide(ride);
+          }
+
           if (vehicleInfo.length > 0) {
             console.log(`Ride ${ride.id} will get one of these: ${vehicleInfo.join(', ')}`);
             // Auto-assign the ride to the closest available driver
