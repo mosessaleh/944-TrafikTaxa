@@ -167,6 +167,21 @@ model Settings {
   minImmediatePrice       Int   @default(0)    // Enforced minimum fare for immediate rides (DKK)
 }
 
+model CompanyNews {
+  id          Int      @id @default(autoincrement())
+  slug        String   @unique
+  title       String
+  body        String   @db.LongText
+  publishedAt DateTime
+  status      String   @default("ACTIVE") // ACTIVE, ENDED
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, publishedAt])
+  @@index([sortOrder, publishedAt])
+}
+
 model Ride {
   id             Int        @id @default(autoincrement())
   user           User       @relation(fields: [userId], references: [id])

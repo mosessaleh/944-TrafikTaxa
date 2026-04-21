@@ -63,9 +63,10 @@ export default function AdminSidebar() {
           />
         </button>
 
-        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${generalExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${generalExpanded ? 'max-h-[60vh] opacity-100 overflow-y-auto pr-1' : 'max-h-0 opacity-0'}`}>
           <NavLink href={getAdminPath()} icon={<LayoutDashboard size={18} />} label="Dashboard" />
           <NavLink href={getAdminPath('/bookings')} icon={<ClipboardList size={18} />} label="Bookings" />
+          <NavLink href={getAdminPath('/news')} icon={<Bell size={18} />} label="Company News" />
           <NavLink href={getAdminPath('/users')} icon={<Users size={18} />} label="Users" />
           <NavLink href={getAdminPath('/vehicles')} icon={<Car size={18} />} label="Vehicles" />
           <NavLink href={getAdminPath('/map')} icon={<MapPin size={18} />} label="Map" />
@@ -87,7 +88,7 @@ export default function AdminSidebar() {
           />
         </button>
 
-        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${partnersExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${partnersExpanded ? 'max-h-[50vh] opacity-100 overflow-y-auto pr-1' : 'max-h-0 opacity-0'}`}>
           <NavLink href={getAdminPath('/partners/overview')} icon={<Eye size={18} />} label="Overview" />
           <NavLink href={getAdminPath('/partners/companies')} icon={<Building size={18} />} label="Companies" />
           <NavLink href={getAdminPath('/partners/drivers')} icon={<Users size={18} />} label="Drivers" />
@@ -105,7 +106,7 @@ export default function AdminSidebar() {
           />
         </button>
 
-        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${systemExpanded ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}>
+        <div className={`overflow-hidden transition-all duration-300 ease-in-out ${systemExpanded ? 'max-h-[40vh] opacity-100 overflow-y-auto pr-1' : 'max-h-0 opacity-0'}`}>
           <NavLink href={getAdminPath('/settings')} icon={<Settings size={18} />} label="Settings" />
           <NavLink href={getAdminPath('/clear-data')} icon={<Trash2 size={18} />} label="Clear Data" variant="danger" />
         </div>
