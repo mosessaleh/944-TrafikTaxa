@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { useSearchParams } from 'next/navigation';
 
 // Import translation files
 import dkMessages from '../messages/dk.json';
@@ -174,6 +175,7 @@ export default function PaymentMethodsClient() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const t = useTranslations();
+  const searchParams = useSearchParams();
 
   // Load payment methods
   const loadPaymentMethods = async () => {
@@ -198,6 +200,14 @@ export default function PaymentMethodsClient() {
   useEffect(() => {
     loadPaymentMethods();
   }, []);
+
+  useEffect(() => {
+    if (searchParams.get('addCard') === '1') {
+      setShowAddCard(true);
+      setError('');
+      setMessage('');
+    }
+  }, [searchParams]);
 
   // Add new card
   const handleAddCard = () => {

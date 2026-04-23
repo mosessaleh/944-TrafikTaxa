@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { getUserFromRequest } from '@/lib/auth';
 
 /**
  * POST /api/complaints/[id]/reply - Add reply to complaint conversation
@@ -10,7 +10,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const user = await getUserFromCookie();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json(
         { ok: false, error: 'Authentication required' },

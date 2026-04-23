@@ -215,6 +215,56 @@ export async function getUserFromCookie(){
   }
 }
 
+export async function getUserFromBearerToken(request: Request) {
+  const authHeader = request.headers.get('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.substring(7);
+
+  try {
+    const decoded: any = verify(token, SECRET);
+
+    if (!decoded?.id || decoded?.type !== 'user') {
+      return null;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: Number(decoded.id) },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        address: true,
+        role: true,
+        language: true as any,
+        emailVerified: true,
+        pendingEmail: true,
+        canPayByInvoice: true,
+        createdAt: true,
+      }
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      ...user,
+      type: 'user',
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getUserFromRequest(request: Request) {
+  return (await getUserFromCookie()) || (await getUserFromBearerToken(request));
+}
+
 export async function requireAdmin(){
   const u = await getUserFromCookie();
   if (!u) throw Object.assign(new Error('Unauthorized'), { status: 401 });

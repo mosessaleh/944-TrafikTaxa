@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { getUserFromRequest } from '@/lib/auth';
 import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 import { notifyAdmin } from '@/lib/notify';
 
@@ -10,7 +10,7 @@ import { notifyAdmin } from '@/lib/notify';
  */
 export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromCookie();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json(
         { ok: false, error: 'Authentication required' },
@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const user = await getUserFromCookie();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json(
         { ok: false, error: 'Authentication required' },
@@ -181,7 +181,7 @@ export async function POST(request: NextRequest) {
 
   try {
     // Authentication
-    const user = await getUserFromCookie();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json(
         { ok: false, error: 'Authentication required' },
