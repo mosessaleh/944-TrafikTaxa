@@ -2,6 +2,8 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 function CardPaymentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -13,6 +15,12 @@ function CardPaymentContent() {
   const [error, setError] = useState<string>("");
 
   useEffect(() => {
+    if (!IS_DEV) {
+      setError("Card checkout is temporarily unavailable in this environment.");
+      setLoading(false);
+      return;
+    }
+
     console.log("CardPayment: Initializing payment", { bookingId, invoiceId });
 
     if (!bookingId && !invoiceId) {
@@ -112,6 +120,11 @@ function CardPaymentContent() {
   }, [bookingId, invoiceId, searchParams]);
 
   const handlePayment = async () => {
+    if (!IS_DEV) {
+      setError("Mock card payment is disabled outside development.");
+      return;
+    }
+
     if (!amount) return;
     
     // Determine the actual booking ID to use

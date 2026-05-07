@@ -3,14 +3,15 @@ import { getUserFromBearerToken, setSessionCookie } from '@/lib/auth';
 
 const isSafeRedirect = (value: string) => value.startsWith('/') && !value.startsWith('//');
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
     const user = await getUserFromBearerToken(request);
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
 
-    const redirectTarget = request.nextUrl.searchParams.get('redirect') || '/';
+    const body = await request.json().catch(() => ({} as { redirect?: string }));
+    const redirectTarget = typeof body.redirect === 'string' ? body.redirect : '/';
     const targetPath = isSafeRedirect(redirectTarget) ? redirectTarget : '/';
 
     const authHeader = request.headers.get('authorization');

@@ -8,6 +8,16 @@ export interface BookingUpdatePayload {
   status: string;
   driverId?: number;
   driver?: any;
+  driverName?: string | null;
+  driverPhone?: string | null;
+  eta?: number | null | {
+    timeMinutes?: number | null;
+    distanceKm?: number | null;
+  };
+  location?: {
+    lat: number;
+    lng: number;
+  } | null;
   timestamp: string;
 }
 
@@ -20,6 +30,9 @@ export interface NotificationPayload {
 export interface ChatMessagePayload {
   bookingId: number;
   message: string;
-  sender: string;
-  timestamp: string;
+  sender?: string;
+  id?: string | number;
+  messageId?: string | number;
+  fromUserId?: string | number;
+  timestamp?: string | number;
 }

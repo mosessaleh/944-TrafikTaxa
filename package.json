@@ -4,8 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "ts-node -O \"{\\\"module\\\":\\\"commonjs\\\"}\" server.js",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
+    "postinstall": "prisma generate",
     "lint": "next lint",
     "test": "jest",
     "test:watch": "jest --watch",

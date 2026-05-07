@@ -11,12 +11,68 @@ import { calculateDistance } from '@/lib/distance';
 import { authorizeCardPayment } from '@/lib/payment-processor';
 import { notifyBookingConfirmedUnified } from '@/lib/notification-service';
 
+const prismaAny = prisma as any;
+
 type SettingsMinControls = {
   minScheduledLeadMinutes: number;
   minScheduledPrice: number;
   allowImmediateBooking: boolean;
   allowScheduledBooking: boolean;
 };
+
+type BookingHistoryRow = {
+  id: number;
+  riderName: string;
+  passengers: number | null;
+  pickupAddress: string;
+  dropoffAddress: string;
+  stopAddress: string | null;
+  scheduled: boolean | number | null;
+  pickupTime: Date | string;
+  distanceKm: number | null;
+  durationMin: number | null;
+  price: number;
+  status: string;
+  explanation: string | null;
+  cancellationReason: string | null;
+  canceledBy: string | null;
+  paymentStatus: string | null;
+  paymentMethod: string | null;
+  vehicleTypeId: number;
+  driverNote: string | null;
+  customerRating: number | null;
+  customerReview: string | null;
+  customerRatedAt: Date | string | null;
+  createdAt: Date | string;
+  driverId: number | null;
+  vehicleTypeTitle: string | null;
+  vehicleTypeCapacity: number | null;
+};
+
+async function getRideHistoryColumns() {
+  const rows = await prisma.$queryRawUnsafe<Array<{ COLUMN_NAME?: string; column_name?: string }>>(
+    `
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'Ride'
+        AND COLUMN_NAME IN (
+          'driverNote',
+          'customerRating',
+          'customerReview',
+          'customerRatedAt',
+          'cancellationReason',
+          'canceledBy'
+        )
+    `
+  );
+
+  return new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => String(row?.COLUMN_NAME || row?.column_name || ''))
+      .filter(Boolean)
+  );
+}
 
 function normalizeMinInt(value: unknown, fallback = 0) {
   const parsed = Number(value);
@@ -85,6 +141,10 @@ const createBookingSchema = z.object({
   vehicleTypeId: z.number().int().positive("Invalid vehicle type"),
   scheduled: z.boolean(),
   pickupTime: z.string(),
+  driverNote: z.string()
+    .max(500, "Driver note is too long")
+    .optional()
+    .nullable(),
 }).superRefine((data, ctx) => {
   const now = new Date();
   const maxFuture = new Date();
@@ -168,44 +228,56 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch bookings with vehicle type information
-    const bookings = await prisma.ride.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        riderName: true,
-        passengers: true,
-        pickupAddress: true,
-        dropoffAddress: true,
-        stopAddress: true,
-        scheduled: true,
-        pickupTime: true,
-        distanceKm: true,
-        durationMin: true,
-        price: true,
-        status: true,
-        explanation: true,
-        cancellationReason: true,
-        canceledBy: true,
-        paymentStatus: true,
-        paymentMethod: true,
-        createdAt: true,
-        driverId: true,
-        vehicleType: {
-          select: {
-            title: true,
-            capacity: true
-          }
-        }
-      }
-    });
+    // Use raw SQL here so booking history keeps working even if Prisma Client
+    // was not regenerated yet after adding ride feedback fields.
+    const existingRideColumns = await getRideHistoryColumns();
+    const optionalRideColumn = (columnName: string) =>
+      existingRideColumns.has(columnName)
+        ? `r.${columnName}`
+        : `NULL AS ${columnName}`;
+
+    const bookings = await prisma.$queryRawUnsafe<BookingHistoryRow[]>(
+      `
+        SELECT
+          r.id,
+          r.riderName,
+          r.passengers,
+          r.pickupAddress,
+          r.dropoffAddress,
+          r.stopAddress,
+          r.scheduled,
+          r.pickupTime,
+          r.distanceKm,
+          r.durationMin,
+          r.price,
+          r.status,
+          r.explanation,
+          ${optionalRideColumn('cancellationReason')},
+          ${optionalRideColumn('canceledBy')},
+          r.paymentStatus,
+          r.paymentMethod,
+          r.vehicleTypeId,
+          ${optionalRideColumn('driverNote')},
+          ${optionalRideColumn('customerRating')},
+          ${optionalRideColumn('customerReview')},
+          ${optionalRideColumn('customerRatedAt')},
+          r.createdAt,
+          r.driverId,
+          vt.title AS vehicleTypeTitle,
+          vt.capacity AS vehicleTypeCapacity
+        FROM Ride r
+        LEFT JOIN VehicleType vt ON vt.id = r.vehicleTypeId
+        WHERE r.userId = ?
+        ORDER BY r.createdAt DESC
+      `,
+      user.id
+    );
 
     // Fetch complaint status for each booking
     const bookingsWithComplaints = await Promise.all(
       bookings.map(async (booking: typeof bookings[number]) => {
         try {
-          const complaint = await prisma.complaint.findFirst({
+          const complaint = await prismaAny.complaint.findFirst({
             where: { rideId: booking.id },
             select: {
               id: true,
@@ -238,7 +310,7 @@ export async function GET(request: NextRequest) {
           pickupAddress: booking.pickupAddress,
           dropoffAddress: booking.dropoffAddress,
           stopAddress: booking.stopAddress,
-          pickupTime: booking.pickupTime.toISOString(),
+          pickupTime: new Date(booking.pickupTime).toISOString(),
           distanceKm: booking.distanceKm,
           durationMin: booking.durationMin,
           price: booking.price,
@@ -248,11 +320,19 @@ export async function GET(request: NextRequest) {
           cancellationReason: (booking as any).cancellationReason || null,
           canceledBy: (booking as any).canceledBy || null,
           paymentMethod: booking.paymentMethod,
-          scheduled: booking.scheduled,
-          vehicleType: booking.vehicleType || { title: 'Standard', capacity: 4 },
+          vehicleTypeId: String(booking.vehicleTypeId),
+          driverNote: booking.driverNote,
+          customerRating: booking.customerRating,
+          customerReview: booking.customerReview,
+          customerRatedAt: booking.customerRatedAt ? new Date(booking.customerRatedAt).toISOString() : null,
+          scheduled: Boolean(booking.scheduled),
+          vehicleType: {
+            title: booking.vehicleTypeTitle || 'Standard',
+            capacity: booking.vehicleTypeCapacity || 4,
+          },
           hasComplaint: booking.hasComplaint,
           complaintStatus: booking.complaintStatus,
-          createdAt: booking.createdAt.toISOString()
+          createdAt: new Date(booking.createdAt).toISOString()
         }));
 
     return NextResponse.json({
@@ -323,6 +403,7 @@ export async function POST(request: NextRequest) {
       vehicleTypeId: parseInt(rawData.vehicleTypeId),
       scheduled: rawData.scheduled === 'true' || rawData.scheduled === true,
       pickupTime: rawData.pickupTime, // Keep as string for date validation
+      driverNote: typeof rawData.driverNote === 'string' ? sanitizeInput(rawData.driverNote, 'text') : null,
       longWaitAccepted: rawData.longWaitAccepted === 'true' || rawData.longWaitAccepted === true
     };
 
@@ -364,7 +445,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify vehicle type exists and is active
-    const vehicleType = await prisma.vehicleType.findUnique({
+    const vehicleType = await prismaAny.vehicleType.findUnique({
       where: { id: validatedData.vehicleTypeId },
       select: { id: true, active: true }
     });
@@ -486,7 +567,7 @@ export async function POST(request: NextRequest) {
     let selectedPaymentMethodId: number | null = null;
     if (paymentMethod === 'card') {
       // Find the default or first active card payment method
-      const defaultCard = await (prisma as any).userPaymentMethod.findFirst({
+      const defaultCard = await prismaAny.userPaymentMethod.findFirst({
         where: {
           userId: user.id,
           type: 'card',
@@ -499,7 +580,7 @@ export async function POST(request: NextRequest) {
         selectedPaymentMethodId = defaultCard.id;
       } else {
         // Get first active card if no default
-        const firstCard = await (prisma as any).userPaymentMethod.findFirst({
+        const firstCard = await prismaAny.userPaymentMethod.findFirst({
           where: {
             userId: user.id,
             type: 'card',
@@ -517,7 +598,7 @@ export async function POST(request: NextRequest) {
 
     // Create booking with PENDING status (awaiting payment confirmation)
     console.log(`[DEBUG] Creating booking with status PENDING for user ${user.id}`);
-    const booking = await prisma.ride.create({
+    const booking = await prismaAny.ride.create({
       data: {
         userId: user.id,
         riderName: validatedData.riderName,
@@ -536,6 +617,7 @@ export async function POST(request: NextRequest) {
         status: 'PENDING', // Awaiting payment confirmation
         paymentStatus: 'UNPAID', // Awaiting payment method selection
         paymentMethod: paymentMethod,
+        driverNote: validatedData.driverNote?.trim() ? validatedData.driverNote.trim() : null,
         vehicleTypeId: validatedData.vehicleTypeId,
         driverQueue,
         ...(selectedPaymentMethodId && { savedPaymentMethodId: selectedPaymentMethodId })
@@ -597,7 +679,7 @@ export async function POST(request: NextRequest) {
         console.log(`[DEBUG] Authorizing card payment for booking ${booking.id}, selectedPaymentMethodId: ${selectedPaymentMethodId}`);
 
         // Get the payment method details
-        const paymentMethodDetails = await prisma.userPaymentMethod.findUnique({
+        const paymentMethodDetails = await prismaAny.userPaymentMethod.findUnique({
           where: { id: selectedPaymentMethodId },
           select: { id: true, token: true, provider: true, type: true }
         });
@@ -614,7 +696,7 @@ export async function POST(request: NextRequest) {
 
           if (authResult.success) {
             // Update booking with payment capture and attempt تهيئة driverQueue لسائق تتابع مجدول
-            const rideAfterPayment = await prisma.ride.update({
+            const rideAfterPayment = await prismaAny.ride.update({
               where: { id: booking.id },
               data: {
                 status: 'CONFIRMED',
@@ -669,7 +751,7 @@ export async function POST(request: NextRequest) {
                       ? rideAfterPayment.driverQueue.filter((v: any) => Number.isInteger(v)).map((v: any) => Number(v))
                       : [];
                     const merged = Array.from(new Set([...(currentQueue || []), ...recommendedQueue]));
-                    await prisma.ride.update({
+                    await prismaAny.ride.update({
                       where: { id: rideAfterPayment.id },
                       data: { driverQueue: merged }
                     });
@@ -717,7 +799,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get updated booking status
-    const updatedBooking = await prisma.ride.findUnique({
+    const updatedBooking = await prismaAny.ride.findUnique({
       where: { id: booking.id },
       select: {
         status: true,
@@ -730,7 +812,7 @@ export async function POST(request: NextRequest) {
     const adminEmail = process.env.ADMIN_EMAIL || process.env.CONTACT_EMAIL;
     if (adminEmail) {
       // Fetch current cancellation fees from settings
-      const settings = await prisma.settings.findFirst();
+      const settings = await prismaAny.settings.findFirst();
 
       const isPaymentAuthorized = updatedBooking?.status === 'CONFIRMED';
       const title = isPaymentAuthorized ? 'New booking (payment authorized)' : 'New scheduled booking (post-trip payment)';
@@ -756,6 +838,7 @@ export async function POST(request: NextRequest) {
             <li><strong>Duration:</strong> ${booking.durationMin} minutes</li>
             <li><strong>Price:</strong> ${booking.price} DKK</li>
             <li><strong>Payment Method:</strong> ${paymentMethod}</li>
+            ${booking.driverNote ? `<li><strong>Driver Note:</strong> ${booking.driverNote}</li>` : ''}
             <li><strong>Status:</strong> ${updatedBooking?.status || 'PENDING'} (${updatedBooking?.explanation || 'awaiting payment confirmation'})</li>
           </ul>
           <h3>Cancellation Policy</h3>

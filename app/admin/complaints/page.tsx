@@ -5,6 +5,8 @@ import AdminComplaintsClient from '@/components/AdminComplaintsClient';
 import ComplaintsAnalytics from '@/components/ComplaintsAnalytics';
 import { ArrowLeft, MessageSquare, AlertCircle, CheckCircle, User, BarChart3, List, TrendingUp } from 'lucide-react';
 
+export const dynamic = 'force-dynamic';
+
 export default function AdminComplaints() {
   const [activeTab, setActiveTab] = useState<'complaints' | 'analytics'>('complaints');
   const [complaints, setComplaints] = useState<any[]>([]);

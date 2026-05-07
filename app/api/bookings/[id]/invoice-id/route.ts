@@ -28,7 +28,7 @@ export async function GET(
     }
 
     if (booking.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
     // Get the invoice ID for this booking

@@ -59,10 +59,16 @@ import crypto from 'crypto';
 
 // CPR Encryption/Decryption using AES-256-GCM
 const CPR_ENCRYPTION_KEY = process.env.CPR_ENCRYPTION_KEY;
+const PAYMENT_TOKEN_ENCRYPTION_KEY =
+  process.env.PAYMENT_TOKEN_ENCRYPTION_KEY ||
+  process.env.AUTH_SECRET ||
+  process.env.JWT_SECRET ||
+  process.env.CPR_ENCRYPTION_KEY;
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
 const IV_LENGTH = 16; // 128 bits
 const TAG_LENGTH = 16; // 128 bits
+const PAYMENT_TOKEN_PREFIX = 'enc:v1:';
 
 // Only throw error if CPR functions are actually called and key is missing
 function requireCPREncryptionKey() {
@@ -71,10 +77,23 @@ function requireCPREncryptionKey() {
   }
 }
 
+function requirePaymentTokenEncryptionKey() {
+  if (!PAYMENT_TOKEN_ENCRYPTION_KEY) {
+    throw new Error(
+      'PAYMENT_TOKEN_ENCRYPTION_KEY or AUTH_SECRET/JWT_SECRET environment variable is required'
+    );
+  }
+}
+
 // Derive key from environment variable
 const getEncryptionKey = (): Buffer => {
   requireCPREncryptionKey();
   return crypto.scryptSync(CPR_ENCRYPTION_KEY!, 'salt', KEY_LENGTH);
+};
+
+const getPaymentTokenEncryptionKey = (): Buffer => {
+  requirePaymentTokenEncryptionKey();
+  return crypto.scryptSync(PAYMENT_TOKEN_ENCRYPTION_KEY!, 'payment-token-salt', KEY_LENGTH);
 };
 
 export function encryptCPR(plainCPR: string): string {
@@ -114,6 +133,53 @@ export function decryptCPR(encryptedCPR: string): string {
   } catch (error) {
     console.error('CPR decryption failed:', error);
     throw new Error('Failed to decrypt CPR data');
+  }
+}
+
+function encryptWithKey(value: string, key: Buffer): string {
+  const iv = crypto.randomBytes(IV_LENGTH);
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+
+  let encrypted = cipher.update(value, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+}
+
+function decryptWithKey(value: string, key: Buffer): string {
+  const parts = value.split(':');
+  if (parts.length !== 3) {
+    throw new Error('Invalid encrypted value format');
+  }
+
+  const iv = Buffer.from(parts[0], 'hex');
+  const authTag = Buffer.from(parts[1], 'hex');
+  const encrypted = parts[2];
+
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
+
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+
+export function encryptPaymentToken(token: string): string {
+  const encrypted = encryptWithKey(token, getPaymentTokenEncryptionKey());
+  return `${PAYMENT_TOKEN_PREFIX}${encrypted}`;
+}
+
+export function decryptPaymentToken(token: string): string {
+  if (!token.startsWith(PAYMENT_TOKEN_PREFIX)) {
+    return token;
+  }
+
+  try {
+    return decryptWithKey(token.slice(PAYMENT_TOKEN_PREFIX.length), getPaymentTokenEncryptionKey());
+  } catch (error) {
+    console.error('Payment token decryption failed:', error);
+    throw new Error('Failed to decrypt payment token');
   }
 }
 

@@ -1,5 +1,6 @@
 import { prisma } from './db';
 import { stripe } from './stripe';
+import { decryptPaymentToken } from './crypto';
 
 /**
  * Payment Processor Service
@@ -104,7 +105,11 @@ export async function processCompletedTripPayments(): Promise<{
  * Authorize and capture card payment (for booking confirmation)
  */
 export async function authorizeCardPayment(booking: any, paymentMethod: any): Promise<PaymentResult> {
-  console.log(`[DEBUG] authorizeCardPayment called for booking ${booking.id}, paymentMethod:`, paymentMethod);
+  console.log(`[DEBUG] authorizeCardPayment called for booking ${booking.id}, paymentMethod:`, {
+    id: paymentMethod?.id,
+    provider: paymentMethod?.provider,
+    type: paymentMethod?.type
+  });
 
   if (!paymentMethod || paymentMethod.provider !== 'stripe') {
     return {
@@ -114,6 +119,7 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
   }
 
   const stripeClient = stripe();
+  const paymentMethodToken = decryptPaymentToken(paymentMethod.token);
 
   try {
     // Get the user's Stripe customer ID from database
@@ -133,7 +139,7 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
 
     // Ensure the payment method is attached to the customer
     try {
-      await stripeClient.paymentMethods.attach(paymentMethod.token, { customer: user.stripeCustomerId });
+      await stripeClient.paymentMethods.attach(paymentMethodToken, { customer: user.stripeCustomerId });
     } catch (attachError: any) {
       // Ignore if already attached
       if (!attachError.message?.includes('already attached')) {
@@ -153,7 +159,7 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
 
     // Confirm the payment intent with the specific payment method
     const confirmedIntent = await stripeClient.paymentIntents.confirm(paymentIntent.id, {
-      payment_method: paymentMethod.token
+      payment_method: paymentMethodToken
     });
 
     if (confirmedIntent.status === 'requires_capture') {
@@ -385,6 +391,8 @@ export async function chargeCancellationFee(
     };
   }
 
+  const paymentMethodToken = decryptPaymentToken(paymentMethod.token);
+
   // Get the user's Stripe customer ID from database
   const user = await prisma.user.findUnique({
     where: { id: trip.userId },
@@ -402,7 +410,7 @@ export async function chargeCancellationFee(
     const paymentIntent = await stripeClient.paymentIntents.create({
       amount: Math.round(chargeAmountDkk * 100),
       currency: 'dkk',
-      payment_method: paymentMethod.token,
+      payment_method: paymentMethodToken,
       customer: user.stripeCustomerId,
       confirm: true,
       automatic_payment_methods: {
@@ -453,13 +461,13 @@ export async function chargeCancellationFee(
  */
 async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise<PaymentResult> {
   const stripeClient = stripe();
+  const paymentMethodToken = decryptPaymentToken(paymentMethod.token);
   const amountDkk = typeof trip.captureAmount === 'number' ? trip.captureAmount : trip.price;
   const safeAmountDkk = Math.max(0, Math.round(amountDkk));
   const amountOre = Math.round(safeAmountDkk * 100);
 
   console.log(`🔄 Processing Stripe payment for trip ${trip.id}, paymentMethod:`, {
     id: paymentMethod.id,
-    token: paymentMethod.token,
     provider: paymentMethod.provider,
     type: paymentMethod.type
   });
@@ -534,7 +542,7 @@ async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise
     const paymentIntent = await stripeClient.paymentIntents.create({
       amount: amountOre, // Convert to øre
       currency: 'dkk',
-      payment_method: paymentMethod.token, // Stripe payment method ID
+      payment_method: paymentMethodToken, // Stripe payment method ID
       customer: user.stripeCustomerId, // Required for payment methods from setup intents
       confirm: true, // Confirm immediately
       automatic_payment_methods: {

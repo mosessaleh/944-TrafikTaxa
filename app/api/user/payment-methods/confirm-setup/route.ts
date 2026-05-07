@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthSecret, getUserFromCookie } from '@/lib/auth';
+import { encryptPaymentToken } from '@/lib/crypto';
 import { prisma } from '@/lib/db';
 import { stripe } from '@/lib/stripe';
 import { verify } from 'jsonwebtoken';
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
         userId: user.id,
         type: 'card',
         provider: 'stripe',
-        token: setupIntent.payment_method as string, // Store Stripe payment method ID
+        token: encryptPaymentToken(setupIntent.payment_method as string),
         last4: card.last4,
         expiryMonth: card.exp_month,
         expiryYear: card.exp_year,

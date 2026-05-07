@@ -16,10 +16,8 @@ export async function GET(request: NextRequest) {
   try {
     await ensureDriverScheduleTables(prisma);
 
-    console.log('Analytics API called');
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('No auth header');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -33,7 +31,6 @@ export async function GET(request: NextRequest) {
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    console.log('Decoded driverId:', driverId);
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') || 'month'; // day, week, month
 
@@ -209,8 +206,8 @@ export async function GET(request: NextRequest) {
     };
 
     return NextResponse.json(analytics);
-  } catch (error) {
-    console.error('Analytics API error:', error);
+  } catch (error: any) {
+    console.error('driver/analytics: error', { message: error?.message });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

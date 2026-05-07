@@ -1,7 +1,61 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { sanitizeInput } from '@/lib/sanitize';
 import { limitOrThrow, clientIpKey } from '@/lib/rate-limit';
+
+function normalizeOriginList(values: Array<string | undefined>): string[] {
+  const allowedOrigins = new Set<string>();
+
+  for (const value of values) {
+    if (!value) continue;
+
+    const entries = value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    for (const entry of entries) {
+      try {
+        const parsed = new URL(entry);
+        allowedOrigins.add(`${parsed.protocol}//${parsed.host}`);
+      } catch {
+        // Ignore invalid configured origins.
+      }
+    }
+  }
+
+  return Array.from(allowedOrigins);
+}
+
+function normalizeRequestOrigin(value: string | null): string | null {
+  if (!value) return null;
+
+  try {
+    const parsed = new URL(value);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return null;
+  }
+}
+
+function getAllowedOrigins(): string[] {
+  if (process.env.NODE_ENV === 'development') {
+    return normalizeOriginList([
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      process.env.PUBLIC_BASE_URL,
+      process.env.NEXT_PUBLIC_APP_URL,
+      process.env.APP_URL,
+      process.env.ALLOWED_DRIVER_ORIGINS,
+    ]);
+  }
+
+  return normalizeOriginList([
+    process.env.PUBLIC_BASE_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.APP_URL,
+    process.env.ALLOWED_DRIVER_ORIGINS,
+  ]);
+}
 
 export async function middleware(req: NextRequest) {
   // Generate a per-request nonce for inline scripts/styles
@@ -13,20 +67,19 @@ export async function middleware(req: NextRequest) {
 
   const pathname = req.nextUrl.pathname;
 
+  if (pathname.startsWith('/api/dev/') && process.env.NODE_ENV !== 'development') {
+    return NextResponse.json(
+      { ok: false, error: 'Not available' },
+      { status: 404 }
+    );
+  }
+
   // Enhanced Origin validation for CSRF protection
   const origin = req.headers.get('origin');
   const referer = req.headers.get('referer');
-  const host = req.headers.get('host');
 
   // Define allowed origins
-  const allowedOrigins = [
-    process.env.NODE_ENV === 'production'
-      ? process.env.PUBLIC_BASE_URL || 'https://944.dk'
-      : 'http://localhost:3000',
-    'http://192.168.0.146:3000', // Driver app origin
-    'http://10.51.194.68:3000', // Additional driver app origin
-    // Add additional allowed origins if needed
-  ].filter(Boolean);
+  const allowedOrigins = getAllowedOrigins();
 
   // Check origin for sensitive operations
   const sensitivePaths = ['/api/', '/admin/'];
@@ -34,7 +87,8 @@ export async function middleware(req: NextRequest) {
 
   if (isSensitivePath && req.method !== 'GET' && req.method !== 'HEAD') {
     // Validate origin for POST/PUT/DELETE requests
-    if (origin && !allowedOrigins.includes(origin)) {
+    const normalizedOrigin = normalizeRequestOrigin(origin);
+    if (normalizedOrigin && !allowedOrigins.includes(normalizedOrigin)) {
       return NextResponse.json(
         { error: 'Unauthorized origin' },
         { status: 403 }
@@ -44,15 +98,10 @@ export async function middleware(req: NextRequest) {
     // Additional referer check for extra security
     if (referer) {
       try {
-        const refererUrl = new URL(referer);
-        const isAllowedReferer = allowedOrigins.some(allowedOrigin => {
-          try {
-            const allowedUrl = new URL(allowedOrigin);
-            return refererUrl.hostname === allowedUrl.hostname;
-          } catch {
-            return false; // Skip invalid allowed origins
-          }
-        });
+        const normalizedReferer = normalizeRequestOrigin(referer);
+        const isAllowedReferer = normalizedReferer
+          ? allowedOrigins.includes(normalizedReferer)
+          : false;
 
         if (!isAllowedReferer) {
           return NextResponse.json(
@@ -191,5 +240,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/.*|favicon.ico|api/dev/.*).*)']
+  matcher: ['/((?!_next/.*|favicon.ico).*)']
 };

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { ensureDevelopmentOnly } from '@/lib/dev-route';
 
 const defaults = [
   { key:'SEDAN5', title:'5-seater car', capacity:5, multiplier:1.00, active:true },
@@ -9,6 +10,9 @@ const defaults = [
 ] as const;
 
 export async function POST(req: Request){
+  const blocked = ensureDevelopmentOnly();
+  if (blocked) return blocked;
+
   try{
     const { token } = await req.json();
     if (!token || token !== process.env.ADMIN_TOKEN) return NextResponse.json({ ok:false }, { status:403 });

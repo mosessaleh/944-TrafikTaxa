@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { setSessionCookie } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
 
 export async function POST(req: Request){
@@ -98,32 +99,8 @@ export async function POST(req: Request){
     // إنشاء الجلسة ككوكي
     const token = authMod.signToken({ id: authenticatedUser.id, type: userType });
     const redirectUrl = userType === 'partner' ? '/partner/dashboard' : '/';
+    await setSessionCookie(token);
     const res = NextResponse.json({ ok:true, user: authenticatedUser, token: token, next: redirectUrl });
-    
-        const isProd = process.env.NODE_ENV === 'production';
-        const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-        const secure = isProd ? true : envSecure;
-        const name = isProd ? '__Host-session' : 'session';
-    
-        res.cookies.set(name, token, {
-          httpOnly: true,
-          sameSite: 'lax',
-          secure,
-          path: '/',
-          maxAge: 60*60*24*7
-        });
-    
-        // Clear legacy cookie name when migrating to __Host- prefix
-        if (name === '__Host-session') {
-          res.cookies.set('session', '', {
-            httpOnly: true,
-            sameSite: 'lax',
-            secure,
-            path: '/',
-            maxAge: 0,
-            expires: new Date(0)
-          });
-        }
 
     // تسجيل تسجيل دخول ناجح
     await AuditLogger.logLoginSuccess(authenticatedUser.id.toString(), rl.clientIpKey(req), req.headers.get('user-agent') || '');

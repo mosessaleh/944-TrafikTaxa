@@ -4,8 +4,6 @@ import { prisma } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('Location update API called');
-
     // Verify driver authentication
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -16,15 +14,11 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-    console.log('Location update - Token received:', token ? 'present' : 'missing');
-    console.log('Location update - Token length:', token?.length || 0);
 
     try {
       var driver = await requireDriverByJWT(request as any);
-      console.log('Location update - Driver authenticated:', driver.id, driver.car);
     } catch (error: any) {
-      console.log('Location update - Driver authentication failed:', error.message);
-      console.log('Location update - Error details:', error);
+      console.warn('driver/location-update: authentication failed', { message: error?.message });
       return NextResponse.json(
         { error: error.message || 'Invalid or expired token' },
         { status: error.status || 401 }
@@ -91,9 +85,8 @@ export async function POST(request: NextRequest) {
       message: 'Location updated successfully',
       timestamp: updateData.lastLocationUpdate,
     });
-
-  } catch (error) {
-    console.error('Location update error:', error);
+  } catch (error: any) {
+    console.error('driver/location-update: error', { message: error?.message });
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

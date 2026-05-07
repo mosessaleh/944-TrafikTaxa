@@ -52,46 +52,69 @@ export type OriginValidationResult = {
   reason?: string;
 };
 
-export function validateRequestOrigin(req: Request): OriginValidationResult {
-  // Check if this is an API key authenticated request (skip origin validation)
-  const authHeader = req.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    // For API key requests, allow in both dev and production
-    // Additional validation can be done at the endpoint level
-    return { ok: true };
+function normalizeOriginList(values: Array<string | undefined>): string[] {
+  const uniqueOrigins = new Set<string>();
+
+  for (const value of values) {
+    if (!value) continue;
+
+    const items = value.split(',').map((item) => item.trim()).filter(Boolean);
+    for (const item of items) {
+      try {
+        const parsed = new URL(item);
+        uniqueOrigins.add(`${parsed.protocol}//${parsed.host}`);
+      } catch {
+        // Skip invalid configured origins instead of trusting malformed values.
+      }
+    }
   }
 
+  return Array.from(uniqueOrigins);
+}
+
+function getTrustedAppOrigins(): string[] {
+  return normalizeOriginList([
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.APP_URL,
+    process.env.PUBLIC_BASE_URL
+  ]);
+}
+
+function matchesTrustedOrigin(headerValue: string | null, allowedOrigins: string[]): boolean {
+  if (!headerValue) return false;
+
+  try {
+    const parsed = new URL(headerValue);
+    const origin = `${parsed.protocol}//${parsed.host}`;
+    return allowedOrigins.includes(origin);
+  } catch {
+    return false;
+  }
+}
+
+export function validateRequestOrigin(req: Request): OriginValidationResult {
   // Only enforce strict Origin/Referer checks in production to avoid breaking local/dev tools
   if (process.env.NODE_ENV !== 'production') {
     return { ok: true };
   }
 
-  const allowedOrigin = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
-  if (!allowedOrigin) {
-    // If not configured, do not block requests to avoid accidental outage
-    return { ok: true };
+  const allowedOrigins = getTrustedAppOrigins();
+  if (allowedOrigins.length === 0) {
+    return { ok: false, reason: 'Trusted app origin is not configured' };
   }
 
   const origin = req.headers.get('origin');
   const referer = req.headers.get('referer');
-  const header = origin || referer;
 
-  if (!header) {
+  if (matchesTrustedOrigin(origin, allowedOrigins) || matchesTrustedOrigin(referer, allowedOrigins)) {
+    return { ok: true };
+  }
+
+  if (!origin && !referer) {
     return { ok: false, reason: 'Missing Origin/Referer header' };
   }
 
-  try {
-    const requestUrl = new URL(header);
-    const allowedUrl = new URL(allowedOrigin);
-
-    if (requestUrl.protocol === allowedUrl.protocol && requestUrl.host === allowedUrl.host) {
-      return { ok: true };
-    }
-
-    return { ok: false, reason: 'Untrusted Origin/Referer' };
-  } catch {
-    return { ok: false, reason: 'Invalid Origin/Referer' };
-  }
+  return { ok: false, reason: 'Untrusted Origin/Referer' };
 }
 
 /**
@@ -99,6 +122,11 @@ export function validateRequestOrigin(req: Request): OriginValidationResult {
  */
 export function validateDriverApiOrigin(req: Request): OriginValidationResult {
   const authHeader = req.headers.get('authorization');
+  const allowedDriverOrigins = normalizeOriginList([
+    process.env.ALLOWED_DRIVER_ORIGINS,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.APP_URL
+  ]);
 
   // If using API key authentication, apply environment-specific rules
   if (authHeader?.startsWith('Bearer ')) {
@@ -107,17 +135,21 @@ export function validateDriverApiOrigin(req: Request): OriginValidationResult {
       return { ok: true };
 
     } else {
-      // In production, check against allowed driver server origins
-      const allowedDriverOrigins = process.env.ALLOWED_DRIVER_ORIGINS?.split(',') || [];
-
       const origin = req.headers.get('origin');
-      if (origin && allowedDriverOrigins.includes(origin)) {
+      const referer = req.headers.get('referer');
+      if (
+        matchesTrustedOrigin(origin, allowedDriverOrigins) ||
+        matchesTrustedOrigin(referer, allowedDriverOrigins)
+      ) {
         return { ok: true };
       }
 
-      // Allow requests without origin for backward compatibility
-      // Additional security can be implemented via IP whitelisting if needed
-      return { ok: true };
+      // Native/mobile clients may omit these headers; keep them working while still rejecting mismatched browser origins.
+      if (!origin && !referer) {
+        return { ok: true };
+      }
+
+      return { ok: false, reason: 'Untrusted driver origin' };
     }
   }
 

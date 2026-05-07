@@ -4,7 +4,6 @@ import { prisma } from '@/lib/db';
 import { verify } from 'jsonwebtoken';
 import { chargeSavedPaymentMethod, PaymentResult } from '@/lib/payment-processor';
 import { notifyUserInvoiceReady } from '@/lib/notify';
-import { getSocketServer } from '@/lib/socket-server';
 import { getAuthSecret } from '@/lib/auth';
 
 const JWT_SECRET = getAuthSecret();
@@ -13,14 +12,14 @@ const UpdateStatusSchema = z.object({
   status: z.enum(['PICKED_UP', 'COMPLETED']),
   pickedAt: z.string().optional(),
   droppedAt: z.string().optional(),
-  droppedOnLocation: z.array(z.number()).optional(), // [lat, lon]
+  droppedOnLocation: z.array(z.number()).optional(),
 });
 
 const allowedStatusTransitions: Record<string, string[]> = {
   DISPATCHED: ['PICKED_UP'],
   ONGOING: ['PICKED_UP'],
   PICKED_UP: ['COMPLETED'],
-  IN_PROGRESS: ['COMPLETED']
+  IN_PROGRESS: ['COMPLETED'],
 };
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
@@ -35,9 +34,6 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     let paymentResult: PaymentResult | null = null;
 
-    console.log('PUT /api/driver/rides/[id]/status called for rideId:', rideId, 'status:', status);
-
-    // Verify the driver token
     const authHeader = req.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
@@ -46,10 +42,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     let driver;
     try {
-      const decoded: any = verify(
-        token,
-        JWT_SECRET
-      );
+      const decoded: any = verify(token, JWT_SECRET);
 
       if (!decoded.driverId || decoded.type !== 'driver') {
         return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 });
@@ -62,19 +55,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       if (!driver) {
         return NextResponse.json({ ok: false, error: 'Driver not found' }, { status: 404 });
       }
-
-      console.log('Driver authenticated:', driver.id);
-    } catch (error) {
+    } catch {
       return NextResponse.json({ ok: false, error: 'Invalid or expired token' }, { status: 401 });
     }
 
-    // Check if ride exists and is assigned to this driver
     const ride = await prisma.ride.findUnique({
       where: { id: rideId },
       include: {
         savedPaymentMethod: true,
-        user: true
-      }
+        user: true,
+      },
     });
 
     if (!ride) {
@@ -90,15 +80,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const allowedNext = allowedStatusTransitions[currentStatus] || [];
     if (!allowedNext.includes(requestedStatus)) {
       return NextResponse.json(
-        {
-          ok: false,
-          error: `Invalid status transition from ${currentStatus} to ${requestedStatus}`
-        },
+        { ok: false, error: `Invalid status transition from ${currentStatus} to ${requestedStatus}` },
         { status: 400 }
       );
     }
 
-    // Update the ride status
     const updateData: any = { status };
     if (status === 'PICKED_UP' && pickedAt) {
       updateData.pickedAt = new Date(pickedAt);
@@ -126,24 +112,21 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       }
     }
 
-    // Notify driver via socket
     const io = (global as any).io;
     if (io) {
       io.to(`driver_${driver.id}`).emit('ride-update', {
-        rideId: rideId,
-        status: status,
-        timestamp: new Date().toISOString()
+        rideId,
+        status,
+        timestamp: new Date().toISOString(),
       });
 
-      // Notify passenger of booking update
       io.to(`booking_${rideId}`).emit('bookingUpdate', {
         bookingId: rideId,
-        status: status,
-        timestamp: new Date().toISOString()
+        status,
+        timestamp: new Date().toISOString(),
       });
     }
 
-    // If completed, update driver status
     if (status === 'COMPLETED') {
       await prisma.comDriver.update({
         where: { id: driver.id },
@@ -154,41 +137,42 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         },
       });
 
-      // Handle payment based on method
       if (ride.savedPaymentMethodId) {
-        console.log(`Processing immediate payment for completed ride ${rideId} with saved payment method ${ride.savedPaymentMethodId}`);
         try {
           paymentResult = await chargeSavedPaymentMethod(ride);
           if (paymentResult.success) {
-            console.log(`✅ Immediate payment successful for ride ${rideId}, transaction: ${paymentResult.transactionId}`);
+            console.log('driver/rides/status: immediate payment succeeded', { rideId });
           } else {
-            console.log(`❌ Immediate payment failed for ride ${rideId}: ${paymentResult.error}`);
+            console.warn('driver/rides/status: immediate payment failed', {
+              rideId,
+              message: paymentResult.error,
+            });
           }
         } catch (paymentError: any) {
-          console.error(`💥 Exception during immediate payment for ride ${rideId}:`, paymentError);
+          console.error('driver/rides/status: immediate payment exception', {
+            rideId,
+            message: paymentError?.message,
+          });
           paymentResult = { success: false, error: paymentError.message };
         }
       } else if (ride.paymentMethod === 'cash') {
-        // For cash payments, mark as paid since driver collects payment
         await prisma.ride.update({
           where: { id: rideId },
           data: {
             paymentStatus: 'PAID',
-            explanation: 'Payment collected in cash by driver'
-          }
+            explanation: 'Payment collected in cash by driver',
+          },
         });
-        console.log(`✅ Cash payment marked as collected for ride ${rideId}`);
       } else {
-        console.log(`No payment method configured for ride ${rideId}, paymentMethod: ${ride.paymentMethod}, savedPaymentMethodId: ${ride.savedPaymentMethodId}`);
+        console.warn('driver/rides/status: no payment method configured', { rideId });
       }
     }
 
-    // Create invoice if ride is completed
     if (status === 'COMPLETED') {
       try {
         const invoiceNumber = `INV-${rideId}-${Date.now()}`;
         const dueDate = new Date();
-        dueDate.setDate(dueDate.getDate() + 14); // 14 days payment term
+        dueDate.setDate(dueDate.getDate() + 14);
 
         const invoice = await prisma.invoice.create({
           data: {
@@ -201,39 +185,50 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             paymentRef: paymentResult?.transactionId,
             paymentDate: paymentResult?.success ? new Date() : null,
             paymentAmount: ride.price,
-          }
+          },
         });
 
-        // Notify user that invoice is ready
         if (ride.user.email) {
           try {
-            await notifyUserInvoiceReady(ride.user.email, ride.user.firstName, {
-              bookingId: ride.id,
-              price: Number(ride.price).toFixed(2)
-            }, invoice.id);
+            await notifyUserInvoiceReady(
+              ride.user.email,
+              ride.user.firstName,
+              {
+                bookingId: ride.id,
+                price: Number(ride.price).toFixed(2),
+              },
+              invoice.id
+            );
           } catch (notifyError) {
-            console.error('Failed to notify user about invoice:', notifyError);
+            console.error('driver/rides/status: failed to notify user about invoice', {
+              rideId,
+              message: (notifyError as any)?.message,
+            });
           }
         }
 
-        console.log(`✅ Invoice created for ride ${rideId}: ${invoiceNumber}`);
+        console.log('driver/rides/status: invoice created', { rideId, invoiceId: invoice.id });
       } catch (invoiceError: any) {
-        console.error(`❌ Failed to create invoice for ride ${rideId}:`, invoiceError);
+        console.error('driver/rides/status: failed to create invoice', {
+          rideId,
+          message: invoiceError?.message,
+        });
       }
     }
 
     return NextResponse.json({
       ok: true,
       message: `Ride status updated to ${status}`,
-      paymentResult: paymentResult ? {
-        success: paymentResult.success,
-        transactionId: paymentResult.transactionId,
-        error: paymentResult.error
-      } : null,
+      paymentResult: paymentResult
+        ? {
+            success: paymentResult.success,
+            transactionId: paymentResult.transactionId,
+            error: paymentResult.error,
+          }
+        : null,
     });
-
   } catch (e: any) {
-    console.error('Error updating ride status:', e);
+    console.error('driver/rides/status: error updating ride status', { message: e?.message });
     return NextResponse.json({ ok: false, error: e?.message || 'Invalid request' }, { status: 400 });
   }
 }

@@ -41,10 +41,8 @@ export async function POST(
     // Check if user is admin or the complaint owner
     const isAdmin = user.type === 'user' && (user as any).role === 'ADMIN';
     const isOwner = complaint.userId === user.id;
-    console.log('User check:', { userId: user.id, complaintUserId: complaint.userId, isAdmin, isOwner });
-
     if (!isAdmin && !isOwner) {
-      console.log('Access denied for user:', user.id);
+      console.warn('complaints/reply: access denied', { complaintId: complaint.id, userId: user.id });
       return NextResponse.json(
         { ok: false, error: 'Access denied' },
         { status: 403 }
@@ -59,10 +57,8 @@ export async function POST(
     }
 
     const { reply } = await request.json();
-    console.log('Received reply data:', { reply });
 
     if (!reply || typeof reply !== 'string' || reply.trim().length === 0) {
-      console.log('Reply validation failed:', { reply, type: typeof reply, length: reply?.length });
       return NextResponse.json(
         { ok: false, error: 'Reply is required' },
         { status: 400 }
@@ -71,9 +67,6 @@ export async function POST(
 
     // Get current conversation - parse JSON
     const currentConversation = JSON.parse(complaint.complaint);
-    console.log('Current conversation before reply:', currentConversation);
-    console.log('User type:', isAdmin ? 'Admin' : 'User');
-    console.log('Reply content:', reply.trim());
 
     // Add reply based on user type
     if (isOwner) {
@@ -98,7 +91,6 @@ export async function POST(
       // Admin can always reply (no restrictions for admin)
       // Add admin reply
       const newConversation = [...currentConversation, `Admin: ${reply.trim()}`];
-      console.log('New conversation after admin reply:', newConversation);
       await (prisma as any).complaint.update({
         where: { id: Number(complaintId) },
         data: {
@@ -106,7 +98,6 @@ export async function POST(
           updatedAt: new Date(),
         },
       });
-      console.log('Database updated successfully for admin reply');
     }
 
     return NextResponse.json({
@@ -114,9 +105,8 @@ export async function POST(
       message: 'Reply added successfully'
     });
 
-  } catch (error) {
-    console.error('[API] Error adding reply:', error);
-    console.error('[API] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+  } catch (error: any) {
+    console.error('complaints/reply: error', { message: error?.message });
     return NextResponse.json(
       { ok: false, error: 'Could not add reply' },
       { status: 500 }

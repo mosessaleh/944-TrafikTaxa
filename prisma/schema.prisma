@@ -211,6 +211,10 @@ model Ride {
   droppedAt      DateTime?
   paymentMethod  String?
   savedPaymentMethodId Int?
+  driverNote     String?
+  customerRating Int?
+  customerReview String?
+  customerRatedAt DateTime?
 
   // Cancellation fields
   cancellationReason String?
@@ -250,6 +254,7 @@ model Ride {
   @@index([createdAt])
   @@index([savedPaymentMethodId])
   @@index([paymentRef])
+  @@index([driverId, customerRating])
   @@index([riskScore])
   @@index([riskLevel])
   @@index([riskReviewed])

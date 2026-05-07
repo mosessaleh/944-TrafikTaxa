@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthSecret, getUserFromCookie } from '@/lib/auth';
+import { encryptPaymentToken } from '@/lib/crypto';
 import { prisma } from '@/lib/db';
 import { verify } from 'jsonwebtoken';
 import { z } from 'zod';
@@ -83,8 +84,6 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    console.log('Payment methods found:', paymentMethods.length, paymentMethods);
-
     return NextResponse.json({
       success: true,
       paymentMethods
@@ -121,8 +120,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Encrypt the token (in production, use proper encryption)
-    const encryptedToken = validatedData.token; // TODO: Implement proper encryption
+    const encryptedToken = encryptPaymentToken(validatedData.token);
 
     const paymentMethod = await (prisma as any).userPaymentMethod.create({
       data: {

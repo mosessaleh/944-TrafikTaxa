@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
 import { signToken } from '@/lib/auth';
 
 const {
@@ -12,19 +11,116 @@ const {
 
 const prisma = new PrismaClient();
 
-export async function OPTIONS() {
+const DRIVER_CORS_METHODS = 'POST, OPTIONS';
+const DRIVER_CORS_HEADERS = 'Content-Type';
+
+function normalizeOriginList(values: Array<string | undefined>): string[] {
+  const allowedOrigins = new Set<string>();
+
+  for (const value of values) {
+    if (!value) continue;
+
+    const entries = value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    for (const entry of entries) {
+      try {
+        const parsed = new URL(entry);
+        allowedOrigins.add(`${parsed.protocol}//${parsed.host}`);
+      } catch {
+        // Ignore malformed configured origins instead of trusting them.
+      }
+    }
+  }
+
+  return Array.from(allowedOrigins);
+}
+
+function normalizeRequestOrigin(value: string | null): string | null {
+  if (!value) return null;
+
+  try {
+    const parsed = new URL(value);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return null;
+  }
+}
+
+function getAllowedDriverOrigins(): string[] {
+  return normalizeOriginList([
+    process.env.ALLOWED_DRIVER_ORIGINS,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.APP_URL
+  ]);
+}
+
+function hasTrustedDriverOrigin(request: Request): boolean {
+  if (process.env.NODE_ENV !== 'production') {
+    return true;
+  }
+
+  const allowedOrigins = getAllowedDriverOrigins();
+  const origin = normalizeRequestOrigin(request.headers.get('origin'));
+  const referer = normalizeRequestOrigin(request.headers.get('referer'));
+
+  if (!origin && !referer) {
+    // Native clients may omit Origin/Referer entirely.
+    return true;
+  }
+
+  return Boolean(
+    (origin && allowedOrigins.includes(origin)) ||
+    (referer && allowedOrigins.includes(referer))
+  );
+}
+
+function getDriverCorsHeaders(request: Request): HeadersInit {
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Methods': DRIVER_CORS_METHODS,
+    'Access-Control-Allow-Headers': DRIVER_CORS_HEADERS,
+  };
+
+  const origin = normalizeRequestOrigin(request.headers.get('origin'));
+  if (origin) {
+    if (process.env.NODE_ENV !== 'production' || getAllowedDriverOrigins().includes(origin)) {
+      headers['Access-Control-Allow-Origin'] = origin;
+      headers['Vary'] = 'Origin';
+    }
+  }
+
+  return headers;
+}
+
+function jsonWithCors(request: NextRequest, body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: getDriverCorsHeaders(request),
+  });
+}
+
+export async function OPTIONS(request: NextRequest) {
+  if (!hasTrustedDriverOrigin(request)) {
+    return new Response(null, {
+      status: 403,
+      headers: getDriverCorsHeaders(request),
+    });
+  }
+
   return new Response(null, {
     status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
+    headers: getDriverCorsHeaders(request),
   });
 }
 
 export async function POST(request: NextRequest) {
   try {
+    if (!hasTrustedDriverOrigin(request)) {
+      return jsonWithCors(request, { error: 'Untrusted origin' }, 403);
+    }
+
     await ensureDriverScheduleTables(prisma);
 
     const { username, password, startKM } = await request.json();
@@ -32,20 +128,8 @@ export async function POST(request: NextRequest) {
     const normalizedPassword = String(password || '');
     const parsedStartKM = Number(startKM);
 
-    console.log('Driver login attempt:', { username: normalizedUsername, hasStartKM: Number.isFinite(parsedStartKM) });
-
     if (!normalizedUsername || !normalizedPassword || !Number.isFinite(parsedStartKM) || parsedStartKM < 0) {
-      return NextResponse.json(
-        { error: 'Invalid credentials' },
-        {
-          status: 401,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-          },
-        }
-      );
+      return jsonWithCors(request, { error: 'Invalid credentials' }, 401);
     }
 
     // Find driver by username
@@ -68,52 +152,19 @@ export async function POST(request: NextRequest) {
         }
       }
     });
-    console.log('Driver found:', !!driver);
-
     if (!driver) {
-      return NextResponse.json(
-        { error: 'Invalid credentials' },
-        {
-          status: 401,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-          },
-        }
-      );
+      return jsonWithCors(request, { error: 'Invalid credentials' }, 401);
     }
 
     // Check password
     const isValidPassword = await bcrypt.compare(normalizedPassword, driver.drPass);
     if (!isValidPassword) {
-      return NextResponse.json(
-        { error: 'Invalid credentials' },
-        {
-          status: 401,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-          },
-        }
-      );
+      return jsonWithCors(request, { error: 'Invalid credentials' }, 401);
     }
 
     // Check if driver is active
-    console.log('Driver active:', driver.isActive);
     if (!driver.isActive || !driver.company?.comStatus) {
-      return NextResponse.json(
-        { error: 'Invalid credentials' },
-        {
-          status: 401,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-          },
-        }
-      );
+      return jsonWithCors(request, { error: 'Invalid credentials' }, 401);
     }
 
     const now = new Date();
@@ -124,19 +175,13 @@ export async function POST(request: NextRequest) {
       const remainingMs = Math.max(0, bannedUntilDate!.getTime() - now.getTime());
       const remainingHours = remainingMs / (1000 * 60 * 60);
       if (remainingHours >= 2) {
-        return NextResponse.json(
+        return jsonWithCors(
+          request,
           {
             error: 'Driver account is temporarily suspended',
             bannedUntil: bannedUntilDate!.toISOString()
           },
-          {
-            status: 403,
-            headers: {
-              'Access-Control-Allow-Origin': '*',
-              'Access-Control-Allow-Methods': 'POST, OPTIONS',
-              'Access-Control-Allow-Headers': 'Content-Type',
-            },
-          }
+          403
         );
       }
     }
@@ -151,18 +196,11 @@ export async function POST(request: NextRequest) {
     });
 
     if (lastShift && lastShift.endKM !== null) {
-      console.log('Last shift endKM:', lastShift.endKM, 'startKM:', parsedStartKM);
       if (parsedStartKM < lastShift.endKM) {
-        return NextResponse.json(
+        return jsonWithCors(
+          request,
           { error: 'There is something incorrect in the kilometers', message: 'There is something incorrect in the kilometers' },
-          {
-            status: 400,
-            headers: {
-              'Access-Control-Allow-Origin': '*',
-              'Access-Control-Allow-Methods': 'POST, OPTIONS',
-              'Access-Control-Allow-Headers': 'Content-Type',
-            },
-          }
+          400
         );
       }
 
@@ -183,7 +221,6 @@ export async function POST(request: NextRequest) {
     if (existingActiveShift) {
       // Use existing active shift
       shift = existingActiveShift;
-      console.log(`Using existing active shift for driver ${driver.id}, started at ${shift.startVagt}`);
     } else {
       // Create new driversvagt record
       const now = new Date();
@@ -199,7 +236,6 @@ export async function POST(request: NextRequest) {
           deffKM: 0, // Initially 0
         },
       });
-      console.log(`Created new shift for driver ${driver.id}`);
     }
 
     const releasedScheduledRidesResult: {
@@ -216,7 +252,7 @@ export async function POST(request: NextRequest) {
 
     const token = signToken({ id: driver.id, driverId: driver.id, type: 'driver' });
 
-    return NextResponse.json({
+    return jsonWithCors(request, {
       success: true,
       message: 'Login successful',
       requiresConfirmation: false,
@@ -240,26 +276,10 @@ export async function POST(request: NextRequest) {
         },
         releasedScheduledRides: releasedScheduledRidesResult
       }
-    }, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
     });
 
-  } catch (error) {
-    console.error('Driver login error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      {
-        status: 500,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        },
-      }
-    );
+  } catch (error: any) {
+    console.error('driver/login: error', { message: error?.message });
+    return jsonWithCors(request, { error: 'Internal server error' }, 500);
   }
 }

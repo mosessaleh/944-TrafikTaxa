@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { getUserFromRequest } from '@/lib/auth';
 import { notifyUserInvoiceReady } from '@/lib/notify';
 import fs from 'fs';
 import path from 'path';
@@ -12,7 +12,7 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const me = await getUserFromCookie();
+    const me = await getUserFromRequest(request);
     if (!me) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -36,7 +36,7 @@ export async function GET(
     }
 
     if (booking.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
     // Check if payment method is invoice OR if we have created a receipt invoice
@@ -56,8 +56,8 @@ export async function GET(
       where: { rideId: booking.id }
     });
 
-    // Create invoices directory structure: public/invoices/userId/invoiceNumber/
-    const invoicesDir = path.join(process.cwd(), 'public', 'invoices');
+    // Store generated invoices outside public/ so they remain accessible only through this authenticated route.
+    const invoicesDir = path.join(process.cwd(), 'storage', 'invoices-private');
     const userInvoicesDir = path.join(invoicesDir, booking.userId.toString());
     
     // Use the existing invoice number if it exists, otherwise create one

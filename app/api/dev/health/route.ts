@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { hashPassword, comparePassword } from '@/lib/crypto';
+import { ensureDevelopmentOnly } from '@/lib/dev-route';
 
 export async function GET(){
+  const blocked = ensureDevelopmentOnly();
+  if (blocked) return blocked;
+
   try{
     // DB ping
     await prisma.$queryRaw`SELECT 1`;

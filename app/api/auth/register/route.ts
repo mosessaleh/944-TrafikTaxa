@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { hashPassword, signToken } from '@/lib/auth';
+import { hashPassword, setSessionCookie, signToken } from '@/lib/auth';
 import { sendEmail } from '@/lib/email';
 import { validateRequestOrigin } from '@/lib/security-headers';
 
@@ -56,27 +56,9 @@ export async function POST(req: Request){
 
     const mail = await sendEmail(data.email, 'Verify your email', `<p>Your verification code is <b>${code}</b>. It expires in 1 hour.</p>`);
 
-    const token = signToken({ id: user.id, role: user.role });
+    const token = signToken({ id: user.id, type: 'user', role: user.role });
+    await setSessionCookie(token);
     const res = NextResponse.json({ ok:true, mail: mail.ok, next: `/verify?email=${encodeURIComponent(user.email)}` });
-
-    const isProd = process.env.NODE_ENV === 'production';
-    const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-    const secure = isProd ? true : envSecure;
-    const name = isProd ? '__Host-session' : 'session';
-
-    res.cookies.set(name, token, { httpOnly:true, secure, sameSite:'lax', path:'/', maxAge:60*60*24*7 });
-
-    // Clear legacy cookie when migrating to __Host- prefix
-    if (name === '__Host-session') {
-      res.cookies.set('session', '', {
-        httpOnly: true,
-        sameSite: 'lax',
-        secure,
-        path: '/',
-        maxAge: 0,
-        expires: new Date(0)
-      });
-    }
 
     return res;
   }catch(e:any){

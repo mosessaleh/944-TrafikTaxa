@@ -17,27 +17,19 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log("card/confirm: Starting payment confirmation");
-
     const me = await getUserFromCookie();
     if (!me) {
-      console.error("card/confirm: User not authenticated");
       return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
     }
 
-    console.log("card/confirm: User authenticated", { userId: me.id, email: (me as any).email });
-
     const raw = await request.json().catch(() => ({}));
-    console.log("card/confirm: Received payload", raw);
 
     const parsed = ConfirmCardPaymentSchema.safeParse(raw);
     if (!parsed.success) {
-      console.error("card/confirm: Invalid payload", parsed.error.flatten());
       return NextResponse.json({ error: "Invalid payload", details: parsed.error.flatten() }, { status: 400 });
     }
 
     const { paymentIntentId, bookingId, invoiceId } = parsed.data;
-    console.log("card/confirm: Parsed data", { paymentIntentId, bookingId, invoiceId });
 
     let amountDkk = 0;
     let booking: any = null;
@@ -45,24 +37,26 @@ export async function POST(request: Request) {
 
     // Handle mock payments for admin users (development flow)
     if (paymentIntentId.startsWith('pi_mock_')) {
-      console.log("card/confirm: Processing mock payment for admin user (Stripe test)");
+      if (process.env.NODE_ENV !== 'development') {
+        return NextResponse.json({ error: "Not available" }, { status: 404 });
+      }
+
+      if ((me as any).role !== 'ADMIN') {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
 
       let invoice: any = null;
 
       // Priority: invoiceId > bookingId (when paying for invoice, use invoice amount)
       if (invoiceId) {
         // Find invoice first when invoiceId is provided
-        console.log("card/confirm: Looking for invoice with ID", invoiceId);
         invoice = await prisma.invoice.findUnique({
           where: { id: invoiceId },
           include: { ride: { include: { user: true, vehicleType: true } } }
         });
-        console.log("card/confirm: Invoice lookup result", invoice ? `Found (ID: ${invoice.id})` : 'Not found');
         if (invoice) {
           booking = invoice.ride;
-          console.log("card/confirm: Set booking from invoice ride", booking?.id);
         } else {
-          console.log("card/confirm: Invoice not found, cannot proceed");
           return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
         }
       } else if (bookingId) {
@@ -71,7 +65,6 @@ export async function POST(request: Request) {
           where: { id: bookingId },
           include: { user: true, vehicleType: true }
         });
-        console.log("card/confirm: Found booking by bookingId", booking?.id);
       } else {
         // Fallback: find first unpaid booking
         booking = await prisma.ride.findFirst({
@@ -82,7 +75,6 @@ export async function POST(request: Request) {
       }
 
       if (!booking) {
-        console.error("card/confirm: No unpaid booking found for user");
         return NextResponse.json({ error: "No unpaid booking found" }, { status: 400 });
       }
 
@@ -94,24 +86,14 @@ export async function POST(request: Request) {
         amountDkk = baseAmount + lateFee1 + lateFee2;
         // Round to 2 decimal places to avoid precision issues
         amountDkk = Math.round(amountDkk * 100) / 100;
-        console.log("card/confirm: Mock amount from invoice (including late fees)", {
-          amountDkk,
-          baseAmount,
-          lateFee1,
-          lateFee2,
-          bookingId: booking.id,
-          invoiceId: invoice.id
-        });
       } else {
         // Use the booking price as the intended amount
         amountDkk = booking.price;
-        console.log("card/confirm: Mock amount from booking", amountDkk, "bookingId:", booking.id);
       }
  
       // Create a real Stripe test PaymentIntent so it appears in the Stripe Dashboard (test mode)
       try {
         const stripeClient = getStripe();
-        console.log("card/confirm: Creating Stripe test PaymentIntent for mock payment");
  
         const stripeIntent = await stripeClient.paymentIntents.create({
           amount: Math.round(amountDkk * 100), // øre for DKK
@@ -128,14 +110,7 @@ export async function POST(request: Request) {
           }
         });
  
-        console.log("card/confirm: Stripe test PaymentIntent created", {
-          id: stripeIntent.id,
-          status: stripeIntent.status,
-          amount: stripeIntent.amount
-        });
- 
         if (stripeIntent.status !== 'succeeded') {
-          console.error("card/confirm: Stripe test payment not completed", { status: stripeIntent.status });
           return NextResponse.json({ error: "Stripe test payment not completed" }, { status: 400 });
         }
  
@@ -151,13 +126,9 @@ export async function POST(request: Request) {
  
     } else {
       // Real Stripe payment processing
-      console.log("card/confirm: Processing real Stripe payment");
-
       const paymentIntent = await retrievePaymentIntent(paymentIntentId);
-      console.log("card/confirm: Payment intent status", paymentIntent.status);
 
       if (paymentIntent.status !== 'succeeded') {
-        console.error("card/confirm: Payment not completed", { status: paymentIntent.status });
         return NextResponse.json({ error: "Payment not completed" }, { status: 400 });
       }
 
@@ -177,17 +148,7 @@ export async function POST(request: Request) {
         ? metaInvoiceId
         : invoiceId;
 
-      console.log("card/confirm: Effective linkage from metadata/body", {
-        bookingIdBody: bookingId,
-        invoiceIdBody: invoiceId,
-        bookingIdMeta: metaBookingId,
-        invoiceIdMeta: metaInvoiceId,
-        effectiveBookingId,
-        effectiveInvoiceId,
-      });
-
       if (!effectiveBookingId && !effectiveInvoiceId) {
-        console.error("card/confirm: No booking/invoice linkage found in metadata or body");
         return NextResponse.json(
           { error: "Unable to link payment to booking/invoice" },
           { status: 400 }
@@ -200,9 +161,6 @@ export async function POST(request: Request) {
           include: { user: true, vehicleType: true }
         });
         if (!booking) {
-          console.error("card/confirm: Booking not found for effectiveBookingId", {
-            effectiveBookingId,
-          });
           return NextResponse.json({ error: "Booking not found" }, { status: 404 });
         }
       } else if (effectiveInvoiceId) {
@@ -211,9 +169,6 @@ export async function POST(request: Request) {
           include: { ride: { include: { user: true, vehicleType: true } } }
         });
         if (!invoiceForAmount) {
-          console.error("card/confirm: Invoice not found for effectiveInvoiceId", {
-            effectiveInvoiceId,
-          });
           return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
         }
         booking = invoiceForAmount.ride;
@@ -239,26 +194,9 @@ export async function POST(request: Request) {
         dbAmountDkk = baseAmount + lateFee1 + lateFee2;
         // Round to 2 decimal places to avoid precision issues
         dbAmountDkk = Math.round(dbAmountDkk * 100) / 100;
-        console.log("card/confirm: Real payment amount from invoice (including late fees)", {
-          dbAmountDkk,
-          baseAmount,
-          lateFee1,
-          lateFee2,
-          bookingId: booking.id,
-          invoiceId: invoiceForAmount.id
-        });
-      } else {
-        console.log("card/confirm: Real payment amount from booking", dbAmountDkk, "bookingId:", booking.id);
       }
 
       const amountFromGatewayDkk = paymentIntent.amount / 100; // Convert from øre to DKK
-
-      console.log("card/confirm: Amounts for verification", {
-        dbAmountDkk,
-        amountFromGatewayDkk,
-        paymentIntentAmount: paymentIntent.amount,
-        metaExpectedAmountDkk,
-      });
 
       // Assert server-side: the amount charged by Stripe must equal the DB amount
       if (Math.round(dbAmountDkk * 100) !== paymentIntent.amount) {
@@ -305,7 +243,6 @@ export async function POST(request: Request) {
     }
 
     // === STEP 1: Create payment record in database ===
-    console.log("card/confirm: Creating payment record in database");
     const payment = await prisma.cardPayment.create({
       data: {
         userId: me.id.toString(),
@@ -313,20 +250,11 @@ export async function POST(request: Request) {
         status: "paid",
       },
     });
-    console.log("card/confirm: Payment record created successfully", { 
-      paymentId: payment.id, 
-      amountDkk: amountDkk,
-      userId: me.id,
-      bookingId: booking.id
-    });
-
     // === STEP 2: Update booking status ===
     const currentStatus = String(booking.status || '').toUpperCase();
     const activeBookingStatuses = ['PENDING', 'PROGRESSING', 'CONFIRMED', 'DISPATCHED', 'ONGOING', 'PICKED_UP', 'IN_PROGRESS'];
     const targetStatus = activeBookingStatuses.includes(currentStatus) ? 'CONFIRMED' : booking.status;
 
-    console.log("card/confirm: Updating booking payment status to PAID");
-    console.log(`[DEBUG] Updating booking ${booking.id} paymentStatus to PAID, status from ${booking.status} to ${targetStatus}`);
     const updatedBooking = await prisma.ride.update({
       where: { id: booking.id },
       data: {
@@ -351,9 +279,6 @@ export async function POST(request: Request) {
         }
       }
     });
-    console.log(`[DEBUG] Booking ${updatedBooking.id} status updated to ${updatedBooking.status} in card/confirm`);
-    console.log("card/confirm: Booking status updated successfully");
-
     // === STEP 2.5: Trigger dispatcher to send ride offers ===
     try {
       const dispatcher = (global as any).checkForNewRides;
@@ -366,14 +291,12 @@ export async function POST(request: Request) {
 
 
     // === STEP 3: Create/Update invoice as receipt ===
-    console.log("card/confirm: Checking/creating invoice as receipt");
     let invoice = await prisma.invoice.findFirst({
       where: { rideId: booking.id }
     });
     
     if (!invoice) {
       // إنشاء فاتورة كإيصال لأن طريقة الدفع ليست "invoice"
-      console.log("card/confirm: Creating receipt invoice");
       const invoiceNumber = `REC${booking.id.toString().padStart(6, '0')}`;
       const dueDate = new Date();
       dueDate.setDate(dueDate.getDate() + 8); // 8 أيام
@@ -388,15 +311,12 @@ export async function POST(request: Request) {
           status: 1
         }
       });
-      console.log("card/confirm: Receipt invoice created successfully", { invoiceId: invoice.id });
     } else if (invoice.paymentStatus !== 'PAID') {
       // تحديث الفاتورة الموجودة إلى مدفوعة فقط إذا لم تكن مدفوعة
-      console.log("card/confirm: Updating existing invoice status to PAID");
       await prisma.invoice.update({
         where: { id: invoice.id },
         data: { paymentStatus: 'PAID' }
       });
-      console.log("card/confirm: Existing invoice status updated successfully");
     }
 
     // === STEP 4: Send notifications (email + in-app + realtime) ===
@@ -410,13 +330,11 @@ export async function POST(request: Request) {
       id: booking.id
     };
 
-    console.log("card/confirm: Sending confirmation notifications");
     try {
       await notifyBookingConfirmedUnified(
         { id: booking.userId, email: booking.user.email, firstName: booking.user.firstName },
         bookingDetails
       );
-      console.log("card/confirm: Booking confirmation notification dispatched");
     } catch (e) {
       console.error("card/confirm: Failed to send booking confirmation notification", e);
     }
@@ -434,7 +352,6 @@ export async function POST(request: Request) {
         { id: booking.userId, email: booking.user.email, firstName: booking.user.firstName },
         paymentDetailsForNotify
       );
-      console.log("card/confirm: Payment confirmation notification dispatched");
     } catch (e) {
       console.error("card/confirm: Failed to send payment confirmation notification", e);
     }
@@ -450,12 +367,15 @@ export async function POST(request: Request) {
           <li><strong>Transaction ID:</strong> ${paymentIntentId}</li>
         </ul>
       `);
-      console.log("card/confirm: Admin notification sent");
     } catch (e) {
       console.error("card/confirm: Failed to send admin notification", e);
     }
 
-    console.log("card/confirm: Payment confirmation completed successfully");
+    console.log("card/confirm: Payment confirmation completed", {
+      bookingId: booking.id,
+      paymentId: payment.id,
+      invoiceId: invoice.id,
+    });
     return NextResponse.json({
       ok: true,
       paymentId: payment.id,

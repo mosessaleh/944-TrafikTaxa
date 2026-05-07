@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromCookie } from '@/lib/auth';
+import { getUserFromRequest } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { Expo } from 'expo-server-sdk';
 
@@ -7,7 +7,7 @@ const prismaAny = prisma as any;
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await getUserFromCookie();
+    const user = await getUserFromRequest(request);
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }

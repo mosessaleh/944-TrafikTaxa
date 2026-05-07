@@ -73,7 +73,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     }
 
     // إذا كان العد التنازلي قد بدأ قبل موعد الرحلة المجدول، لا نحتسب زمن الانتظار قبل الموعد
-    let timeDiffMin = Math.floor(timeDiffMs / (1000 * 60));
     if (proximityData?.countdownStart && ride.scheduled && ride.pickupTime) {
       const scheduledTs = new Date(ride.pickupTime).getTime();
       const effectiveStart = Math.max(proximityData.countdownStart, scheduledTs);

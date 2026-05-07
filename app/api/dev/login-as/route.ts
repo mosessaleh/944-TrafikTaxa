@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { signToken, setSessionCookie } from '@/lib/auth';
+import { ensureDevelopmentOnly } from '@/lib/dev-route';
 
 export async function POST(req: Request){
-  // Hard-disable this dev endpoint outside development to prevent abuse in production
-  if (process.env.NODE_ENV !== 'development') {
-    return NextResponse.json({ ok:false, error:'Not available' }, { status:404 });
-  }
+  const blocked = ensureDevelopmentOnly();
+  if (blocked) return blocked;
 
   try{
     const { email, token } = await req.json();

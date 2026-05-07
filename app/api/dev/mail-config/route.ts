@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
+import { ensureDevelopmentOnly } from '@/lib/dev-route';
 
 export async function GET(){
+  const blocked = ensureDevelopmentOnly();
+  if (blocked) return blocked;
+
   const cfg = {
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,

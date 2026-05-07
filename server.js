@@ -4656,20 +4656,27 @@ app.prepare().then(() => {
     });
 
     socket.on('sendMessage', async (data) => {
-      if (!data?.bookingId || !data?.message || !data?.sender) return;
-      const authorized = await canAccessBooking(data.bookingId, socket);
+      const bookingId = Number(data?.bookingId);
+      const message = typeof data?.message === 'string' ? data.message.trim() : '';
+      const sender = typeof data?.sender === 'string' ? data.sender.trim() : '';
+      if (!Number.isInteger(bookingId) || bookingId <= 0 || !message || message.length > 1000 || !sender || sender.length > 80) {
+        socket.emit('error', { type: 'invalid_chat_payload', message: 'Invalid chat message payload' });
+        return;
+      }
+      const authorized = await canAccessBooking(bookingId, socket);
       if (!authorized) {
-        console.log(`Unauthorized sendMessage attempt for booking ${data.bookingId}`);
+        console.log(`Unauthorized sendMessage attempt for booking ${bookingId}`);
         socket.emit('error', { type: 'unauthorized_chat', message: 'Not allowed to send messages to this chat' });
         return;
       }
       const messageData = {
-        message: data.message,
-        sender: data.sender,
+        bookingId,
+        message,
+        sender,
         timestamp: new Date().toISOString()
       };
-      io.to(`chat_${data.bookingId}`).emit('newMessage', messageData);
-      console.log(`Message sent in chat ${data.bookingId} by ${data.sender}`);
+      io.to(`chat_${bookingId}`).emit('newMessage', messageData);
+      console.log(`Message sent in chat ${bookingId}`);
     });
 
     socket.on('disconnect', () => {

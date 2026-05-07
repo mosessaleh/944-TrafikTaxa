@@ -6,51 +6,29 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  console.log('🚀 API START - Invoice ID:', params.id);
-  
   try {
-    console.log('🔐 Checking authentication...');
     const me = await getUserFromCookie();
     if (!me) {
-      console.log('❌ Not authenticated');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    console.log('✅ Authenticated as user:', me.id);
 
-    const invoiceId = parseInt(params.id);
-    console.log('🔢 Parsed invoice ID:', invoiceId, 'Type:', typeof invoiceId);
-    
+    const invoiceId = parseInt(params.id, 10);
     if (isNaN(invoiceId) || invoiceId <= 0) {
-      console.log('❌ Invalid invoice ID');
       return NextResponse.json({ error: 'Invalid invoice ID' }, { status: 400 });
     }
 
-    console.log('📊 Fetching invoice from database...');
-    console.log('💾 Database connection status:', prisma ? 'Connected' : 'Not connected');
-    
     const invoice = await prisma.invoice.findUnique({
       where: { id: invoiceId }
-    }) as any; // Cast to any to access late fee fields
-
-    console.log('📋 Invoice fetch result:', invoice ? `Found (ID: ${invoice.id})` : 'Not found');
+    }) as any;
 
     if (!invoice) {
-      console.log('❌ Invoice not found');
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
-    console.log('🔒 Checking authorization...');
-    console.log('👤 User ID:', me.id, 'Invoice user ID:', invoice.userId, 'User role:', (me as any).role);
-    
     if (invoice.userId !== me.id && (me.type !== 'user' || (me as any).role !== 'ADMIN')) {
-      console.log('❌ Access denied');
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
-    console.log('✅ Authorization passed');
-
-    // Fetch complete user data
-    console.log('👤 Fetching user data...');
     const user = await prisma.user.findUnique({
       where: { id: invoice.userId },
       select: {
@@ -64,14 +42,9 @@ export async function GET(
     });
 
     if (!user) {
-      console.log('❌ User not found');
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    console.log('✅ User found:', user.firstName, user.lastName);
-
-    // Fetch complete ride data
-    console.log('🚗 Fetching ride data...');
     const ride = await prisma.ride.findUnique({
       where: { id: invoice.rideId },
       include: {
@@ -85,13 +58,9 @@ export async function GET(
     });
 
     if (!ride) {
-      console.log('❌ Ride not found');
       return NextResponse.json({ error: 'Ride not found' }, { status: 404 });
     }
 
-    console.log('✅ Ride found:', ride.pickupAddress, '→', ride.dropoffAddress);
-
-    // Create complete response with all needed data
     const completeInvoice = {
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
@@ -99,9 +68,7 @@ export async function GET(
       status: invoice.status,
       dueDate: invoice.dueDate.toISOString(),
       createdAt: invoice.createdAt.toISOString(),
-      // Use updatedAt if present, otherwise fall back to createdAt to avoid null-related crashes
       updatedAt: (invoice.updatedAt ?? invoice.createdAt).toISOString(),
-      // Late fee fields
       lateFee1: invoice.lateFee1,
       lateFee2: invoice.lateFee2,
       lateFee1Date: invoice.lateFee1Date?.toISOString(),
@@ -132,24 +99,19 @@ export async function GET(
       }
     };
 
-    console.log('✅ Returning complete invoice data');
     return NextResponse.json({
       success: true,
-      invoice: completeInvoice,
-      user: me
+      invoice: completeInvoice
     });
-
   } catch (error) {
-    console.error('💥 API ERROR:', error);
-    console.error('📚 Error type:', error instanceof Error ? error.constructor.name : 'Unknown');
-    console.error('📝 Error message:', error instanceof Error ? error.message : 'No message');
-    console.error('🏗️ Error stack:', error instanceof Error ? error.stack : 'No stack');
-    
+    console.error('invoice/[id]/data failed:', error instanceof Error ? error.message : error);
+
     return NextResponse.json(
       {
         error: 'Internal server error',
-        details: process.env.NODE_ENV === 'development' ?
-          (error instanceof Error ? error.message : 'Unknown error') : undefined,
+        details: process.env.NODE_ENV === 'development'
+          ? (error instanceof Error ? error.message : 'Unknown error')
+          : undefined,
         timestamp: new Date().toISOString()
       },
       { status: 500 }

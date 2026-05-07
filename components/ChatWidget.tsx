@@ -45,8 +45,28 @@ export default function ChatWidget({ bookingId, driverName = 'Driver', className
     setMessage('');
   };
 
-  const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString('en-GB', {
+  const getMessageKey = (msg: ChatMessagePayload, index: number) => {
+    const key = msg.messageId ?? msg.id;
+    return key != null ? String(key) : `${msg.bookingId}-${index}`;
+  };
+
+  const isCurrentUserMessage = (msg: ChatMessagePayload) => {
+    return msg.fromUserId === 'current_user' || msg.sender === 'customer' || msg.sender === 'user';
+  };
+
+  const formatTime = (timestamp?: string | number) => {
+    if (timestamp == null) {
+      return '';
+    }
+
+    const normalizedTimestamp =
+      typeof timestamp === 'string' ? new Date(timestamp).getTime() : timestamp;
+
+    if (Number.isNaN(normalizedTimestamp)) {
+      return '';
+    }
+
+    return new Date(normalizedTimestamp).toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -101,27 +121,33 @@ export default function ChatWidget({ bookingId, driverName = 'Driver', className
                 <p>Start a conversation with the driver</p>
               </div>
             ) : (
-              bookingMessages.map((msg) => (
+              bookingMessages.map((msg, index) => {
+                const isCurrentUser = isCurrentUserMessage(msg);
+                const formattedTime = formatTime(msg.timestamp);
+
+                return (
                 <div
-                  key={msg.messageId}
-                  className={`flex ${msg.fromUserId === 'current_user' ? 'justify-end' : 'justify-start'}`}
+                  key={getMessageKey(msg, index)}
+                  className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
                     className={`max-w-xs px-3 py-2 rounded-lg text-sm ${
-                      msg.fromUserId === 'current_user'
+                      isCurrentUser
                         ? 'bg-blue-600 text-white'
                         : 'bg-gray-200 text-gray-800'
                     }`}
                   >
                     <p>{msg.message}</p>
-                    <p className={`text-xs mt-1 ${
-                      msg.fromUserId === 'current_user' ? 'text-blue-200' : 'text-gray-500'
-                    }`}>
-                      {formatTime(msg.timestamp || Date.now())}
-                    </p>
+                    {formattedTime && (
+                      <p className={`text-xs mt-1 ${
+                        isCurrentUser ? 'text-blue-200' : 'text-gray-500'
+                      }`}>
+                        {formattedTime}
+                      </p>
+                    )}
                   </div>
                 </div>
-              ))
+              )})
             )}
             <div ref={messagesEndRef} />
           </div>

@@ -2,6 +2,8 @@
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+const IS_DEV = process.env.NODE_ENV === "development";
+
 function PaymentSuccessContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -18,6 +20,11 @@ function PaymentSuccessContent() {
   useEffect(() => {
     // Handle mock payments for admin users
     if (isMock) {
+      if (!IS_DEV) {
+        setStatus("error");
+        return;
+      }
+
       // For mock payments, calculate the correct amount (including late fees for invoices)
       const fetchPaymentAmount = async () => {
         let resolvedAmount: number | null = null;

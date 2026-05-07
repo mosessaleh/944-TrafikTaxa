@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { Suspense, useEffect, useRef, useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import io, { Socket } from 'socket.io-client';
 
@@ -50,7 +50,7 @@ interface BookingUpdateData {
   status: string;
 }
 
-export default function WaitingForDriverPage() {
+function WaitingForDriverContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const bookingId = searchParams.get("bookingId");
@@ -83,7 +83,7 @@ export default function WaitingForDriverPage() {
 
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
-      console.error('Google Maps API key not found');
+      console.error('waiting-for-driver: Google Maps API key not found');
       return;
     }
 
@@ -123,7 +123,7 @@ export default function WaitingForDriverPage() {
       });
       mapRef.current = map;
     } catch (err) {
-      console.error('Error initializing map:', err);
+      console.error('waiting-for-driver: failed to initialize map', err);
       setMapError(true);
       // Don't throw error, just log it - map is optional
     }
@@ -137,12 +137,12 @@ export default function WaitingForDriverPage() {
         if (audioContext.state === 'suspended') {
           audioContext.resume().then(() => {
             playSound(audioContext);
-          }).catch(err => console.warn('Could not resume audio context:', err));
+          }).catch(err => console.warn('waiting-for-driver: could not resume audio context', err));
         } else {
           playSound(audioContext);
         }
       } catch (err) {
-        console.warn('Could not play notification sound:', err);
+        console.warn('waiting-for-driver: could not play notification sound', err);
       }
     }
   }, [driverFound]);
@@ -164,7 +164,7 @@ export default function WaitingForDriverPage() {
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.5);
     } catch (err) {
-      console.warn('Could not play sound:', err);
+      console.warn('waiting-for-driver: could not play sound', err);
     }
   };
 
@@ -185,7 +185,7 @@ export default function WaitingForDriverPage() {
       initializeMap().then(() => {
         updateMap(bookingDetails);
       }).catch(err => {
-        console.error('Failed to initialize map:', err);
+        console.error('waiting-for-driver: map initialization failed', err);
         setMapError(true);
       });
     }
@@ -234,19 +234,16 @@ export default function WaitingForDriverPage() {
         socketRef.current = socket;
 
         socket.on('connect', () => {
-          console.log('Connected to socket server');
           socket.emit('joinBooking', { bookingId });
         });
 
         socket.on('bookingUpdate', (data: BookingUpdateData) => {
-          console.log('Received booking update:', data);
           if (data.bookingId == bookingId) {
             handleBookingUpdate(data);
           }
         });
 
         socket.on('driverLocationUpdate', (data: any) => {
-          console.log('Received driver location update:', data);
           if (driverFound && driverMarkerRef.current && mapRef.current) {
             const newLocation = { lat: data.location.lat, lng: data.location.lng };
             driverMarkerRef.current.setPosition(newLocation);
@@ -292,16 +289,14 @@ export default function WaitingForDriverPage() {
         });
 
         socket.on('connect_error', (err) => {
-          console.error('Socket connection error:', err);
+          console.error('waiting-for-driver: socket connection error', err);
           setError('Connection error. Please refresh the page.');
         });
 
-        socket.on('disconnect', () => {
-          console.log('Disconnected from socket server');
-        });
+        socket.on('disconnect', () => {});
 
       } catch (err) {
-        console.error('Error initializing page:', err);
+        console.error('waiting-for-driver: page initialization error', err);
         setError('Failed to load booking details. Please try again.');
         setIsLoading(false);
       }
@@ -402,7 +397,7 @@ export default function WaitingForDriverPage() {
 
       setIsLoading(false);
     } catch (err) {
-      console.error('Error validating access:', err);
+      console.error('waiting-for-driver: access validation failed', err);
       setError('Failed to load booking details');
       setIsLoading(false);
       throw err;
@@ -410,9 +405,7 @@ export default function WaitingForDriverPage() {
   };
 
   const handleBookingUpdate = (data: BookingUpdateData) => {
-    console.log('Handling booking update:', data);
     if (data.status === 'CONFIRMED') {
-      console.log('Driver assigned, updating UI');
       setSearchingStatus("Driver assigned! Waiting for driver to accept...");
       setCanCancel(false); // Hide cancel button when driver is assigned
       // Stop auto cancel timer
@@ -424,7 +417,6 @@ export default function WaitingForDriverPage() {
       fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
         .then(res => res.json())
         .then(updatedData => {
-          console.log('Fetched updated booking:', updatedData);
           const updatedBooking: Booking = updatedData.ride || updatedData;
           setBookingDetails(updatedBooking);
           // Show map if driver location is available
@@ -433,9 +425,8 @@ export default function WaitingForDriverPage() {
             updateMap(updatedBooking);
           }
         })
-        .catch(err => console.error('Error fetching updated booking:', err));
+        .catch(err => console.error('waiting-for-driver: failed to fetch updated booking', err));
     } else if (data.status === 'DISPATCHED' || data.status === 'ONGOING') {
-      console.log('Driver accepted, updating UI');
       setDriverFound(true);
       setSearchingStatus("Driver found! Driver is on the way...");
       setCanCancel(false); // Hide cancel button when driver accepts
@@ -448,18 +439,15 @@ export default function WaitingForDriverPage() {
       fetch(`/api/bookings/${bookingId}`, { credentials: 'include' })
         .then(res => res.json())
         .then(updatedData => {
-          console.log('Fetched updated booking:', updatedData);
           const updatedBooking: Booking = updatedData.ride || updatedData;
           setBookingDetails(updatedBooking);
           updateMap(updatedBooking);
         })
-        .catch(err => console.error('Error fetching updated booking:', err));
+        .catch(err => console.error('waiting-for-driver: failed to fetch updated booking', err));
     } else if (data.status === 'COMPLETED') {
-      console.log('Ride completed');
       setSearchingStatus("Ride completed! Redirecting...");
       setTimeout(() => router.push("/bookings"), 3000);
     } else if (data.status === 'CANCELED') {
-      console.log('Ride canceled');
       setSearchingStatus("Ride canceled! Redirecting...");
       setTimeout(() => router.push("/bookings"), 3000);
     }
@@ -486,19 +474,18 @@ export default function WaitingForDriverPage() {
         }
       }
     } catch (error) {
-      console.error('Error refreshing booking data:', error);
+      console.error('waiting-for-driver: failed to refresh booking data', error);
     }
   };
 
   const updateMap = async (booking: Booking) => {
-    console.log('Updating map for booking:', booking);
     if (!booking.driver?.lastLocation) {
-      console.warn('No driver location available');
+      console.warn('waiting-for-driver: no driver location available');
       return;
     }
 
     if (mapError || !mapRef.current) {
-      console.log('Map not available, skipping update');
+      console.warn('waiting-for-driver: map not available, skipping update');
       return;
     }
 
@@ -523,12 +510,9 @@ export default function WaitingForDriverPage() {
       : null;
 
     if (!passengerLatLng || isNaN(passengerLatLng.lat) || isNaN(passengerLatLng.lng)) {
-      console.warn('Passenger location not available');
+      console.warn('waiting-for-driver: passenger location not available');
       return;
     }
-
-    console.log('Driver location:', driverLocation);
-    console.log('Passenger location:', passengerLatLng);
 
     // Clear existing markers and route
     if (driverMarkerRef.current) driverMarkerRef.current.setMap(null);
@@ -615,7 +599,7 @@ export default function WaitingForDriverPage() {
       if (status === google.maps.DirectionsStatus.OK && routeRendererRef.current) {
         routeRendererRef.current.setDirections(result);
       } else {
-        console.warn('Directions request failed:', status);
+        console.warn('waiting-for-driver: directions request failed', status);
       }
     });
 
@@ -640,7 +624,6 @@ export default function WaitingForDriverPage() {
             const newLocation = Array.isArray(newLocationRaw)
               ? { lat: newLocationRaw[0], lng: newLocationRaw[1] }
               : { lat: newLocationRaw.lat, lng: newLocationRaw.lng };
-            console.log('Updating driver marker position:', newLocation);
             driverMarkerRef.current.setPosition({ lat: newLocation.lat, lng: newLocation.lng });
 
             // Update route if needed
@@ -666,7 +649,7 @@ export default function WaitingForDriverPage() {
           }
         }
       } catch (err) {
-        console.error('Error updating driver location:', err);
+        console.error('waiting-for-driver: failed to update driver location', err);
       }
     };
 
@@ -691,8 +674,6 @@ export default function WaitingForDriverPage() {
       bookingId,
       ...message
     });
-
-    setChatMessages(prev => [...prev, message]);
     setChatInput('');
   };
 
@@ -712,7 +693,7 @@ export default function WaitingForDriverPage() {
         setError("Failed to cancel booking");
       }
     } catch (err) {
-      console.error("Error canceling booking:", err);
+      console.error("waiting-for-driver: failed to cancel booking", err);
       setError("Error canceling booking");
     }
   };
@@ -734,7 +715,7 @@ export default function WaitingForDriverPage() {
         setError("Failed to auto-cancel booking");
       }
     } catch (err) {
-      console.error("Error auto-canceling booking:", err);
+      console.error("waiting-for-driver: failed to auto-cancel booking", err);
       setError("Error auto-canceling booking");
     }
   };
@@ -920,5 +901,21 @@ export default function WaitingForDriverPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function WaitingForDriverFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+    </div>
+  );
+}
+
+export default function WaitingForDriverPage() {
+  return (
+    <Suspense fallback={<WaitingForDriverFallback />}>
+      <WaitingForDriverContent />
+    </Suspense>
   );
 }
