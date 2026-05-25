@@ -177,6 +177,14 @@ function normalizeDriverQueue(queue) {
     .filter((value) => Number.isFinite(value));
 }
 
+function getEtaWindowKey(timeMinutes) {
+  if (!Number.isFinite(timeMinutes)) return 'unknown';
+  if (timeMinutes <= 5) return '0-5';
+  if (timeMinutes <= 10) return '5-10';
+  if (timeMinutes <= 20) return '10-20';
+  return '20+';
+}
+
 function buildRidePayload(ride) {
   return {
     id: ride.id,
@@ -556,9 +564,11 @@ async function getAvailableVehiclesForRide(ride) {
       return [];
     }
 
+    const strategyVehicleIds = data.vehicles.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+
     const vehicles = await prisma.comVehicles.findMany({
       where: {
-        id: { in: data.vehicles }
+        id: { in: strategyVehicleIds }
       },
       select: {
         id: true,
@@ -566,7 +576,12 @@ async function getAvailableVehiclesForRide(ride) {
       }
     });
 
-    const carPlates = vehicles.map(v => v.regNumber);
+    const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+    const orderedVehicles = strategyVehicleIds
+      .map((vehicleId) => vehicleMap.get(vehicleId))
+      .filter(Boolean);
+
+    const carPlates = orderedVehicles.map(v => v.regNumber);
     const drivers = await prisma.comDriver.findMany({
       where: {
         car: { in: carPlates }
@@ -579,7 +594,7 @@ async function getAvailableVehiclesForRide(ride) {
 
     const driverMap = new Map(drivers.map(d => [d.car, d.id]));
 
-    const vehicleInfo = await Promise.all(vehicles.map(async (vehicle, index) => {
+    const vehicleInfo = await Promise.all(orderedVehicles.map(async (vehicle, index) => {
       const driverId = driverMap.get(vehicle.regNumber);
       if (!driverId) return `car${index + 1}: [${vehicle.id}, unknown, unknown]`;
 
@@ -2987,8 +3002,10 @@ async function autoAssignRide(ride, vehicleInfo) {
       }
     }
 
-    // Sort by time (closest first)
-    availableDrivers.sort((a, b) => a.timeMinutes - b.timeMinutes);
+    const etaWindows = new Set(availableDrivers.map((driver) => getEtaWindowKey(driver.timeMinutes)));
+    if (etaWindows.size > 1) {
+      availableDrivers.sort((a, b) => a.timeMinutes - b.timeMinutes);
+    }
 
     // Get rejected drivers for this ride
     const rejectedDrivers = global.rejectedRides?.get(ride.id) || new Set();

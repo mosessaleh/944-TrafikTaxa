@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
+    const allDrivers = searchParams.get('all') === 'true';
 
     // Default period: from 26th of last month to 25th of current month or current date if before 25th
     const now = new Date();
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest) {
 
     const rides = await prisma.ride.findMany({
       where: {
-        driverId: driver.id,
+        ...(allDrivers ? {} : { driverId: driver.id }),
         status: { in: ['COMPLETED', 'CANCELED'] },
         createdAt: {
           gte: start,

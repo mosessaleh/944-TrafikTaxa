@@ -99,8 +99,13 @@ export async function GET(request: Request) {
               }
             });
 
+            const vehicleMap = new Map(vehicles.map((vehicle: any) => [Number(vehicle.id), vehicle]));
+            const orderedVehicles = strategyData.vehicles
+              .map((vehicleId: any) => vehicleMap.get(Number(vehicleId)))
+              .filter(Boolean);
+
             // Add driver information and busy status
-            const vehiclesWithStatus = await Promise.all(vehicles.map(async (vehicle: any) => {
+            const vehiclesWithStatus = await Promise.all(orderedVehicles.map(async (vehicle: any) => {
               const driver = await prisma.comDriver.findFirst({
                 where: { car: vehicle.regNumber },
                 select: { currentRideId: true }
