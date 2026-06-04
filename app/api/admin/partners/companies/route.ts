@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
 
 export async function GET(request: Request) {
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     }
 
     // Require admin authentication
-    await requireAdmin();
+    await requirePermission('partners.manage');
 
     const companies = await prisma.partnerCompany.findMany({
       include: {

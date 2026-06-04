@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { isStaffRole, type AppRole } from '@/lib/permissions';
 
 export type CurrentUser = {
   id: number;
@@ -7,7 +8,7 @@ export type CurrentUser = {
   lastName: string;
   phone: string;
   address: string;
-  role: 'USER' | 'ADMIN';
+  role: AppRole;
   emailVerified: boolean;
   pendingEmail?: string | null;
 };
@@ -42,7 +43,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       lastName: String(parsed.lastName || ''),
       phone: String(parsed.phone || ''),
       address: String(parsed.address || ''),
-      role: parsed.role === 'ADMIN' ? 'ADMIN' : 'USER',
+      role: isStaffRole(parsed.role) ? parsed.role : 'USER',
       emailVerified: !!parsed.emailVerified,
       pendingEmail: parsed.pendingEmail || null,
     };

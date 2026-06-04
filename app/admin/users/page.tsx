@@ -1,7 +1,10 @@
 import { prisma } from '@/lib/db';
+import { requirePermission } from '@/lib/auth';
 import AdminUsersClient, { AdminUser } from '@/components/AdminUsersClient';
 
 export default async function AdminUsers(){
+  await requirePermission('users.read');
+
   const raw = await prisma.user.findMany({
     orderBy:{ id:'desc' },
     select: {

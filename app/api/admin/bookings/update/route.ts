@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
-import { requireAdmin, getUserFromCookie } from '@/lib/auth';
+import { requirePermission, getUserFromCookie } from '@/lib/auth';
 import { chargeSavedPaymentMethod } from '@/lib/payment-processor';
 
 const Schema = z.object({ id: z.number().int(), action: z.enum(['CONFIRM','DISPATCH','START','COMPLETE','CANCEL','MARK_PAID','PROCESS','CONFIRM_BOOKING','REFUNDING','REFUNDED','DELIVERED']) });
@@ -12,7 +12,7 @@ function emailTpl(subject:string, body:string){
 }
 
 export async function POST(req: NextRequest){
-  try{ await requireAdmin(); }catch(e:any){ return NextResponse.json({ ok:false, error:'Forbidden' }, { status: e?.status||403 }); }
+  try{ await requirePermission('bookings.manage'); }catch(e:any){ return NextResponse.json({ ok:false, error:'Forbidden' }, { status: e?.status||403 }); }
   
   try{
     const { id, action } = Schema.parse(await req.json());

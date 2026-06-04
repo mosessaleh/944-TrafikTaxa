@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { getUserFromCookie, requirePermission } from '@/lib/auth';
+import { hasPermission } from '@/lib/permissions';
 import { getHighRiskBookings } from '@/lib/risk-assessment';
 import { notifyAdmin } from '@/lib/notify';
 
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
   try {
     // Optional authentication - can be called by cron jobs
     const user = await getUserFromCookie();
-    const isAdmin = user && user.type === 'user' && (user as any).role === 'ADMIN';
+    const isAdmin = user && user.type === 'user' && hasPermission((user as any).role, 'risk.read');
 
     // Get high-risk bookings that need attention
     const highRiskBookings = await getHighRiskBookings(10); // Top 10 high-risk bookings

@@ -1,12 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
+import { AuditEvent, AuditLogger } from '@/lib/audit-log';
+
+function dangerZoneEnabled() {
+  return process.env.NODE_ENV !== 'production' || process.env.ENABLE_ADMIN_DANGER_ZONE === 'true';
+}
 
 export async function POST(
   request: NextRequest,
 ) {
   try {
+    if (!dangerZoneEnabled()) {
+      return NextResponse.json(
+        { error: 'Danger zone is disabled in production' },
+        { status: 403 }
+      );
+    }
+
     const originCheck = validateRequestOrigin(request);
     if (!originCheck.ok) {
       return NextResponse.json(
@@ -15,10 +27,7 @@ export async function POST(
       );
     }
 
-    const me = await getUserFromCookie();
-    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const me = await requirePermission('danger.manage');
 
     const { table } = await request.json();
     
@@ -30,7 +39,7 @@ export async function POST(
     const allowedTables = [
       'ride', 'invoice', 'complaint', 'favoriteaddress', 'paymentMethod',
       'cryptoPayment', 'cardPayment', 'paypalPayment', 'revolutPayment',
-      'cryptoWallet', 'auditLog'
+      'cryptoWallet'
     ];
 
     const excludedTables = ['user', 'vehicleType', 'settings', '_prisma_migrations'];
@@ -59,7 +68,6 @@ export async function POST(
       'paypalPayment': 'payPalPayment',
       'revolutPayment': 'revolutPayment',
       'cryptoWallet': 'cryptoWallet',
-      'auditLog': 'auditLog'
     };
 
     const modelName = modelMap[table];
@@ -114,12 +122,18 @@ export async function POST(
       case 'cryptoWallet':
         result = await prisma.cryptoWallet.deleteMany({});
         break;
-      case 'auditLog':
-        result = await prisma.auditLog.deleteMany({});
-        break;
       default:
         return NextResponse.json({ error: 'Model not found' }, { status: 400 });
     }
+
+    await AuditLogger.log({
+      event: AuditEvent.ADMIN_ACTION,
+      userId: String((me as any).id),
+      ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('cf-connecting-ip') || undefined,
+      userAgent: request.headers.get('user-agent') || undefined,
+      metadata: { action: 'clear_data', table, deletedCount: result.count, cascadeInfo },
+      severity: 'critical'
+    });
 
     console.log(`Cleared data from ${table}:`, result);
 
@@ -145,6 +159,13 @@ export async function GET(
   request: NextRequest,
 ) {
   try {
+    if (!dangerZoneEnabled()) {
+      return NextResponse.json(
+        { error: 'Danger zone is disabled in production' },
+        { status: 403 }
+      );
+    }
+
     const originCheck = validateRequestOrigin(request);
     if (!originCheck.ok) {
       return NextResponse.json(
@@ -153,10 +174,7 @@ export async function GET(
       );
     }
 
-    const me = await getUserFromCookie();
-    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    await requirePermission('danger.manage');
 
     // Get record counts for all clearable tables
     const getCount = async (model: any, name: string) => {
@@ -178,11 +196,10 @@ export async function GET(
       getCount(prisma.cardPayment, 'cardPayment'),
       getCount(prisma.payPalPayment, 'paypalPayment'),
       getCount(prisma.revolutPayment, 'revolutPayment'),
-      getCount(prisma.cryptoWallet, 'cryptoWallet'),
-      getCount(prisma.auditLog, 'auditLog')
+      getCount(prisma.cryptoWallet, 'cryptoWallet')
     ].map(async (promise, index) => {
       const count = await promise;
-      const names = ['ride', 'invoice', 'complaint', 'favoriteaddress', 'paymentMethod', 'cryptoPayment', 'cardPayment', 'paypalPayment', 'revolutPayment', 'cryptoWallet', 'auditLog'];
+      const names = ['ride', 'invoice', 'complaint', 'favoriteaddress', 'paymentMethod', 'cryptoPayment', 'cardPayment', 'paypalPayment', 'revolutPayment', 'cryptoWallet'];
       return { name: names[index], count };
     }));
 

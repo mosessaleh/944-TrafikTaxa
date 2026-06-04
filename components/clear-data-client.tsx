@@ -84,7 +84,7 @@ export default function ClearDataClient() {
   };
 
   const handleTruncateTransactionTables = async () => {
-    const warningMessage = `Are you absolutely sure you want to TRUNCATE ALL transaction tables? This will permanently delete ALL data from: auditlog, cardpayment, cryptopayment, invoice, notification, notificationsettings, ride. IDs will reset to 1. This action cannot be undone!`;
+    const warningMessage = `Are you absolutely sure you want to TRUNCATE ALL transaction tables? This will permanently delete ALL data from: cardpayment, cryptopayment, invoice, notification, notificationsettings, ride. IDs will reset to 1. This action cannot be undone! Audit logs are preserved.`;
 
     if (!confirm(warningMessage)) {
       return;
@@ -126,14 +126,13 @@ export default function ClearDataClient() {
       'ride': 'Bookings/Rides',
       'invoice': 'Invoices',
       'complaint': 'Complaints',
-      'favoriteAddress': 'Favorite Addresses',
+      'favoriteaddress': 'Favorite Addresses',
       'paymentMethod': 'Payment Methods',
       'cryptoPayment': 'Crypto Payments',
       'cardPayment': 'Card Payments',
       'paypalPayment': 'PayPal Payments',
       'revolutPayment': 'Revolut Payments',
-      'cryptoWallet': 'Crypto Wallets',
-      'auditLog': 'Audit Logs'
+      'cryptoWallet': 'Crypto Wallets'
     };
     return names[table] || table;
   };
@@ -174,7 +173,7 @@ export default function ClearDataClient() {
             <div>
               <h3 className="text-lg font-bold text-red-900">Truncate Transaction Tables</h3>
               <p className="text-red-700 text-sm mt-1">
-                Reset all transaction-related tables: auditlog, cardpayment, cryptopayment, invoice, notification, notificationsettings, ride.
+                Reset all transaction-related tables: cardpayment, cryptopayment, invoice, notification, notificationsettings, ride.
                 IDs will restart from 1.
               </p>
             </div>

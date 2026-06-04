@@ -1,7 +1,10 @@
 import { Suspense } from 'react';
+import { requirePermission } from '@/lib/auth';
 import { AdminPartnerOverviewClient } from '@/components/AdminPartnerOverviewClient';
 
-export default function AdminPartnerOverviewPage() {
+export default async function AdminPartnerOverviewPage() {
+  await requirePermission('partners.read');
+
   return (
     <div className="space-y-6">
       <div>

@@ -5,8 +5,20 @@ import Link from 'next/link';
 import useSWR from 'swr';
 import ComplaintModal from './ComplaintModal';
 import ComplaintConversationModal from './ComplaintConversationModal';
+import AccountHistoryPanel from './account-history-panel';
 import ProfileEditClient from './profile-edit-client';
 import PaymentMethodsClient from './payment-methods-client';
+import { isStaffRole } from '@/lib/permissions';
+import {
+  Bell,
+  ClipboardList,
+  CreditCard,
+  FileText,
+  LogOut,
+  Star,
+  Trash2,
+  User as UserIcon,
+} from 'lucide-react';
 
 // Import translation files
 import dkMessages from '../messages/dk.json';
@@ -56,7 +68,7 @@ function useTranslations(user: User | null) {
     return value || key;
   };
 
-  return t;
+  return { t, language };
 }
 
 // Invoice Actions Component (moved inside AccountClient to access t)
@@ -155,10 +167,9 @@ export default function AccountClient() {
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [complaintModal, setComplaintModal] = useState<{ isOpen: boolean; bookingId: number | null }>({ isOpen: false, bookingId: null });
   const [complaintConversationModal, setComplaintConversationModal] = useState<{ isOpen: boolean; complaint: Complaint | null }>({ isOpen: false, complaint: null });
-  const [expandedBooking, setExpandedBooking] = useState<number | null>(null);
   const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'unpaid' | 'overdue'>('all');
 
-  const t = useTranslations(me);
+  const { t, language } = useTranslations(me);
 
   // Invoice Actions Component
   function InvoiceActions({ bookingId }: { bookingId: number }) {
@@ -647,10 +658,6 @@ export default function AccountClient() {
     }
   };
 
-  const toggleBookingExpansion = (bookingId: number) => {
-    setExpandedBooking(expandedBooking === bookingId ? null : bookingId);
-  };
-
   // Update URL when tab changes
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -710,6 +717,15 @@ export default function AccountClient() {
     );
   }
 
+  const accountTabs = [
+    { id: 'profile' as const, label: t('account.profile.title'), Icon: UserIcon },
+    { id: 'history' as const, label: t('account.history.title'), Icon: ClipboardList },
+    { id: 'payment-methods' as const, label: t('account.paymentMethods.title'), Icon: CreditCard },
+    { id: 'invoices' as const, label: t('account.invoices.title'), Icon: FileText },
+    { id: 'favorites' as const, label: t('account.favorites.title'), Icon: Star },
+    { id: 'notifications' as const, label: t('account.notifications.title'), Icon: Bell },
+  ];
+
   return (
     <div className="min-h-screen pt-20 pb-8 bg-slate-50">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -724,17 +740,10 @@ export default function AccountClient() {
           {/* Sidebar */}
           <aside className="w-full lg:w-64">
             <nav className="bg-white border border-slate-200 rounded-2xl shadow-sm divide-y divide-slate-100">
-              {[
-                { id: 'profile', label: t('account.profile.title'), icon: '👤' },
-                { id: 'history', label: t('account.history.title'), icon: '📋' },
-                { id: 'payment-methods', label: t('account.paymentMethods.title'), icon: '💳' },
-                { id: 'invoices', label: t('account.invoices.title'), icon: '📄' },
-                { id: 'favorites', label: t('account.favorites.title'), icon: '⭐' },
-                { id: 'notifications', label: t('account.notifications.title'), icon: '🔔' },
-              ].map((item) => (
+              {accountTabs.map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => setTab(item.id as any)}
+                  onClick={() => setTab(item.id)}
                   className={`w-full flex items-center justify-between gap-2 px-4 py-3 text-sm font-medium transition-colors ${
                     tab === item.id
                       ? 'bg-slate-900 text-white'
@@ -742,7 +751,7 @@ export default function AccountClient() {
                   }`}
                 >
                   <span className="flex items-center gap-2">
-                    <span>{item.icon}</span>
+                    <item.Icon size={18} aria-hidden="true" />
                     <span>{item.label}</span>
                   </span>
                   {tab === item.id && (
@@ -760,7 +769,7 @@ export default function AccountClient() {
                 <div className="p-6">
                   <h1 className="text-3xl font-bold mb-6">{t('account.profile.title')}</h1>
    
-                  {!me.emailVerified && me.role !== 'ADMIN' && (
+                  {!me.emailVerified && !isStaffRole(me.role) && (
                     <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200 mb-6">
                       <div className="font-medium text-orange-800">{t('account.profile.unverified')}</div>
                       <div className="text-sm text-orange-700" dangerouslySetInnerHTML={{ __html: t('account.profile.verifyEmail').replace('{email}', `<b>${me.email}</b>`) }} />
@@ -773,7 +782,7 @@ export default function AccountClient() {
                       <div className="grid gap-1">
                         <div className="text-sm text-gray-500">{t('account.profile.email')}</div>
                         <div className="font-semibold flex items-center gap-2">{me.email} <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${me.emailVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{me.emailVerified ? t('account.profile.verified') : t('account.profile.unverified')}</span></div>
-                        {!me.emailVerified && me.role !== 'ADMIN' && (
+                        {!me.emailVerified && !isStaffRole(me.role) && (
                           <div className="text-sm text-gray-600" dangerouslySetInnerHTML={{ __html: t('account.profile.needVerification').replace('<Link>', `<a href="/verify?email=${encodeURIComponent(me.email)}" class="underline">`).replace('</Link>', '</a>') }} />
                         )}
                       </div>
@@ -788,391 +797,31 @@ export default function AccountClient() {
                     address: me.address || '',
                     pendingEmail: me.pendingEmail || null,
                     role: me.role
-                  }} onProfileUpdate={refreshProfile} />
+                  }} language={language} onProfileUpdate={refreshProfile} />
    
                   <div className="mt-8 pt-6 border-t border-slate-200">
                     <button
                       onClick={handleLogout}
-                      className="btn-ghost text-red-600 hover:text-red-700 hover:bg-red-50"
+                      className="btn-ghost inline-flex items-center gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
                     >
+                      <LogOut size={16} aria-hidden="true" />
                       {t('account.profile.logout')}
                     </button>
                   </div>
                 </div>
-              )}
-
+              )}
           {tab === 'history' && (
-            <div className="p-6">
-              <h2 className="text-xl font-semibold text-slate-800 mb-6">{t('account.history.title')}</h2>
-
-              {/* Check for active ride */}
-              {ridesData && ridesData.some((ride: Ride) => ride.status === 'ONGOING' || ride.status === 'DISPATCHED') && (
-                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-semibold text-blue-800">Active Ride</h3>
-                      <p className="text-blue-700">You have an active ride in progress.</p>
-                    </div>
-                    <Link
-                      href={`/waiting-for-driver?bookingId=${ridesData.find((ride: Ride) => ride.status === 'ONGOING' || ride.status === 'DISPATCHED')?.id}`}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      View Ride Status
-                    </Link>
-                  </div>
-                </div>
-              )}
-              {ridesLoading ? (
-                <div className="text-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600 mx-auto"></div>
-                  <p className="mt-2 text-slate-600">{t('account.history.loading')}</p>
-                </div>
-              ) : ridesError ? (
-                <div className="text-center py-8">
-                  <p className="text-red-600 mb-4">{t('account.history.error')}</p>
-                  <p className="text-slate-600 text-sm">{ridesError.message}</p>
-                </div>
-              ) : !ridesData || ridesData.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-slate-600">{t('account.history.noBookings')}</p>
-                  <button
-                    onClick={() => router.push('/book')}
-                    className="btn-primary mt-4"
-                  >
-                    {t('account.history.bookFirst')}
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {ridesData.map((ride: Ride) => {
-                    const isExpanded = expandedBooking === ride.id;
-                    // console.log(ride) // Debug: removed to clean up code
-                    return (
-                      <div key={ride.id} className="bg-white border border-slate-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden">
-                        {/* Header - Clickable */}
-                        <div
-                          className="bg-gradient-to-r from-slate-50 to-slate-100 px-6 py-4 border-b border-slate-200 cursor-pointer hover:from-slate-100 hover:to-slate-200 transition-colors"
-                          onClick={() => toggleBookingExpansion(ride.id)}
-                        >
-                          {/* Desktop View */}
-                          <div className="hidden sm:flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                              <div className="flex items-center gap-2">
-                                <span className="text-2xl">
-                                  {ride.status === 'COMPLETED' ? '✅' :
-                                   ride.status === 'CONFIRMED' ? '🟢' :
-                                   ride.status === 'PENDING' ? '🟡' :
-                                   ride.status === 'CANCELED' ? '❌' :
-                                   ride.status === 'ONGOING' ? '🚗' :
-                                   ride.status === 'DISPATCHED' ? '🚗' : '📋'}
-                                </span>
-                                <div>
-                                  <h3 className="font-bold text-slate-800 text-base">
-                                    Booking #{ride.id}
-                                  </h3>
-                                  <p className="text-xs text-slate-600">
-                                    {new Date(ride.createdAt).toLocaleDateString('en-US', {
-                                      year: 'numeric',
-                                      month: 'short',
-                                      day: 'numeric'
-                                    })}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                                  ride.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
-                                  ride.status === 'CONFIRMED' ? 'bg-blue-100 text-blue-800' :
-                                  ride.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
-                                  ride.status === 'CANCELED' ? 'bg-red-100 text-red-800' :
-                                  ride.status === 'ONGOING' ? 'bg-purple-100 text-purple-800' :
-                                  ride.status === 'DISPATCHED' ? 'bg-orange-100 text-orange-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {ride.status}
-                                </span>
-                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                                  ride.paymentStatus === 'PAID' ? 'bg-emerald-100 text-emerald-800' :
-                                  'bg-gray-100 text-gray-800'
-                                }`}>
-                                  {ride.paymentStatus === 'PAID' ? '💳 Paid' : '⏳ Unpaid'}
-                                </span>
-                                {ride.hasComplaint && (
-                                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
-                                    ⚠️ Complaint
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="text-right">
-                                <p className="text-xl font-bold text-slate-800">{Number(ride.price).toFixed(2)} <span className="text-sm">DKK</span></p>
-                              </div>
-                              <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>
-                                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Mobile View */}
-                          <div className="flex sm:hidden items-center justify-between">
-                            <div className="flex items-start gap-3">
-                              <span className="text-lg">
-                                {ride.status === 'COMPLETED' ? '✅' :
-                                 ride.status === 'CONFIRMED' ? '🟢' :
-                                 ride.status === 'PENDING' ? '🟡' :
-                                 ride.status === 'CANCELED' ? '❌' :
-                                 ride.status === 'ONGOING' ? '🚗' :
-                                 ride.status === 'DISPATCHED' ? '🚗' : '📋'}
-                              </span>
-                              <div>
-                                <h3 className="font-bold text-slate-800 text-xs">
-                                  Booking #{ride.id}
-                                </h3>
-                                <p className="text-xs text-slate-500">
-                                  {new Date(ride.createdAt).toLocaleDateString('en-US', {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric'
-                                  })}
-                                </p>
-                                <p className="text-xs text-slate-600 mt-0.5">
-                                  <span className={ride.status === 'COMPLETED' ? 'text-green-600' :
-                                                   ride.status === 'CONFIRMED' ? 'text-blue-600' :
-                                                   ride.status === 'PENDING' ? 'text-yellow-600' :
-                                                   ride.status === 'CANCELED' ? 'text-red-600' :
-                                                   ride.status === 'ONGOING' ? 'text-purple-600' :
-                                                   ride.status === 'DISPATCHED' ? 'text-orange-600' :
-                                                   'text-gray-600'}>
-                                    {ride.status}
-                                  </span>
-                                  {' • '}
-                                  <span className={ride.paymentStatus === 'PAID' ? 'text-emerald-600' : 'text-gray-600'}>
-                                    {ride.paymentStatus === 'PAID' ? 'Paid' : 'Unpaid'}
-                                  </span>
-                                  {ride.hasComplaint && (
-                                    <>
-                                      {' • '}
-                                      <span className="text-amber-600">Complaint Submitted</span>
-                                    </>
-                                  )}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="text-right">
-                                <p className="text-sm font-bold text-slate-800">{Number(ride.price).toFixed(2)} <span className="text-xs">DKK</span></p>
-                              </div>
-                              <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`}>
-                                <svg className="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Expandable Content */}
-                        <div className={`overflow-y-auto transition-all duration-300 ease-in-out ${
-                          isExpanded ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0'
-                        }`}>
-                          <div className="px-6 py-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                              {/* Route Info */}
-                              <div className="space-y-3">
-                                <div>
-                                  <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                                    <span>📍</span>
-                                    {t('account.history.route')}
-                                  </h4>
-                                  <div className="bg-slate-50 rounded-lg p-3">
-                                    <div className="flex items-start gap-3">
-                                      <div className="flex flex-col items-center">
-                                        <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                                        <div className="w-0.5 h-6 bg-slate-300"></div>
-                                        {ride.stopAddress && (
-                                          <>
-                                            <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
-                                            <div className="w-0.5 h-6 bg-slate-300"></div>
-                                          </>
-                                        )}
-                                        <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                                      </div>
-                                      <div className="flex-1 space-y-2">
-                                        <div>
-                                          <p className="text-xs font-medium text-slate-700">{t('account.history.from')}</p>
-                                          <p className="text-sm text-slate-600">{ride.pickupAddress}</p>
-                                        </div>
-                                        {ride.stopAddress && (
-                                          <div>
-                                            <p className="text-xs font-medium text-slate-700">{t('account.history.stop')}</p>
-                                            <p className="text-sm text-slate-600">{ride.stopAddress}</p>
-                                          </div>
-                                        )}
-                                        <div>
-                                          <p className="text-xs font-medium text-slate-700">{t('account.history.to')}</p>
-                                          <p className="text-sm text-slate-600">{ride.dropoffAddress}</p>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Trip Details */}
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div className="bg-blue-50 rounded-lg p-3">
-                                    <p className="text-xs text-blue-600 font-medium">{t('account.history.distance')}</p>
-                                    <p className="text-base font-bold text-blue-800">{ride.distanceKm?.toFixed(1) || 'N/A'} km</p>
-                                  </div>
-                                  <div className="bg-purple-50 rounded-lg p-3">
-                                    <p className="text-xs text-purple-600 font-medium">{t('account.history.vehicleType')}</p>
-                                    <p className="text-base font-bold text-purple-800">
-                                      {ride.vehicleType?.title || 'Standard'}
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Time & Actions */}
-                              <div className="space-y-3">
-                                <div>
-                                  <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                                    <span>🕐</span>
-                                    {t('account.history.timeDetails')}
-                                  </h4>
-                                  <div className="bg-slate-50 rounded-lg p-3 space-y-2">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm text-slate-600">
-                                        {ride.scheduled ? t('account.history.scheduled') : t('account.history.immediate')}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs font-medium text-slate-700">{t('account.history.pickupTime')}</p>
-                                      <p className="text-sm text-slate-600">
-                                        {new Date(ride.pickupTime).toLocaleString('en-US', {
-                                          year: 'numeric',
-                                          month: 'short',
-                                          day: 'numeric',
-                                          hour: '2-digit',
-                                          minute: '2-digit'
-                                        })}
-                                      </p>
-                                    </div>
-                                    {ride.durationMin && (
-                                      <div>
-                                        <p className="text-xs font-medium text-slate-700">{t('account.history.estimatedDuration')}</p>
-                                        <p className="text-sm text-slate-600">{ride.durationMin} min</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* Payment Method */}
-                                {ride.paymentMethod && (
-                                  <div>
-                                    <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                                      <span>💳</span>
-                                      {t('account.history.paymentMethod')}
-                                    </h4>
-                                    <div className="bg-emerald-50 rounded-lg p-3">
-                                      <p className="text-sm font-medium text-emerald-700">
-                                        {ride.paymentMethod}
-                                      </p>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Invoice Actions - Show for all paid bookings since we create receipts */}
-                                {ride.paymentStatus === 'PAID' && (
-                                  <div>
-                                    <h4 className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                                      <span>📄</span>
-                                      {t('account.history.receipt')}
-                                    </h4>
-                                    <div className="bg-blue-50 rounded-lg p-3">
-                                      <InvoiceActions bookingId={ride.id} />
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Status Explanation */}
-                                <div>
-                                  <h4 className="font-semibold text-slate-700 mb-2">{t('account.history.statusExplanation')}</h4>
-                                  <div className="bg-slate-50 rounded-lg p-3">
-                                    <p className="text-sm text-slate-600">{ride.explanation}</p>
-                                  </div>
-                                </div>
-
-                                {ride.status === 'CANCELED' && (ride.cancellationReason || ride.canceledBy) && (
-                                  <div>
-                                    <h4 className="font-semibold text-slate-700 mb-2">{t('account.history.cancellationDetails')}</h4>
-                                    <div className="bg-red-50 rounded-lg p-3 space-y-2">
-                                      {ride.cancellationReason && (
-                                        <p className="text-sm text-red-700">
-                                          <span className="font-semibold">{t('account.history.cancellationReason')}:</span> {ride.cancellationReason}
-                                        </p>
-                                      )}
-                                      {ride.canceledBy && (
-                                        <p className="text-sm text-red-700">
-                                          <span className="font-semibold">{t('account.history.canceledBy')}:</span> {t(`account.history.canceledBy_${ride.canceledBy}`)}
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-
-                                <div className="bg-amber-50 rounded-lg p-3 text-sm text-amber-800">
-                                  {t('account.history.complaintHint')}
-                                </div>
-                                {/* Actions */}
-                                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:justify-end">
-                                  {/* Pay Now Button - Hide if invoice is available */}
-                                  {(ride.status === 'PENDING' || ride.status === 'CONFIRMED') && ride.paymentStatus !== 'PAID' && ride.paymentMethod !== 'invoice' && (
-                                    <a
-                                      key={`pay-${ride.id}`}
-                                      href={`/pay?booking_id=${ride.id}`}
-                                      className="w-full sm:w-auto px-4 py-2 text-sm rounded-lg transition-colors font-medium bg-green-600 text-white hover:bg-green-700 shadow-sm"
-                                    >
-                                      {t('account.history.payNow')}
-                                    </a>
-                                  )}
-
-                                  {/* Cancel Button */}
-                                  {(ride.status === 'PENDING' || ride.status === 'CONFIRMED') && (
-                                    <button
-                                      key={`cancel-${ride.id}`}
-                                      onClick={() => handleCancelBooking(ride.id)}
-                                      className="w-full sm:w-auto px-4 py-2 text-sm rounded-lg transition-colors font-medium bg-red-600 text-white hover:bg-red-700 shadow-sm"
-                                    >
-                                      {t('account.history.cancel')}
-                                    </button>
-                                  )}
-
-                                  {/* Complaint Button */}
-                                  <button
-                                    key={`complaint-${ride.id}`}
-                                    onClick={() => ride.hasComplaint ? handleViewComplaint(ride.id) : setComplaintModal({ isOpen: true, bookingId: ride.id })}
-                                    className={`w-full sm:w-auto px-4 py-2 text-sm rounded-lg transition-colors font-medium shadow-sm ${
-                                      ride.hasComplaint
-                                        ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                        : 'bg-amber-600 text-white hover:bg-amber-700'
-                                    }`}
-                                  >
-                                    {ride.hasComplaint ? t('account.history.viewComplaint') : t('account.history.submitComplaint')}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                    })}
-                </div>
-              )}
-            </div>
+            <AccountHistoryPanel
+              rides={ridesData}
+              isLoading={ridesLoading}
+              error={ridesError as { message?: string } | null}
+              t={t}
+              onBookFirst={() => router.push('/book')}
+              onCancelBooking={handleCancelBooking}
+              onOpenComplaint={(bookingId) => setComplaintModal({ isOpen: true, bookingId })}
+              onViewComplaint={handleViewComplaint}
+              renderInvoiceActions={(bookingId) => <InvoiceActions bookingId={bookingId} />}
+            />
           )}
 
           {tab === 'favorites' && (
@@ -1234,7 +883,7 @@ export default function AccountClient() {
                           className="text-red-600 hover:text-red-700 p-2"
                           title="Remove favorite"
                         >
-                          🗑️
+                          <Trash2 size={18} aria-hidden="true" />
                         </button>
                       </div>
                     </div>
@@ -1497,3 +1146,4 @@ export default function AccountClient() {
 </div>
 );
 }
+

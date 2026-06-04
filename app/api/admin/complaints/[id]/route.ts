@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 /**
  * POST /api/admin/complaints/[id] - Update complaint status and admin decision
@@ -10,13 +10,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const user = await getUserFromCookie();
-    if (!user || user.type !== 'user' || (user as any).role !== 'ADMIN') {
-      return NextResponse.json(
-        { ok: false, error: 'Admin access required' },
-        { status: 403 }
-      );
-    }
+    await requirePermission('complaints.manage');
 
     const complaintId = params.id;
 

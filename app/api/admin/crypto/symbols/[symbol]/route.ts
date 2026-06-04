@@ -1,15 +1,12 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getUserFromCookie } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
 
 type Params = { params: { symbol: string } };
 
 export async function PUT(request: Request, { params }: Params) {
-  const me = await getUserFromCookie();
-  if (!me || me.type !== 'user' || (me as any).role !== "ADMIN") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  try{ await requirePermission('crypto.manage'); }catch(e:any){ return NextResponse.json({ error: "forbidden" }, { status: e?.status||403 }); }
   const body = await request.json().catch(() => ({}));
   const active = Boolean(body?.active);
   const symbol = params.symbol.toLowerCase();
@@ -21,10 +18,7 @@ export async function PUT(request: Request, { params }: Params) {
 }
 
 export async function DELETE(request: Request, { params }: Params) {
-  const me = await getUserFromCookie();
-  if (!me || me.type !== 'user' || (me as any).role !== "ADMIN") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  try{ await requirePermission('crypto.manage'); }catch(e:any){ return NextResponse.json({ error: "forbidden" }, { status: e?.status||403 }); }
   const symbol = params.symbol.toLowerCase();
   await prisma.cryptoWallet.deleteMany({ where: { symbol } });
   return NextResponse.json({ ok: true });

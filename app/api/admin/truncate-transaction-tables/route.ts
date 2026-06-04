@@ -1,18 +1,35 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { prisma } from '@/lib/db';
+import { validateRequestOrigin } from '@/lib/security-headers';
+import { AuditEvent, AuditLogger } from '@/lib/audit-log';
 
-export async function POST() {
+function dangerZoneEnabled() {
+  return process.env.NODE_ENV !== 'production' || process.env.ENABLE_ADMIN_DANGER_ZONE === 'true';
+}
+
+export async function POST(request: Request) {
   try {
-    await requireAdmin();
+    if (!dangerZoneEnabled()) {
+      return NextResponse.json(
+        { error: 'Danger zone is disabled in production' },
+        { status: 403 }
+      );
+    }
 
-    console.log('Truncating transaction tables: auditlog, cardpayment, cryptopayment, invoice, notification, notificationsettings, ride');
+    const originCheck = validateRequestOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json({ error: 'Invalid request origin' }, { status: 403 });
+    }
+
+    const admin = await requirePermission('danger.manage');
+
+    console.log('Truncating transaction tables: cardpayment, cryptopayment, invoice, notification, notificationsettings, ride');
 
     // Disable foreign key checks for MySQL
     await prisma.$executeRaw`SET FOREIGN_KEY_CHECKS = 0;`;
 
     // Truncate tables (MySQL syntax)
-    await prisma.$executeRaw`TRUNCATE TABLE auditlog;`;
     await prisma.$executeRaw`TRUNCATE TABLE cardpayment;`;
     await prisma.$executeRaw`TRUNCATE TABLE cryptopayment;`;
     await prisma.$executeRaw`TRUNCATE TABLE invoice;`;
@@ -22,6 +39,18 @@ export async function POST() {
 
     // Re-enable foreign key checks
     await prisma.$executeRaw`SET FOREIGN_KEY_CHECKS = 1;`;
+
+    await AuditLogger.log({
+      event: AuditEvent.ADMIN_ACTION,
+      userId: String(admin.id),
+      ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('cf-connecting-ip') || undefined,
+      userAgent: request.headers.get('user-agent') || undefined,
+      metadata: {
+        action: 'truncate_transaction_tables',
+        tables: ['cardpayment', 'cryptopayment', 'invoice', 'notification', 'notificationsettings', 'ride']
+      },
+      severity: 'critical'
+    });
 
     console.log('All transaction tables truncated successfully.');
 

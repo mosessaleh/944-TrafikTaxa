@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 const Upsert = z.object({
   id: z.number().int().optional(),
@@ -13,13 +13,13 @@ const Upsert = z.object({
 });
 
 export async function GET(){
-  try{ await requireAdmin(); }catch(e:any){ return NextResponse.json({ ok:false }, { status:403 }); }
+  try{ await requirePermission('settings.read'); }catch(e:any){ return NextResponse.json({ ok:false }, { status:403 }); }
   const items = await prisma.vehicleType.findMany({ orderBy:{ id:'asc' } });
   return NextResponse.json({ ok:true, items });
 }
 
 export async function POST(req: Request){
-  try{ await requireAdmin(); }catch(e:any){ return NextResponse.json({ ok:false }, { status:403 }); }
+  try{ await requirePermission('settings.manage'); }catch(e:any){ return NextResponse.json({ ok:false }, { status:403 }); }
   const body = await req.json();
   const data = Upsert.parse(body);
 
@@ -40,7 +40,7 @@ export async function POST(req: Request){
 }
 
 export async function DELETE(req: Request){
-  try{ await requireAdmin(); }catch(e:any){ return NextResponse.json({ ok:false }, { status:403 }); }
+  try{ await requirePermission('settings.manage'); }catch(e:any){ return NextResponse.json({ ok:false }, { status:403 }); }
   const url = new URL(req.url);
   const id = url.searchParams.get('id');
   if (!id) return NextResponse.json({ ok:false, error:'Missing id' }, { status:400 });

@@ -1,0 +1,10 @@
+ALTER TABLE `User`
+  MODIFY `role` ENUM(
+    'USER',
+    'ADMIN',
+    'SUPER_ADMIN',
+    'DISPATCHER',
+    'FINANCE',
+    'SUPPORT',
+    'PARTNER_MANAGER'
+  ) NOT NULL DEFAULT 'USER';

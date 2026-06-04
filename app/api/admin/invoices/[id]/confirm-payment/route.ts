@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 // =====================
 // Simple Rate Limiting System
@@ -54,8 +54,10 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const me = await getUserFromCookie();
-    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
+    let me;
+    try {
+      me = await requirePermission('invoices.manage');
+    } catch {
       await createAuditLog(
         'admin_unauthorized_access_attempt',
         'unknown',

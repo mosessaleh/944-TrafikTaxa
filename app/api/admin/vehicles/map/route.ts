@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requirePermission } from '@/lib/auth';
 
 interface Vehicle {
   id: number;
@@ -21,6 +22,8 @@ interface OnlineDriver {
 
 export async function GET(request: Request) {
   try {
+    await requirePermission('drivers.read');
+
     // Get all vehicles with their location data
     let vehicles: Vehicle[];
     try {
@@ -60,60 +63,16 @@ export async function GET(request: Request) {
       onlineDrivers = [];
     }
 
-    // If no vehicles in database, add mock vehicles for testing
-    if (vehicles.length === 0) {
-      vehicles = [
-        {
-          id: 1,
-          regNumber: 'ADMIN-001',
-          lastLat: 55.6761,
-          lastLon: 12.5683,
-          lastLocationUpdate: new Date(),
-          vehicleType: 'SEDAN5',
-          make: 'Test',
-          model: 'Sedan',
-          status: '1'
-        },
-        {
-          id: 2,
-          regNumber: 'ADMIN-002',
-          lastLat: 55.6861,
-          lastLon: 12.5783,
-          lastLocationUpdate: new Date(),
-          vehicleType: 'VAN',
-          make: 'Test',
-          model: 'Van',
-          status: '1'
-        },
-        {
-          id: 3,
-          regNumber: 'ADMIN-003',
-          lastLat: 55.6661,
-          lastLon: 12.5583,
-          lastLocationUpdate: new Date(),
-          vehicleType: 'LIMO',
-          make: 'Test',
-          model: 'Limo',
-          status: '1'
-        }
-      ];
-    }
-
     // Combine vehicle data with connection status
     const vehiclesWithStatus = vehicles.map(vehicle => {
       const driver = onlineDrivers.find(d => d.car === vehicle.regNumber);
       const isOnline = !!driver;
       const isBusy = driver ? driver.isBusy : false;
 
-      // For mock vehicles, make some appear online
-      const isMockVehicle = vehicle.regNumber.startsWith('ADMIN-');
-      const mockOnline = isMockVehicle ? (vehicle.id % 2 === 1) : false; // Alternate online/offline
-      const mockBusy = isMockVehicle ? (vehicle.id === 2) : false; // Make ADMIN-002 busy
-
       return {
         ...vehicle,
-        isOnline: isOnline || mockOnline,
-        isBusy: isBusy || mockBusy
+        isOnline,
+        isBusy
       };
     });
 

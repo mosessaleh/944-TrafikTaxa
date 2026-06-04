@@ -1,23 +1,11 @@
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import Link from 'next/link';
 import { ArrowLeft, AlertTriangle, Shield, CheckCircle, XCircle, Clock, TrendingUp } from 'lucide-react';
 import RiskManagementClient from '../../../components/RiskManagementClient';
 
 export default async function AdminRiskManagement() {
-  const me = await getUserFromCookie();
-  if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
-    return (
-      <div className="max-w-xl mx-auto grid gap-4">
-        <h1 className="text-3xl font-bold">Admin</h1>
-        <div className="border rounded-2xl p-4 bg-yellow-50 text-yellow-900">
-          <div className="font-semibold">Access restricted</div>
-          <div className="text-sm mt-1">You must be an administrator to view this page.</div>
-          <div className="mt-3"><Link href="/" className="underline">Go back home</Link></div>
-        </div>
-      </div>
-    );
-  }
+  await requirePermission('risk.read');
 
   // Get high-risk bookings (only those that have been risk-assessed)
   // Temporarily disabled until Prisma client is regenerated

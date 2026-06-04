@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { prisma } from '@/lib/db';
 import { processCompletedTripPayments, retryFailedPayments, chargeSavedPaymentMethod } from '@/lib/payment-processor';
 
@@ -9,11 +9,7 @@ import { processCompletedTripPayments, retryFailedPayments, chargeSavedPaymentMe
  */
 export async function POST(request: NextRequest) {
   try {
-    // Check admin authentication
-    const user = await getUserFromCookie();
-    if (!user || user.type !== 'user' || (user as any).role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    await requirePermission('payments.manage');
 
     const body = await request.json().catch(() => ({}));
     const { action = 'process', rideId } = body;
@@ -82,11 +78,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET(request: NextRequest) {
   try {
-    // Check admin authentication
-    const user = await getUserFromCookie();
-    if (!user || user.type !== 'user' || (user as any).role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    await requirePermission('payments.read');
 
     // Get statistics about pending payments
     const pendingPayments = await (prisma as any).ride.count({

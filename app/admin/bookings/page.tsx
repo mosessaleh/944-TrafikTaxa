@@ -1,113 +1,224 @@
 "use client";
+
+import { useEffect, useMemo, useState } from 'react';
 import useSWR from 'swr';
-import { useState, useEffect } from 'react';
-import { 
-  Search, 
-  Calendar, 
-  Download, 
-  Filter,
+import {
+  Calendar,
   CheckCircle,
-  XCircle,
   Clock,
   CreditCard,
-  MapPin,
+  Download,
+  Filter,
+  MoreHorizontal,
+  RefreshCw,
+  Search,
+  Send,
   User,
-  MoreVertical,
-  Trash2,
-  RefreshCw
+  X,
+  XCircle,
 } from 'lucide-react';
+import { useAdminTranslations } from '@/components/admin-i18n';
 
-const fetcher = (url:string)=> fetch(url,{cache:'no-store'}).then(r=>r.json());
+type TabKey = 'pending' | 'paid' | 'processing' | 'confirmedActive' | 'completed' | 'canceled' | 'refunding' | 'refunded';
 
-function TabBtn({active,label,count,onClick}:{active:boolean,label:string,count:number,onClick:()=>void}){
-  return (
-    <button
-        onClick={onClick}
-        className={`px-4 py-2.5 rounded-lg font-medium text-sm transition-all duration-200 flex items-center gap-2 ${
-            active
-            ? 'bg-blue-600 text-white shadow-md shadow-blue-200'
-            : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
-        }`}
-    >
-        {label}
-        <span className={`px-1.5 py-0.5 rounded-md text-xs ${active ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'}`}>
-            {count}
-        </span>
-    </button>
-  );
-}
+const fetcher = (url: string) => fetch(url, { cache: 'no-store' }).then((r) => r.json());
 
-export default function AdminBookings(){
-  const { data } = useSWR('/api/admin/bookings',{ fetcher });
-  const rides = (data?.rides||[]) as any[];
+const statusStyles: Record<string, string> = {
+  COMPLETED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  DELIVERED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  PICKED_UP: 'bg-blue-50 text-blue-700 border-blue-200',
+  CANCELED: 'bg-red-50 text-red-700 border-red-200',
+  PROGRESSING: 'bg-blue-50 text-blue-700 border-blue-200',
+  CONFIRMED: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+  REFUNDING: 'bg-amber-50 text-amber-700 border-amber-200',
+  REFUNDED: 'bg-violet-50 text-violet-700 border-violet-200',
+  PENDING: 'bg-gray-50 text-gray-700 border-gray-200',
+  DISPATCHED: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  ONGOING: 'bg-sky-50 text-sky-700 border-sky-200',
+};
 
-  // State for filtering and bulk operations
+export default function AdminBookings() {
+  const { t, language } = useAdminTranslations();
+  const { data, mutate, isLoading } = useSWR('/api/admin/bookings', fetcher, { refreshInterval: 20000 });
+  const rides = (data?.rides || []) as any[];
+
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedBookings, setSelectedBookings] = useState<number[]>([]);
+  const [currentTab, setCurrentTab] = useState<TabKey>('pending');
+  const [selectedRide, setSelectedRide] = useState<any | null>(null);
+  const [dispatchTarget, setDispatchTarget] = useState<any | null>(null);
+  const [dispatchDriverId, setDispatchDriverId] = useState('');
+  const [dispatchMode, setDispatchMode] = useState<'manual' | 'auto' | null>(null);
+  const [dispatchError, setDispatchError] = useState('');
 
-  const groups = {
-    pending: rides.filter(r=> r.status==='PENDING' && r.paymentStatus!=='PAID'),
-    paid: rides.filter(r=> r.paymentStatus==='PAID'),
-    processing: rides.filter(r=> r.status==='PROGRESSING'),
-    confirmedActive: rides.filter(r=> (r.status==='CONFIRMED' || r.status==='DISPATCHED' || r.status==='ONGOING')),
-    completed: rides.filter(r=> r.status==='COMPLETED'),
-    canceled: rides.filter(r=> r.status==='CANCELED'),
-    refunding: rides.filter(r=> r.status==='REFUNDING'),
-    refunded: rides.filter(r=> r.status==='REFUNDED'),
-  } as const;
+  const groups = useMemo(() => ({
+    pending: rides.filter((r) => r.status === 'PENDING' && r.paymentStatus !== 'PAID'),
+    paid: rides.filter((r) => r.paymentStatus === 'PAID'),
+    processing: rides.filter((r) => r.status === 'PROGRESSING'),
+    confirmedActive: rides.filter((r) => ['CONFIRMED', 'DISPATCHED', 'ONGOING', 'PICKED_UP'].includes(r.status)),
+    completed: rides.filter((r) => r.status === 'COMPLETED'),
+    canceled: rides.filter((r) => r.status === 'CANCELED'),
+    refunding: rides.filter((r) => r.status === 'REFUNDING'),
+    refunded: rides.filter((r) => r.status === 'REFUNDED'),
+  }), [rides]);
 
-  // Filter rides based on search, date, and status
-  const filterRides = (rides: any[]) => {
-    return rides.filter(ride => {
-      // Search filter
-      const matchesSearch = !searchTerm ||
-        ride.id.toString().includes(searchTerm) ||
-        ride.user?.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        ride.user?.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        ride.pickupAddress?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        ride.dropoffAddress?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        ride.stopAddress?.toLowerCase().includes(searchTerm.toLowerCase());
+  const tabs: Array<{ key: TabKey; label: string }> = [
+    { key: 'pending', label: t('admin.bookings.pending') },
+    { key: 'paid', label: t('admin.bookings.paid') },
+    { key: 'processing', label: t('admin.bookings.processing') },
+    { key: 'confirmedActive', label: t('admin.bookings.active') },
+    { key: 'completed', label: t('admin.bookings.completed') },
+    { key: 'canceled', label: t('admin.bookings.canceled') },
+    { key: 'refunding', label: t('admin.bookings.refunding') },
+    { key: 'refunded', label: t('admin.bookings.refunded') },
+  ];
 
-      // Date filter
-      const rideDate = new Date(ride.createdAt);
+  useEffect(() => {
+    const hash = window.location.hash?.slice(1) as TabKey;
+    if (hash && groups[hash]) setCurrentTab(hash);
+  }, [groups]);
+
+  const filteredList = useMemo(() => {
+    return groups[currentTab].filter((ride: any) => {
+      const term = searchTerm.trim().toLowerCase();
+      const fullName = `${ride.user?.firstName || ''} ${ride.user?.lastName || ''}`.toLowerCase();
+      const matchesSearch = !term ||
+        String(ride.id).includes(term) ||
+        fullName.includes(term) ||
+        String(ride.user?.email || '').toLowerCase().includes(term) ||
+        String(ride.user?.phone || '').toLowerCase().includes(term) ||
+        String(ride.pickupAddress || '').toLowerCase().includes(term) ||
+        String(ride.dropoffAddress || '').toLowerCase().includes(term);
+
+      const created = new Date(ride.createdAt);
       const today = new Date();
       const matchesDate = dateFilter === 'all' ||
-        (dateFilter === 'today' && rideDate.toDateString() === today.toDateString()) ||
-        (dateFilter === 'week' && rideDate >= new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)) ||
-        (dateFilter === 'month' && rideDate.getMonth() === today.getMonth() && rideDate.getFullYear() === today.getFullYear());
+        (dateFilter === 'today' && created.toDateString() === today.toDateString()) ||
+        (dateFilter === 'week' && created >= new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000)) ||
+        (dateFilter === 'month' && created.getMonth() === today.getMonth() && created.getFullYear() === today.getFullYear());
 
-      // Status filter
       const matchesStatus = statusFilter === 'all' || ride.status === statusFilter;
-
       return matchesSearch && matchesDate && matchesStatus;
     });
-  };
+  }, [currentTab, dateFilter, groups, searchTerm, statusFilter]);
 
-  const tabs = [
-    {key:'pending', label:'Pending'},
-    {key:'paid', label:'Paid'},
-    {key:'processing', label:'Processing'},
-    {key:'confirmedActive', label:'Active'},
-    {key:'completed', label:'Completed'},
-    {key:'canceled', label:'Canceled'},
-    {key:'refunding', label:'Refunding'},
-    {key:'refunded', label:'Refunded'}
-  ] as const;
+  const stats = useMemo(() => {
+    const today = new Date().toDateString();
+    const needsAction = rides.filter((r) => r.status === 'PENDING' || (r.paymentStatus !== 'PAID' && r.status !== 'CANCELED')).length;
+    return {
+      total: rides.length,
+      today: rides.filter((r) => new Date(r.createdAt).toDateString() === today).length,
+      needsAction,
+      active: groups.confirmedActive.length,
+      revenue: rides.filter((r) => r.paymentStatus === 'PAID').reduce((sum, r) => sum + Number(r.price || 0), 0),
+    };
+  }, [groups.confirmedActive.length, rides]);
 
-  // Use proper React state for tab management
-  const [currentTab, setCurrentTab] = useState<keyof typeof groups>('pending');
+  function switchTab(key: TabKey) {
+    setCurrentTab(key);
+    window.location.hash = key;
+    setSelectedBookings([]);
+  }
 
-  // Filtered list for current tab
-  const filteredList = filterRides(groups[currentTab]);
+  function openDispatchModal(ride: any) {
+    setDispatchTarget(ride);
+    setDispatchDriverId(ride?.driverId ? String(ride.driverId) : '');
+    setDispatchError('');
+    setDispatchMode(null);
+  }
 
-  // Export to CSV function
-  const exportToCSV = () => {
-    const headers = ['ID', 'User', 'Pickup Address', 'Stop Address', 'Dropoff Address', 'Time', 'Price', 'Status', 'Payment Status', 'Payment Method', 'Explanation'];
-    const csvData = filteredList.map(ride => [
+  function closeDispatchModal() {
+    setDispatchTarget(null);
+    setDispatchDriverId('');
+    setDispatchError('');
+  }
+
+  async function submitDispatch(mode: 'manual' | 'auto') {
+    if (!dispatchTarget) return;
+
+    if (mode === 'manual') {
+      const parsedDriverId = Number(dispatchDriverId);
+      if (!Number.isInteger(parsedDriverId) || parsedDriverId <= 0) {
+        setDispatchError(t('admin.bookings.dispatchDriverInvalid', 'Enter a valid driver ID.'));
+        return;
+      }
+    }
+
+    setDispatchMode(mode);
+    setDispatchError('');
+
+    try {
+      const res = await fetch('/api/admin/bookings/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          mode === 'manual'
+            ? { id: dispatchTarget.id, mode, driverId: Number(dispatchDriverId) }
+            : { id: dispatchTarget.id, mode }
+        ),
+      });
+
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDispatchError(body.error || t('admin.bookings.dispatchFailed', 'Dispatch failed.'));
+        return;
+      }
+
+      await mutate();
+
+      if (selectedRide?.id === dispatchTarget.id && body?.ride) {
+        setSelectedRide((prev: any) => prev?.id === body.ride.id ? { ...prev, ...body.ride } : prev);
+      }
+
+      closeDispatchModal();
+      if (body?.message) {
+        alert(body.message);
+      }
+    } catch (error) {
+      setDispatchError(t('admin.bookings.dispatchFailed', 'Dispatch failed.'));
+    } finally {
+      setDispatchMode(null);
+    }
+  }
+
+  async function applyAction(id: number, action: string) {
+    if (!confirm(`${t('admin.bookings.confirmAction')} #${id}?`)) return;
+    const res = await fetch('/api/admin/bookings/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(body.error || 'Action failed');
+      return;
+    }
+    await mutate();
+    setSelectedRide(null);
+  }
+
+  async function handleBulkAction(action: string) {
+    if (selectedBookings.length === 0) return;
+    if (!confirm(t('admin.bookings.bulkConfirm'))) return;
+
+    for (const id of selectedBookings) {
+      await fetch('/api/admin/bookings/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      });
+    }
+    setSelectedBookings([]);
+    mutate();
+  }
+
+  function exportToCSV() {
+    const headers = ['ID', 'User', 'Pickup', 'Stop', 'Dropoff', 'Time', 'Price', 'Status', 'Payment', 'Method'];
+    const rows = filteredList.map((ride) => [
       ride.id,
-      `${ride.user?.firstName} ${ride.user?.lastName}`,
+      `${ride.user?.firstName || ''} ${ride.user?.lastName || ''}`,
       ride.pickupAddress,
       ride.stopAddress || '',
       ride.dropoffAddress,
@@ -116,397 +227,560 @@ export default function AdminBookings(){
       ride.status,
       ride.paymentStatus,
       ride.paymentMethod || 'N/A',
-      ride.explanation
     ]);
-
-    if (typeof window !== 'undefined') {
-      const csvContent = [headers, ...csvData].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `bookings-${currentTab}-${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-    }
-  };
-
-  useEffect(() => {
-    const hash = typeof window !== 'undefined' ? window.location.hash?.slice(1) : '';
-    const validTab = hash && groups[hash as keyof typeof groups] ? hash as keyof typeof groups : 'pending';
-    setCurrentTab(validTab);
-  }, [data]);
-
-  function switchTab(k: keyof typeof groups){
-    setCurrentTab(k);
-    if (typeof window !== 'undefined') {
-      window.location.hash = k;
-    }
+    const csv = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bookings-${currentTab}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
   }
 
-  // Bulk operations
-  const handleBulkAction = async (action: string) => {
-    if (selectedBookings.length === 0) return;
-
-    if (!confirm(`Are you sure you want to ${action.toLowerCase()} ${selectedBookings.length} booking(s)?`)) return;
-
-    try {
-      for (const id of selectedBookings) {
-        await fetch('/api/admin/bookings/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, action })
-        });
-      }
-      setSelectedBookings([]);
-      if (typeof window !== 'undefined') {
-        window.location.reload();
-      }
-    } catch (error) {
-      alert('Error performing bulk action');
-    }
-  };
-
-  // Calculate statistics for dashboard
-  const stats = {
-    total: rides.length,
-    totalRevenue: rides.filter(r => r.paymentStatus === 'PAID').reduce((sum, r) => sum + (r.price || 0), 0),
-    todayBookings: rides.filter(r => {
-      const today = new Date().toDateString();
-      return new Date(r.createdAt).toDateString() === today;
-    }).length,
-    activeRides: groups.confirmedActive.length
-  };
-
   return (
-    <div className="space-y-6">
-      
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-            <h1 className="text-2xl font-bold text-gray-900">Bookings Management</h1>
-            <p className="text-gray-500 text-sm mt-1">Manage and track all ride bookings.</p>
-        </div>
-        <div className="flex gap-2">
-            <button onClick={exportToCSV} className="bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center gap-2">
-                <Download size={16} />
-                Export CSV
-            </button>
-        </div>
-      </div>
-
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Bookings" value={stats.total} icon={<Clock size={20} />} color="text-blue-600" bg="bg-blue-50" />
-        <StatCard label="Today's Bookings" value={stats.todayBookings} icon={<Calendar size={20} />} color="text-emerald-600" bg="bg-emerald-50" />
-        <StatCard label="Total Revenue" value={`${stats.totalRevenue} DKK`} icon={<CreditCard size={20} />} color="text-purple-600" bg="bg-purple-50" />
-        <StatCard label="Active Rides" value={stats.activeRides} icon={<CheckCircle size={20} />} color="text-orange-600" bg="bg-orange-50" />
-      </div>
-
-      {/* Bulk Actions Bar */}
-      {selectedBookings.length > 0 && (
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2">
-          <div className="flex items-center gap-2 text-blue-800 font-medium">
-            <CheckCircle size={18} />
-            <span>{selectedBookings.length} booking(s) selected</span>
+    <div className="space-y-5 px-4 py-6">
+      <header className="rounded-lg border border-gray-200 bg-white px-5 py-4 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-950">{t('admin.bookings.title')}</h1>
+            <p className="mt-1 text-sm text-gray-500">{t('admin.bookings.subtitle')}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <BulkActionButton onClick={() => handleBulkAction('CONFIRM')} label="Confirm" icon={<CheckCircle size={14} />} color="bg-green-600 hover:bg-green-700" />
-            <BulkActionButton onClick={() => handleBulkAction('CANCEL')} label="Cancel" icon={<XCircle size={14} />} color="bg-red-600 hover:bg-red-700" />
-            <BulkActionButton onClick={() => handleBulkAction('MARK_PAID')} label="Mark Paid" icon={<CreditCard size={14} />} color="bg-emerald-600 hover:bg-emerald-700" />
-            <button
-                onClick={() => setSelectedBookings([])}
-                className="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium transition-colors"
-            >
-                Clear
+            <button onClick={() => mutate()} className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <RefreshCw size={15} />
+              {t('admin.common.refresh')}
+            </button>
+            <button onClick={exportToCSV} className="inline-flex h-9 items-center gap-2 rounded-md bg-gray-900 px-3 text-sm font-medium text-white hover:bg-gray-800">
+              <Download size={15} />
+              {t('admin.common.exportCsv')}
             </button>
           </div>
         </div>
-      )}
+      </header>
 
-      {/* Main Content Area */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-        
-        {/* Filters & Search */}
-        <div className="p-4 border-b border-gray-100 flex flex-col lg:flex-row gap-4 justify-between items-center bg-gray-50/50">
-            
-            {/* Tabs */}
-            <select
-                className="px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
-                value={currentTab}
-                onChange={(e) => switchTab(e.target.value as keyof typeof groups)}
-            >
-                {tabs.map(t => (
-                    <option key={t.key} value={t.key}>
-                        {t.label} ({filterRides(groups[t.key as keyof typeof groups]).length})
-                    </option>
-                ))}
-            </select>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <Metric label={t('admin.bookings.total')} value={stats.total} icon={<Clock size={18} />} />
+        <Metric label={t('admin.bookings.today')} value={stats.today} icon={<Calendar size={18} />} />
+        <Metric label={t('admin.bookings.needsAction')} value={stats.needsAction} icon={<MoreHorizontal size={18} />} tone="amber" />
+        <Metric label={t('admin.bookings.active')} value={stats.active} icon={<CheckCircle size={18} />} tone="green" />
+        <Metric label={t('admin.bookings.revenue')} value={`${stats.revenue.toFixed(0)} DKK`} icon={<CreditCard size={18} />} />
+      </div>
 
-            {/* Search & Filters */}
-            <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-                <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                    <input
-                        type="text"
-                        placeholder="Search bookings..."
-                        className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-64"
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                </div>
-                <div className="relative">
-                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                    <select
-                        className="pl-9 pr-8 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white cursor-pointer"
-                        value={dateFilter}
-                        onChange={(e) => setDateFilter(e.target.value)}
-                    >
-                        <option value="all">All Dates</option>
-                        <option value="today">Today</option>
-                        <option value="week">This Week</option>
-                        <option value="month">This Month</option>
-                    </select>
-                </div>
-                <div className="relative">
-                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                    <select
-                        className="pl-9 pr-8 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none bg-white cursor-pointer"
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                    >
-                        <option value="all">All Statuses</option>
-                        <option value="PENDING">Pending</option>
-                        <option value="CONFIRMED">Confirmed</option>
-                        <option value="DISPATCHED">Dispatched</option>
-                        <option value="ONGOING">Ongoing</option>
-                        <option value="COMPLETED">Completed</option>
-                        <option value="CANCELED">Canceled</option>
-                        <option value="REFUNDING">Refunding</option>
-                        <option value="REFUNDED">Refunded</option>
-                    </select>
-                </div>
-            </div>
+      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="border-b border-gray-100 px-4 pt-4">
+          <div className="flex gap-2 overflow-x-auto pb-3">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => switchTab(tab.key)}
+                className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-md border px-3 text-sm font-medium ${
+                  currentTab === tab.key
+                    ? 'border-gray-900 bg-gray-900 text-white'
+                    : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {tab.label}
+                <span className={`rounded px-1.5 py-0.5 text-xs ${currentTab === tab.key ? 'bg-white/15' : 'bg-gray-100 text-gray-600'}`}>
+                  {groups[tab.key].length}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Table */}
+        <div className="flex flex-col gap-3 border-b border-gray-100 bg-gray-50/60 p-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="relative w-full xl:max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder={`${t('admin.common.search')}...`}
+              className="h-10 w-full rounded-md border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <FilterSelect value={dateFilter} onChange={setDateFilter} icon={<Calendar size={15} />}>
+              <option value="all">{t('admin.bookings.allDates')}</option>
+              <option value="today">{t('admin.bookings.today')}</option>
+              <option value="week">{t('admin.bookings.thisWeek')}</option>
+              <option value="month">{t('admin.bookings.thisMonth')}</option>
+            </FilterSelect>
+            <FilterSelect value={statusFilter} onChange={setStatusFilter} icon={<Filter size={15} />}>
+              <option value="all">{t('admin.bookings.allStatuses')}</option>
+              {['PENDING', 'PROGRESSING', 'CONFIRMED', 'DISPATCHED', 'ONGOING', 'COMPLETED', 'CANCELED', 'REFUNDING', 'REFUNDED'].map((status) => (
+                <option key={status} value={status}>{formatStatus(status)}</option>
+              ))}
+            </FilterSelect>
+          </div>
+        </div>
+
+        {selectedBookings.length > 0 && (
+          <div className="flex flex-col gap-3 border-b border-blue-100 bg-blue-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm font-medium text-blue-800">{selectedBookings.length} {t('admin.bookings.selected')}</span>
+            <div className="flex flex-wrap gap-2">
+              <ActionButton label={t('admin.common.confirm')} icon={<CheckCircle size={14} />} onClick={() => handleBulkAction('CONFIRM')} />
+              <ActionButton label={t('admin.common.cancel')} icon={<XCircle size={14} />} onClick={() => handleBulkAction('CANCEL')} danger />
+              <ActionButton label={t('admin.bookings.markPaid')} icon={<CreditCard size={14} />} onClick={() => handleBulkAction('MARK_PAID')} />
+              <button onClick={() => setSelectedBookings([])} className="h-8 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-600 hover:bg-gray-50">{t('admin.common.clear')}</button>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-100">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead className="border-b border-gray-100 bg-white text-xs uppercase tracking-wide text-gray-500">
               <tr>
-                <th className="px-4 py-3 w-10">
+                <th className="w-10 px-4 py-3">
                   <input
                     type="checkbox"
                     checked={selectedBookings.length === filteredList.length && filteredList.length > 0}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedBookings(filteredList.map(r => r.id));
-                      } else {
-                        setSelectedBookings([]);
-                      }
-                    }}
+                    onChange={(e) => setSelectedBookings(e.target.checked ? filteredList.map((r) => r.id) : [])}
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
                 </th>
-                <th className="px-4 py-3">ID</th>
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Route</th>
-                <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">Price</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Payment</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+                <th className="px-4 py-3">{t('admin.bookings.bookingId')}</th>
+                <th className="px-4 py-3">{t('admin.bookings.pickup')}</th>
+                <th className="px-4 py-3">{t('admin.bookings.customer')}</th>
+                <th className="px-4 py-3">{t('admin.bookings.route')}</th>
+                <th className="px-4 py-3">{t('admin.bookings.price')}</th>
+                <th className="px-4 py-3">{t('admin.bookings.status')}</th>
+                <th className="px-4 py-3">{t('admin.bookings.payment')}</th>
+                <th className="px-4 py-3 text-right">{t('admin.common.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredList.map((r:any)=> (
-                 <tr key={r.id} className="hover:bg-gray-50/50 transition-colors group">
-                   <td className="px-4 py-3">
-                     <input
-                       type="checkbox"
-                       checked={selectedBookings.includes(r.id)}
-                       onChange={(e) => {
-                         if (e.target.checked) {
-                           setSelectedBookings([...selectedBookings, r.id]);
-                         } else {
-                           setSelectedBookings(selectedBookings.filter(id => id !== r.id));
-                         }
-                       }}
-                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                     />
-                   </td>
-                   <td className="px-4 py-3 font-medium text-gray-900">#{r.id}</td>
-                   <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-xs font-medium">
-                                {r.user?.firstName?.[0]}{r.user?.lastName?.[0]}
-                            </div>
-                            <div>
-                                <div className="font-medium text-gray-900">{r.user?.firstName} {r.user?.lastName}</div>
-                                <div className="text-xs text-gray-500">{r.user?.email}</div>
-                            </div>
-                        </div>
-                   </td>
-                    <td className="px-4 py-3 max-w-xs">
-                      <div className="flex flex-col gap-1">
-                         <div className="flex items-start gap-1.5 text-xs">
-                             <MapPin size={14} className="text-green-500 mt-0.5 shrink-0" />
-                             <span className="text-gray-600 truncate" title={r.pickupAddress}>{r.pickupAddress}</span>
-                         </div>
-                         {r.stopAddress && (
-                           <div className="flex items-start gap-1.5 text-xs">
-                               <MapPin size={14} className="text-amber-500 mt-0.5 shrink-0" />
-                               <span className="text-gray-600 truncate" title={r.stopAddress}>{r.stopAddress}</span>
-                           </div>
-                         )}
-                         <div className="flex items-start gap-1.5 text-xs">
-                             <MapPin size={14} className="text-red-500 mt-0.5 shrink-0" />
-                             <span className="text-gray-600 truncate" title={r.dropoffAddress}>{r.dropoffAddress}</span>
-                         </div>
+              {isLoading && (
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-500">Loading...</td></tr>
+              )}
+              {!isLoading && filteredList.map((ride: any) => (
+                <tr key={ride.id} className="hover:bg-gray-50/70">
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedBookings.includes(ride.id)}
+                      onChange={(e) => {
+                        setSelectedBookings((prev) => e.target.checked ? [...prev, ride.id] : prev.filter((id) => id !== ride.id));
+                      }}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-semibold text-gray-950">#{ride.id}</div>
+                    <div className="text-xs text-gray-500">{formatDate(ride.createdAt, language)}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{formatDate(ride.pickupTime, language)}</div>
+                    <div className="text-xs text-gray-500">{formatTime(ride.pickupTime, language)}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-gray-100 text-gray-500">
+                        <User size={15} />
+                      </span>
+                      <div>
+                        <div className="font-medium text-gray-900">{displayName(ride)}</div>
+                        <div className="text-xs text-gray-500">{ride.user?.email || '-'}</div>
                       </div>
-                    </td>
-                   <td className="px-4 py-3">
-                     <div className="text-gray-900 font-medium">{new Date(r.pickupTime).toLocaleDateString()}</div>
-                     <div className="text-xs text-gray-500">{new Date(r.pickupTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                   </td>
-                   <td className="px-4 py-3 font-semibold text-gray-900">{Number(r.price).toFixed(2)} DKK</td>
-                   <td className="px-4 py-3">
-                     <StatusBadge status={r.status} />
-                   </td>
-                   <td className="px-4 py-3">
-                     <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-1.5">
-                            {r.paymentStatus === 'PAID' ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-100">
-                                    Paid
-                                </span>
-                            ) : (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-yellow-50 text-yellow-700 border border-yellow-100">
-                                    Unpaid
-                                </span>
-                            )}
-                        </div>
-                        <div className="text-xs text-gray-500 capitalize flex items-center gap-1">
-                            <CreditCard size={12} />
-                            {r.paymentMethod?.toLowerCase() || 'N/A'}
-                        </div>
-                     </div>
-                   </td>
-                   <td className="px-4 py-3 text-right">
-                     <div className="relative inline-block text-left group-hover:opacity-100 opacity-100 sm:opacity-0 transition-opacity">
-                       <select
-                         className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                         onChange={async (e) => {
-                           if (e.target.value) {
-                             const action = e.target.value;
-                             e.target.value = ''; // Reset select
-                             if (confirm(`Are you sure you want to ${action.toLowerCase().replace('_', ' ')} this booking?`)) {
-                               try {
-                                 const response = await fetch('/api/admin/bookings/update', {
-                                   method: 'POST',
-                                   headers: { 'Content-Type': 'application/json' },
-                                   body: JSON.stringify({ id: r.id, action: action })
-                                 });
-                                 if (response.ok) {
-                                   if (typeof window !== 'undefined') {
-                                     window.location.reload();
-                                   }
-                                 } else {
-                                   const data = await response.json();
-                                   alert(`Error: ${data.error || 'Unknown error'}`);
-                                 }
-                               } catch (error) {
-                                 alert('Network error occurred');
-                               }
-                             }
-                           }
-                         }}
-                         defaultValue=""
-                       >
-                         <option value="">Actions</option>
-                         <option value="CONFIRM">✅ Confirm</option>
-                         <option value="DISPATCH">🚗 Dispatch</option>
-                         <option value="DELIVERED">🚚 Mark Delivered</option>
-                         <option value="COMPLETE">📦 Complete</option>
-                         <option value="CANCEL">❌ Cancel</option>
-                         <option value="MARK_PAID">💳 Mark Paid</option>
-                         <option value="REFUNDING">🔄 Refund in Progress</option>
-                         <option value="REFUNDED">✅ Mark Refunded</option>
-                       </select>
-                     </div>
-                   </td>
-                 </tr>
-               ))}
-              {filteredList.length===0 && (
-                <tr><td colSpan={9} className="p-12 text-center text-gray-500">
-                  <div className="flex flex-col items-center justify-center">
-                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                        <Search size={32} className="text-gray-400" />
                     </div>
-                    <h3 className="text-lg font-medium text-gray-900">No bookings found</h3>
-                    <p className="text-sm mt-1 max-w-xs mx-auto">We couldn't find any bookings matching your current filters. Try adjusting your search or date range.</p>
-                    <button
-                        onClick={() => {setSearchTerm(''); setDateFilter('all'); setStatusFilter('all');}}
-                        className="mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
-                    >
-                        <RefreshCw size={14} />
-                        Clear Filters
-                    </button>
-                  </div>
-                </td></tr>
+                  </td>
+                  <td className="max-w-sm px-4 py-3">
+                    <RoutePreview ride={ride} />
+                  </td>
+                  <td className="px-4 py-3 font-semibold text-gray-950">{Number(ride.price || 0).toFixed(2)} DKK</td>
+                  <td className="px-4 py-3"><StatusBadge status={ride.status} /></td>
+                  <td className="px-4 py-3"><PaymentBadge ride={ride} /></td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button onClick={() => setSelectedRide(ride)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                        <MoreHorizontal size={14} />
+                        {t('admin.common.details')}
+                      </button>
+                      <QuickAction ride={ride} t={t} onAction={applyAction} onDispatch={openDispatchModal} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!isLoading && filteredList.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-14 text-center">
+                    <div className="mx-auto flex max-w-sm flex-col items-center">
+                      <Search size={30} className="text-gray-300" />
+                      <div className="mt-3 font-medium text-gray-900">{t('admin.common.noResults')}</div>
+                      <button onClick={() => { setSearchTerm(''); setDateFilter('all'); setStatusFilter('all'); }} className="mt-3 text-sm font-medium text-blue-600 hover:text-blue-700">
+                        {t('admin.common.clearFilters')}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {selectedRide && (
+        <BookingModal
+          ride={selectedRide}
+          t={t}
+          language={language}
+          onClose={() => setSelectedRide(null)}
+          onAction={applyAction}
+          onDispatch={openDispatchModal}
+        />
+      )}
+
+      {dispatchTarget && (
+        <DispatchRideModal
+          ride={dispatchTarget}
+          t={t}
+          driverId={dispatchDriverId}
+          busyMode={dispatchMode}
+          error={dispatchError}
+          onClose={closeDispatchModal}
+          onChangeDriverId={setDispatchDriverId}
+          onManualDispatch={() => submitDispatch('manual')}
+          onAutoDispatch={() => submitDispatch('auto')}
+        />
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value, icon, tone = 'blue' }: { label: string; value: string | number; icon: React.ReactNode; tone?: 'blue' | 'green' | 'amber' }) {
+  const colors = {
+    blue: 'bg-blue-50 text-blue-700',
+    green: 'bg-emerald-50 text-emerald-700',
+    amber: 'bg-amber-50 text-amber-700',
+  };
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</div>
+        <span className={`flex h-8 w-8 items-center justify-center rounded-md ${colors[tone]}`}>{icon}</span>
+      </div>
+      <div className="mt-2 text-2xl font-semibold text-gray-950">{value}</div>
+    </div>
+  );
+}
+
+function FilterSelect({ value, onChange, icon, children }: { value: string; onChange: (value: string) => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">{icon}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-10 rounded-md border border-gray-200 bg-white pl-9 pr-8 text-sm text-gray-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+        {children}
+      </select>
+    </div>
+  );
+}
+
+function QuickAction({ ride, t, onAction, onDispatch }: { ride: any; t: (path: string) => string; onAction: (id: number, action: string) => void; onDispatch: (ride: any) => void }) {
+  const action = ride.status === 'PENDING'
+    ? { key: 'CONFIRM', label: t('admin.common.confirm'), icon: <CheckCircle size={14} /> }
+    : ride.status === 'CONFIRMED'
+      ? { key: 'DISPATCH', label: t('admin.bookings.dispatch'), icon: <Send size={14} /> }
+      : ['DISPATCHED', 'ONGOING', 'PICKED_UP'].includes(ride.status)
+        ? { key: 'DELIVERED', label: t('admin.bookings.delivered'), icon: <CheckCircle size={14} /> }
+        : null;
+
+  if (!action) return null;
+
+  return (
+    <button
+      onClick={() => action.key === 'DISPATCH' ? onDispatch(ride) : onAction(ride.id, action.key)}
+      className="inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700"
+    >
+      {action.icon}
+      {action.label}
+    </button>
+  );
+}
+
+function BookingModal({ ride, t, language, onClose, onAction, onDispatch }: { ride: any; t: (path: string, fallback?: string) => string; language: string; onClose: () => void; onAction: (id: number, action: string) => void; onDispatch: (ride: any) => void }) {
+  const actions = getBookingActions(ride, t);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-5 py-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs uppercase tracking-wide text-gray-500">{t('admin.bookings.bookingId')} #{ride.id}</div>
+              <h2 className="truncate text-lg font-semibold text-gray-950">{displayName(ride)}</h2>
+            </div>
+            <button onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[calc(90vh-73px)] overflow-y-auto px-5 py-5">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-3">
+                <InfoBox label={t('admin.bookings.status')} value={formatStatus(ride.status)} />
+                <InfoBox label={t('admin.bookings.payment')} value={ride.paymentStatus || '-'} />
+                <InfoBox label={t('admin.bookings.pickup')} value={`${formatDate(ride.pickupTime, language)} ${formatTime(ride.pickupTime, language)}`} />
+                <InfoBox label={t('admin.bookings.price')} value={`${Number(ride.price || 0).toFixed(2)} DKK`} />
+              </div>
+
+              <section className="rounded-lg border border-gray-200 p-4">
+                <h3 className="text-sm font-semibold text-gray-900">{t('admin.bookings.route')}</h3>
+                <div className="mt-3">
+                  <RoutePreview ride={ride} expanded />
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-gray-200 p-4">
+                <h3 className="text-sm font-semibold text-gray-900">{t('admin.bookings.passenger')}</h3>
+                <div className="mt-3 space-y-1 text-sm text-gray-600">
+                  <div>{displayName(ride)}</div>
+                  <div>{ride.user?.email || '-'}</div>
+                  <div>{ride.user?.phone || '-'}</div>
+                </div>
+              </section>
+            </div>
+
+            <section className="rounded-lg border border-gray-200 p-4">
+              <h3 className="text-sm font-semibold text-gray-900">{t('admin.common.actions')}</h3>
+              <div className="mt-3 grid gap-2">
+                {actions.map((action) => (
+                  <button
+                    key={action.key}
+                    onClick={() => action.key === 'DISPATCH' ? onDispatch(ride) : onAction(ride.id, action.key)}
+                    className={`inline-flex h-10 items-center justify-center gap-2 rounded-md border px-3 text-sm font-medium ${
+                      action.key === 'DISPATCH'
+                        ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                        : action.key === 'CANCEL'
+                          ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <action.Icon size={15} />
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function StatCard({ label, value, icon, color, bg }: any) {
-    return (
-        <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-lg ${bg} flex items-center justify-center ${color}`}>
-                {icon}
-            </div>
-            <div>
-                <div className="text-2xl font-bold text-gray-900">{value}</div>
-                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</div>
-            </div>
+function DispatchRideModal({
+  ride,
+  t,
+  driverId,
+  busyMode,
+  error,
+  onClose,
+  onChangeDriverId,
+  onManualDispatch,
+  onAutoDispatch,
+}: {
+  ride: any;
+  t: (path: string, fallback?: string) => string;
+  driverId: string;
+  busyMode: 'manual' | 'auto' | null;
+  error: string;
+  onClose: () => void;
+  onChangeDriverId: (value: string) => void;
+  onManualDispatch: () => void;
+  onAutoDispatch: () => void;
+}) {
+  const isBusy = Boolean(busyMode);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4" onClick={() => { if (!isBusy) onClose(); }}>
+      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-semibold text-gray-950">
+              {t('admin.bookings.dispatchModalTitle', 'Dispatch ride')} #{ride.id}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              {ride.scheduled
+                ? t('admin.bookings.dispatchModalScheduled', 'Assign a driver for this scheduled ride or let the system handle it automatically.')
+                : t('admin.bookings.dispatchModalImmediate', 'Send this ride to a specific driver or ask the system to find the nearest available car.')}
+            </p>
+          </div>
+          <button onClick={onClose} disabled={isBusy} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60">
+            <X size={16} />
+          </button>
         </div>
-    )
+
+        <div className="space-y-4 px-5 py-5">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="text-sm font-semibold text-gray-900">{displayName(ride)}</div>
+            <div className="mt-1 text-sm text-gray-600">{ride.pickupAddress}</div>
+            <div className="text-sm text-gray-500">{ride.dropoffAddress}</div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">
+              {t('admin.bookings.dispatchDriverId', 'Driver ID')}
+            </label>
+            <input
+              type="number"
+              min="1"
+              value={driverId}
+              onChange={(e) => onChangeDriverId(e.target.value)}
+              placeholder={t('admin.bookings.dispatchDriverPlaceholder', 'Enter driver ID')}
+              className="h-11 w-full rounded-md border border-gray-200 px-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button
+              onClick={onManualDispatch}
+              disabled={isBusy}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Send size={16} className={busyMode === 'manual' ? 'animate-spin' : ''} />
+              {busyMode === 'manual'
+                ? t('admin.bookings.dispatchSending', 'Sending...')
+                : t('admin.bookings.dispatchSendToDriver', 'Send to driver')}
+            </button>
+
+            <button
+              onClick={onAutoDispatch}
+              disabled={isBusy}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw size={16} className={busyMode === 'auto' ? 'animate-spin' : ''} />
+              {busyMode === 'auto'
+                ? t('admin.bookings.dispatchSearching', 'Searching...')
+                : t('admin.bookings.dispatchAutoSearch', 'Auto search')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function BulkActionButton({ onClick, label, icon, color }: any) {
-    return (
-        <button
-            onClick={onClick}
-            className={`px-3 py-1.5 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${color}`}
-        >
-            {icon}
-            {label}
-        </button>
-    )
+function RoutePreview({ ride, expanded = false }: { ride: any; expanded?: boolean }) {
+  return (
+    <div className={`space-y-2 ${expanded ? '' : 'text-xs'}`}>
+      <RouteLine color="bg-emerald-500" text={ride.pickupAddress || '-'} />
+      {ride.stopAddress && <RouteLine color="bg-amber-500" text={ride.stopAddress} />}
+      <RouteLine color="bg-red-500" text={ride.dropoffAddress || '-'} />
+    </div>
+  );
+}
+
+function RouteLine({ color, text }: { color: string; text: string }) {
+  return (
+    <div className="flex items-start gap-2 text-gray-600">
+      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${color}`} />
+      <span className="line-clamp-1" title={text}>{text}</span>
+    </div>
+  );
+}
+
+function InfoBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-gray-950">{value}</div>
+    </div>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {
-    const styles = {
-        COMPLETED: 'bg-green-100 text-green-700 border-green-200',
-        DELIVERED: 'bg-green-100 text-green-700 border-green-200',
-        PICKED_UP: 'bg-blue-100 text-blue-700 border-blue-200',
-        CANCELED: 'bg-red-100 text-red-700 border-red-200',
-        PROGRESSING: 'bg-blue-100 text-blue-700 border-blue-200',
-        CONFIRMED: 'bg-cyan-100 text-cyan-700 border-cyan-200',
-        REFUNDING: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-        REFUNDED: 'bg-purple-100 text-purple-700 border-purple-200',
-        PENDING: 'bg-gray-100 text-gray-700 border-gray-200',
-        DISPATCHED: 'bg-indigo-100 text-indigo-700 border-indigo-200'
-    };
+  return (
+    <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${statusStyles[status] || statusStyles.PENDING}`}>
+      {formatStatus(status)}
+    </span>
+  );
+}
 
-    const style = styles[status as keyof typeof styles] || styles.PENDING;
+function PaymentBadge({ ride }: { ride: any }) {
+  const paid = ride.paymentStatus === 'PAID';
+  return (
+    <div className="space-y-1">
+      <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${paid ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+        {paid ? 'PAID' : ride.paymentStatus || 'UNPAID'}
+      </span>
+      <div className="flex items-center gap-1 text-xs text-gray-500">
+        <CreditCard size={12} />
+        {String(ride.paymentMethod || 'N/A').toLowerCase()}
+      </div>
+    </div>
+  );
+}
 
-    return (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${style}`}>
-            {status.replace('_', ' ')}
-        </span>
-    );
+function ActionButton({ label, icon, onClick, danger = false }: { label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean }) {
+  return (
+    <button onClick={onClick} className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function getBookingActions(ride: any, t: (path: string) => string) {
+  const actions: Array<{ key: string; label: string; Icon: any }> = [];
+
+  if (ride.status === 'PENDING') {
+    actions.push({ key: 'CONFIRM', label: t('admin.common.confirm'), Icon: CheckCircle });
+  }
+
+  if (ride.status === 'CONFIRMED') {
+    actions.push({ key: 'DISPATCH', label: t('admin.bookings.dispatch'), Icon: Send });
+  }
+
+  if (ride.paymentStatus !== 'PAID' && !['CANCELED', 'REFUNDED'].includes(ride.status)) {
+    actions.push({ key: 'MARK_PAID', label: t('admin.bookings.markPaid'), Icon: CreditCard });
+  }
+
+  if (['DISPATCHED', 'ONGOING', 'PICKED_UP'].includes(ride.status)) {
+    actions.push({ key: 'DELIVERED', label: t('admin.bookings.delivered'), Icon: CheckCircle });
+  }
+
+  if (ride.status === 'DELIVERED') {
+    actions.push({ key: 'COMPLETE', label: t('admin.bookings.complete'), Icon: CheckCircle });
+  }
+
+  if (ride.status === 'COMPLETED') {
+    actions.push({ key: 'REFUNDING', label: t('admin.bookings.refundProgress'), Icon: RefreshCw });
+  }
+
+  if (ride.status === 'REFUNDING') {
+    actions.push({ key: 'REFUNDED', label: t('admin.bookings.markRefunded'), Icon: CheckCircle });
+  }
+
+  if (!['CANCELED', 'COMPLETED', 'REFUNDED'].includes(ride.status)) {
+    actions.push({ key: 'CANCEL', label: t('admin.common.cancel'), Icon: XCircle });
+  }
+
+  return actions;
+}
+
+function displayName(ride: any) {
+  const name = `${ride.user?.firstName || ''} ${ride.user?.lastName || ''}`.trim();
+  return name || ride.passengerName || ride.riderName || '-';
+}
+
+function formatStatus(status: string) {
+  return String(status || '').replace(/_/g, ' ');
+}
+
+function formatDate(value: string, language: string) {
+  if (!value) return '-';
+  return new Date(value).toLocaleDateString(language === 'ar' ? 'ar' : language === 'dk' ? 'da-DK' : 'en-US');
+}
+
+function formatTime(value: string, language: string) {
+  if (!value) return '-';
+  return new Date(value).toLocaleTimeString(language === 'ar' ? 'ar' : language === 'dk' ? 'da-DK' : 'en-US', { hour: '2-digit', minute: '2-digit' });
 }

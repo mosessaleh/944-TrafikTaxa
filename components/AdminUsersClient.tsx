@@ -12,12 +12,37 @@ import {
   XCircle, 
   Edit2, 
   Send,
-  MoreVertical,
   Filter,
   Users
 } from 'lucide-react';
 
-export type AdminUserRole = "USER" | "ADMIN";
+export type AdminUserRole =
+  | "USER"
+  | "ADMIN"
+  | "SUPER_ADMIN"
+  | "DISPATCHER"
+  | "FINANCE"
+  | "SUPPORT"
+  | "PARTNER_MANAGER";
+
+const STAFF_USER_ROLES: AdminUserRole[] = [
+  "ADMIN",
+  "SUPER_ADMIN",
+  "DISPATCHER",
+  "FINANCE",
+  "SUPPORT",
+  "PARTNER_MANAGER"
+];
+
+const ROLE_LABELS: Record<AdminUserRole, string> = {
+  USER: "User",
+  ADMIN: "Administrator",
+  SUPER_ADMIN: "Super Admin",
+  DISPATCHER: "Dispatcher",
+  FINANCE: "Finance",
+  SUPPORT: "Support",
+  PARTNER_MANAGER: "Partner Manager"
+};
 
 export type AdminUser = {
   id: number;
@@ -53,7 +78,7 @@ export default function AdminUsersClient({ initialUsers }: Props) {
   const [actionMessage, setActionMessage] = useState<ActionMessage>(null);
 
   const totalUsers = users.length;
-  const adminCount = users.filter((u) => u.role === "ADMIN").length;
+  const adminCount = users.filter((u) => STAFF_USER_ROLES.includes(u.role)).length;
   const verifiedCount = users.filter((u) => u.emailVerified).length;
 
   const filteredUsers = useMemo(() => {
@@ -209,7 +234,7 @@ export default function AdminUsersClient({ initialUsers }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Total Users" value={totalUsers} icon={<Users size={20} />} color="text-blue-600" bg="bg-blue-50" />
         <StatCard label="Verified Users" value={verifiedCount} icon={<CheckCircle size={20} />} color="text-emerald-600" bg="bg-emerald-50" />
-        <StatCard label="Administrators" value={adminCount} icon={<Shield size={20} />} color="text-purple-600" bg="bg-purple-50" />
+        <StatCard label="Staff Accounts" value={adminCount} icon={<Shield size={20} />} color="text-purple-600" bg="bg-purple-50" />
       </div>
 
       {actionMessage && (
@@ -305,12 +330,12 @@ export default function AdminUsersClient({ initialUsers }: Props) {
                   </td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                        u.role === 'ADMIN' 
+                        STAFF_USER_ROLES.includes(u.role)
                         ? 'bg-purple-50 text-purple-700 border-purple-100' 
                         : 'bg-gray-50 text-gray-700 border-gray-100'
                     }`}>
-                        {u.role === 'ADMIN' && <Shield size={12} className="mr-1" />}
-                        {u.role}
+                        {STAFF_USER_ROLES.includes(u.role) && <Shield size={12} className="mr-1" />}
+                        {ROLE_LABELS[u.role]}
                     </span>
                   </td>
                   <td className="px-4 py-3">
@@ -460,8 +485,9 @@ export default function AdminUsersClient({ initialUsers }: Props) {
                       })
                     }
                   >
-                    <option value="USER">User</option>
-                    <option value="ADMIN">Administrator</option>
+                    {Object.entries(ROLE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
                   </select>
                 </div>
                 

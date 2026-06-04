@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
+import { AuditEvent, AuditLogger } from '@/lib/audit-log';
 
-const Schema = z.object({ email: z.string().email(), role: z.enum(['ADMIN','USER']) });
+const Schema = z.object({
+  email: z.string().email(),
+  role: z.enum(['USER', 'ADMIN', 'SUPER_ADMIN', 'DISPATCHER', 'FINANCE', 'SUPPORT', 'PARTNER_MANAGER'])
+});
 
 export async function POST(req: Request){
-  // حماية من CSRF عبر التحقق من Origin/Referer في الإنتاج
   const originCheck = validateRequestOrigin(req);
   if (!originCheck.ok) {
     return NextResponse.json(
@@ -16,16 +19,29 @@ export async function POST(req: Request){
     );
   }
 
-  // تحقق أدمن باستخدام جلسة JWT الموقعة والمخزنة في الكوكي
-  const me = await getUserFromCookie();
-  if (!me) {
-    return NextResponse.json({ ok:false, error:'Unauthorized' }, { status:401 });
-  }
-  if (me.type !== 'user' || (me as any).role !== 'ADMIN') {
-    return NextResponse.json({ ok:false, error:'Forbidden' }, { status:403 });
-  }
-
+  const me = await requirePermission('users.manage_roles');
   const { email, role } = Schema.parse(await req.json());
-  await prisma.user.update({ where: { email }, data: { role } });
+  const existing = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, role: true }
+  });
+
+  await prisma.user.update({ where: { email }, data: { role: role as any } });
+
+  await AuditLogger.log({
+    event: AuditEvent.ADMIN_ACTION,
+    userId: String((me as any).id),
+    ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('cf-connecting-ip') || undefined,
+    userAgent: req.headers.get('user-agent') || undefined,
+    metadata: {
+      action: 'user_role_change',
+      targetUserId: existing?.id,
+      targetEmail: email,
+      previousRole: existing?.role,
+      nextRole: role
+    },
+    severity: 'high'
+  });
+
   return NextResponse.json({ ok:true });
 }

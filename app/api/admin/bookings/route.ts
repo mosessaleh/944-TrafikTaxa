@@ -1,16 +1,36 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 export async function GET(){
   try{
-    await requireAdmin();
+    await requirePermission('bookings.read');
   }catch(e:any){
     return NextResponse.json({ ok:false, error:'Forbidden' }, { status: e?.status||403 });
   }
 
   try{
-    const rides = await prisma.ride.findMany();
+    const rides = await prisma.ride.findMany({
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true
+          }
+        },
+        vehicleType: {
+          select: {
+            title: true,
+            key: true
+          }
+        }
+      },
+      orderBy: { pickupTime: 'desc' },
+      take: 500
+    });
     return NextResponse.json({ ok:true, rides });
   }catch(e:any){
     console.error('Error fetching rides:', e);

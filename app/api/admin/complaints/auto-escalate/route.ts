@@ -1,5 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requirePermission } from '@/lib/auth';
+
+async function authorizeAutoEscalation(request: NextRequest) {
+  const configuredSecret = process.env.ADMIN_CRON_SECRET || process.env.CRON_SECRET;
+  const authHeader = request.headers.get('authorization');
+
+  if (configuredSecret && authHeader === `Bearer ${configuredSecret}`) {
+    return;
+  }
+
+  await requirePermission('complaints.manage');
+}
 
 /**
  * POST /api/admin/complaints/auto-escalate - Automatically escalate overdue complaints
@@ -7,6 +19,8 @@ import { prisma } from '@/lib/db';
  */
 export async function POST(request: NextRequest) {
   try {
+    await authorizeAutoEscalation(request);
+
     const now = new Date();
 
     // Find complaints that are overdue (past SLA deadline) and not yet escalated

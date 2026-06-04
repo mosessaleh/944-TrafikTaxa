@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 /**
  * GET /api/admin/complaints/analytics - Get complaint analytics data
  */
 export async function GET(request: NextRequest) {
   try {
-    const user = await getUserFromCookie();
-    if (!user || user.type !== 'user' || (user as any).role !== 'ADMIN') {
-      return NextResponse.json(
-        { ok: false, error: 'Admin access required' },
-        { status: 403 }
-      );
-    }
+    await requirePermission('complaints.read');
 
     // Get total counts
     const totalComplaints = await (prisma as any).complaint.count();

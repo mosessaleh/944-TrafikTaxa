@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { z } from 'zod';
 
 const {
@@ -70,6 +70,45 @@ const SchedulePolicySchema = z.object({
 
 const SETTINGS_SCHEMA_VERSION = 2;
 let ensureSettingsSchemaPromise: Promise<void> | null = null;
+
+const SENSITIVE_PAYMENT_FIELDS = [
+  'devSecretKey',
+  'devWebhookSecret',
+  'prodSecretKey',
+  'prodWebhookSecret'
+];
+
+function maskSecret(value: unknown) {
+  if (typeof value !== 'string' || !value) return value;
+  if (value.length <= 8) return '********';
+  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function sanitizePaymentMethod(method: any) {
+  if (!method || typeof method !== 'object') return method;
+
+  const sanitized = { ...method };
+  for (const field of SENSITIVE_PAYMENT_FIELDS) {
+    if (field in sanitized) {
+      sanitized[field] = maskSecret(sanitized[field]);
+    }
+  }
+
+  return sanitized;
+}
+
+function stripMaskedSecretsForUpdate(next: any, existing: any) {
+  const data = { ...next };
+
+  for (const field of SENSITIVE_PAYMENT_FIELDS) {
+    const value = data[field];
+    if (typeof value === 'string' && value.includes('...')) {
+      data[field] = existing?.[field] ?? undefined;
+    }
+  }
+
+  return data;
+}
 
 function normalizeBooleanFlag(value: unknown, fallback = true) {
   if (typeof value === 'boolean') return value;
@@ -162,7 +201,7 @@ async function ensureSettingsColumns() {
 }
 
 export async function GET(){
-  try{ await requireAdmin(); }catch{ return NextResponse.json({ ok:false }, { status:403 }); }
+  try{ await requirePermission('settings.read'); }catch{ return NextResponse.json({ ok:false }, { status:403 }); }
 
   try {
     await ensureSettingsColumns();
@@ -221,7 +260,7 @@ export async function GET(){
     return NextResponse.json({
       ok:true,
       settings,
-      paymentMethods,
+      paymentMethods: paymentMethods.map(sanitizePaymentMethod),
       schedulePolicy,
       legalMaxDailyMinutes: LEGAL_MAX_DAILY_MINUTES
     });
@@ -232,7 +271,7 @@ export async function GET(){
 }
 
 export async function POST(req: Request){
-  try{ await requireAdmin(); }catch{ return NextResponse.json({ ok:false }, { status:403 }); }
+  try{ await requirePermission('settings.manage'); }catch{ return NextResponse.json({ ok:false }, { status:403 }); }
   try {
     await ensureSettingsColumns();
 
@@ -283,12 +322,16 @@ export async function POST(req: Request){
     // Handle payment method update
     if (body.paymentMethod) {
       const paymentData = PaymentMethodSchema.parse(body.paymentMethod);
+      const existingPaymentMethod = await (prisma as any).paymentMethod.findUnique({
+        where: { key: paymentData.key }
+      });
+      const updateData = stripMaskedSecretsForUpdate(paymentData, existingPaymentMethod);
       const pm = await (prisma as any).paymentMethod.upsert({
         where: { key: paymentData.key },
-        update: paymentData,
+        update: updateData,
         create: paymentData
       });
-      return NextResponse.json({ ok:true, paymentMethod: pm });
+      return NextResponse.json({ ok:true, paymentMethod: sanitizePaymentMethod(pm) });
     }
 
     return NextResponse.json({ ok:false, error: 'Invalid request' }, { status:400 });

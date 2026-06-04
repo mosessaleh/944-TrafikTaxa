@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { sign, verify } from 'jsonwebtoken';
 import { comparePassword as cmp, hashPassword as hsh } from '@/lib/crypto';
 import { randomBytes } from 'crypto';
+import { hasPermission, isStaffRole, Permission } from '@/lib/permissions';
 
 function resolveAuthSecret() {
   const configuredSecret = process.env.AUTH_SECRET || process.env.JWT_SECRET;
@@ -268,7 +269,16 @@ export async function getUserFromRequest(request: Request) {
 export async function requireAdmin(){
   const u = await getUserFromCookie();
   if (!u) throw Object.assign(new Error('Unauthorized'), { status: 401 });
-  if (u.type !== 'user' || (u as any).role !== 'ADMIN') throw Object.assign(new Error('Forbidden'), { status: 403 });
+  if (u.type !== 'user' || !isStaffRole((u as any).role)) throw Object.assign(new Error('Forbidden'), { status: 403 });
+  return u;
+}
+
+export async function requirePermission(permission: Permission){
+  const u = await getUserFromCookie();
+  if (!u) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+  if (u.type !== 'user' || !hasPermission((u as any).role, permission)) {
+    throw Object.assign(new Error('Forbidden'), { status: 403 });
+  }
   return u;
 }
 

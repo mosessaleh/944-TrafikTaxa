@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
 
 const {
@@ -141,7 +141,7 @@ async function ensureAdmin(request: NextRequest) {
   }
 
   try {
-    await requireAdmin();
+    await requirePermission('drivers.manage');
     return null;
   } catch (error: any) {
     return buildError('Unauthorized', error?.status || 403);

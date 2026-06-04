@@ -4,6 +4,7 @@ import React, { ReactNode } from 'react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { getAdminPath } from '@/lib/admin-route';
+import { hasPermission, type AppRole, type Permission } from '@/lib/permissions';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -21,10 +22,11 @@ import {
   ChevronDown,
   Menu,
   FileText,
-  MapPin
+  MapPin,
+  ScrollText
 } from 'lucide-react';
 
-export default function AdminSidebar() {
+export default function AdminSidebar({ role }: { role: AppRole }) {
   const [generalExpanded, setGeneralExpanded] = useState(false);
   const [partnersExpanded, setPartnersExpanded] = useState(false);
   const [systemExpanded, setSystemExpanded] = useState(false);
@@ -65,16 +67,16 @@ export default function AdminSidebar() {
 
         <div className={`overflow-hidden transition-all duration-300 ease-in-out ${generalExpanded ? 'max-h-[60vh] opacity-100 overflow-y-auto pr-1' : 'max-h-0 opacity-0'}`}>
           <NavLink href={getAdminPath()} icon={<LayoutDashboard size={18} />} label="Dashboard" />
-          <NavLink href={getAdminPath('/bookings')} icon={<ClipboardList size={18} />} label="Bookings" />
-          <NavLink href={getAdminPath('/news')} icon={<Bell size={18} />} label="Company News" />
-          <NavLink href={getAdminPath('/users')} icon={<Users size={18} />} label="Users" />
-          <NavLink href={getAdminPath('/vehicles')} icon={<Car size={18} />} label="Vehicles" />
-          <NavLink href={getAdminPath('/map')} icon={<MapPin size={18} />} label="Map" />
-          <NavLink href={getAdminPath('/payments')} icon={<CreditCard size={18} />} label="Payments" />
-          <NavLink href={getAdminPath('/invoices')} icon={<FileText size={18} />} label="Invoices" />
-          <NavLink href={getAdminPath('/crypto')} icon={<Bitcoin size={18} />} label="Crypto" />
-          <NavLink href={getAdminPath('/complaints')} icon={<AlertTriangle size={18} />} label="Complaints" />
-          <NavLink href={getAdminPath('/risk')} icon={<Shield size={18} />} label="Risk Management" />
+          <PermissionLink role={role} permission="bookings.read" href={getAdminPath('/bookings')} icon={<ClipboardList size={18} />} label="Bookings" />
+          <PermissionLink role={role} permission="news.manage" href={getAdminPath('/news')} icon={<Bell size={18} />} label="Company News" />
+          <PermissionLink role={role} permission="users.read" href={getAdminPath('/users')} icon={<Users size={18} />} label="Users" />
+          <PermissionLink role={role} permission="settings.manage" href={getAdminPath('/vehicles')} icon={<Car size={18} />} label="Vehicles" />
+          <PermissionLink role={role} permission="drivers.read" href={getAdminPath('/map')} icon={<MapPin size={18} />} label="Map" />
+          <PermissionLink role={role} permission="payments.read" href={getAdminPath('/payments')} icon={<CreditCard size={18} />} label="Payments" />
+          <PermissionLink role={role} permission="invoices.read" href={getAdminPath('/invoices')} icon={<FileText size={18} />} label="Invoices" />
+          <PermissionLink role={role} permission="crypto.read" href={getAdminPath('/crypto')} icon={<Bitcoin size={18} />} label="Crypto" />
+          <PermissionLink role={role} permission="complaints.read" href={getAdminPath('/complaints')} icon={<AlertTriangle size={18} />} label="Complaints" />
+          <PermissionLink role={role} permission="risk.read" href={getAdminPath('/risk')} icon={<Shield size={18} />} label="Risk Management" />
         </div>
 
         <button
@@ -89,10 +91,10 @@ export default function AdminSidebar() {
         </button>
 
         <div className={`overflow-hidden transition-all duration-300 ease-in-out ${partnersExpanded ? 'max-h-[50vh] opacity-100 overflow-y-auto pr-1' : 'max-h-0 opacity-0'}`}>
-          <NavLink href={getAdminPath('/partners/overview')} icon={<Eye size={18} />} label="Overview" />
-          <NavLink href={getAdminPath('/partners/companies')} icon={<Building size={18} />} label="Companies" />
-          <NavLink href={getAdminPath('/partners/drivers')} icon={<Users size={18} />} label="Drivers" />
-          <NavLink href={getAdminPath('/partners/vehicles')} icon={<Car size={18} />} label="Vehicles" />
+          <PermissionLink role={role} permission="partners.read" href={getAdminPath('/partners/overview')} icon={<Eye size={18} />} label="Overview" />
+          <PermissionLink role={role} permission="partners.read" href={getAdminPath('/partners/companies')} icon={<Building size={18} />} label="Companies" />
+          <PermissionLink role={role} permission="drivers.read" href={getAdminPath('/partners/drivers')} icon={<Users size={18} />} label="Drivers" />
+          <PermissionLink role={role} permission="partners.read" href={getAdminPath('/partners/vehicles')} icon={<Car size={18} />} label="Vehicles" />
         </div>
 
         <button
@@ -107,8 +109,9 @@ export default function AdminSidebar() {
         </button>
 
         <div className={`overflow-hidden transition-all duration-300 ease-in-out ${systemExpanded ? 'max-h-[40vh] opacity-100 overflow-y-auto pr-1' : 'max-h-0 opacity-0'}`}>
-          <NavLink href={getAdminPath('/settings')} icon={<Settings size={18} />} label="Settings" />
-          <NavLink href={getAdminPath('/clear-data')} icon={<Trash2 size={18} />} label="Clear Data" variant="danger" />
+          <PermissionLink role={role} permission="settings.read" href={getAdminPath('/settings')} icon={<Settings size={18} />} label="Settings" />
+          <PermissionLink role={role} permission="audit.read" href={getAdminPath('/audit')} icon={<ScrollText size={18} />} label="Audit Log" />
+          <PermissionLink role={role} permission="danger.manage" href={getAdminPath('/clear-data')} icon={<Trash2 size={18} />} label="Clear Data" variant="danger" />
         </div>
       </nav>
 
@@ -139,5 +142,25 @@ function NavLink({ href, icon, label, variant = 'default' }: { href: string, ico
       </span>
       <span>{label}</span>
     </Link>
+  );
+}
+
+function PermissionLink(props: {
+  role: AppRole;
+  permission: Permission;
+  href: string;
+  icon: ReactNode;
+  label: string;
+  variant?: 'default' | 'danger';
+}) {
+  if (!hasPermission(props.role, props.permission)) return null;
+
+  return (
+    <NavLink
+      href={props.href}
+      icon={props.icon}
+      label={props.label}
+      variant={props.variant}
+    />
   );
 }

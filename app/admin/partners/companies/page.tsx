@@ -1,7 +1,10 @@
 import { prisma } from '@/lib/db';
+import { requirePermission } from '@/lib/auth';
 import AdminPartnerCompaniesClient, { PartnerCompany } from '@/components/AdminPartnerCompaniesClient';
 
 export default async function AdminPartnerCompanies() {
+  await requirePermission('partners.read');
+
   const raw = await prisma.partnerCompany.findMany({
     orderBy: { id: 'desc' },
     select: {

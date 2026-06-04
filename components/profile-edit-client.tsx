@@ -2,15 +2,14 @@
 import { useState } from 'react';
 import { ProfileUpdateSchema, ProfileUpdateInput } from '@/lib/validation';
 import { useCSRF } from '@/lib/useCSRF';
+import { isStaffRole } from '@/lib/permissions';
 
 // Import translation files
 import dkMessages from '../messages/dk.json';
 import enMessages from '../messages/en.json';
 
 // Translation function
-function useTranslations() {
-  const language = typeof window !== 'undefined' ? (localStorage.getItem('language') || 'dk') : 'dk';
-
+function useTranslations(language: string) {
   const t = (key: string) => {
     const keys = key.split('.');
     const messages = language === 'dk' ? dkMessages : enMessages;
@@ -24,7 +23,7 @@ function useTranslations() {
   return t;
 }
 
-export default function ProfileEditClient({ initial, onProfileUpdate }: { initial: any; onProfileUpdate?: () => void }){
+export default function ProfileEditClient({ initial, language = 'dk', onProfileUpdate }: { initial: any; language?: string; onProfileUpdate?: () => void }){
   const [f,setF] = useState<ProfileUpdateInput>(initial);
   const [msg,setMsg] = useState('');
   const [err,setErr] = useState('');
@@ -34,7 +33,7 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
 
   // CSRF token management
   const { csrfToken, loading: csrfLoading, error: csrfError } = useCSRF();
-  const t = useTranslations();
+  const t = useTranslations(language);
 
   async function onSave(e:React.FormEvent){
     e.preventDefault(); setMsg(''); setErr(''); setValidationErrors({}); setLoading(true);
@@ -157,7 +156,7 @@ export default function ProfileEditClient({ initial, onProfileUpdate }: { initia
       )}
 
       {/* Email verification status */}
-      {(!initial.emailVerified || initial.emailVerified === 0 || initial.emailVerified === "0") && !initial.pendingEmail && initial.role !== 'ADMIN' && (
+      {(!initial.emailVerified || initial.emailVerified === 0 || initial.emailVerified === "0") && !initial.pendingEmail && !isStaffRole(initial.role) && (
         <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200">
           <div className="font-medium text-orange-800">{t('account.profile.emailNotVerified')}</div>
           <div className="text-sm text-orange-700">

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 const NewsInput = z.object({
   id: z.number().int().positive().optional(),
@@ -47,7 +47,7 @@ async function buildUniqueSlug(title: string, currentId?: number) {
 
 export async function GET() {
   try {
-    await requireAdmin();
+    await requirePermission('news.manage');
   } catch {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
@@ -63,7 +63,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await requireAdmin();
+    await requirePermission('news.manage');
   } catch {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
@@ -135,7 +135,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    await requireAdmin();
+    await requirePermission('news.manage');
   } catch {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getAdminPath } from '@/lib/admin-route';
+import { isStaffRole } from '@/lib/permissions';
 
 export default function ClientNav(){
   const [me,setMe]=useState<any>(null);
@@ -36,7 +37,7 @@ export default function ClientNav(){
       {me.emailVerified && <Link href="/book" className="hover:underline">Book</Link>}
       {me.emailVerified && <Link href="/bookings" className="hover:underline">History</Link>}
       <Link href="/profile" className="hover:underline">Profile</Link>
-      {me.role === 'ADMIN' && <Link href={getAdminPath()} className="hover:underline">Admin</Link>}
+      {isStaffRole(me.role) && <Link href={getAdminPath()} className="hover:underline">Admin</Link>}
       <button onClick={logout} className="px-3 py-1.5 rounded-xl border">Logout</button>
     </div>
   );

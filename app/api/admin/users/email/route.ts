@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { validateRequestOrigin } from '@/lib/security-headers';
 import { notifyUserEmail, wrapWithBrandedTemplate } from '@/lib/notify';
 
@@ -22,14 +22,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Admin auth via signed JWT session
-    const me = await getUserFromCookie();
-    if (!me) {
-      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
-    }
-    if (me.type !== 'user' || (me as any).role !== 'ADMIN') {
-      return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
-    }
+    await requirePermission('users.manage');
 
     const json = await req.json().catch(() => ({}));
     const parsed = Schema.safeParse(json);

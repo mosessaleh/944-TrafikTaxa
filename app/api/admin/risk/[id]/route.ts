@@ -1,19 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const user = await getUserFromCookie();
-    if (!user || user.type !== 'user' || (user as any).role !== 'ADMIN') {
-      return NextResponse.json(
-        { ok: false, error: 'Admin access required' },
-        { status: 403 }
-      );
-    }
+    const user = await requirePermission('risk.manage');
 
     const bookingId = params.id;
 

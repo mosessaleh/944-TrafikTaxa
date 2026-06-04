@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 import { sendPaymentReminderEmail, sendLateFeeNotificationEmail } from '@/lib/mail';
 
 interface InvoiceWithUser {
@@ -49,10 +49,7 @@ interface InvoiceWithPriority extends InvoiceWithUser {
 
 export async function GET(request: NextRequest) {
   try {
-    const me = await getUserFromCookie();
-    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    await requirePermission('invoices.read');
 
     const url = new URL(request.url);
     const limitParam = url.searchParams.get('limit');
@@ -139,10 +136,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const me = await getUserFromCookie();
-    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const me = await requirePermission('invoices.manage');
 
     const body = await request.json();
     const { action, invoiceId } = body;

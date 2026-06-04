@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
-import Link from 'next/link';
+import { requireAdmin } from '@/lib/auth';
 import { getAdminPath } from '@/lib/admin-route';
 import { 
   TrendingUp, 
@@ -16,19 +15,7 @@ import {
 } from 'lucide-react';
 
 export default async function AdminHome(){
-  const me = await getUserFromCookie();
-  if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN'){
-    return (
-      <div className="max-w-xl mx-auto grid gap-4">
-        <h1 className="text-3xl font-bold">Admin</h1>
-        <div className="border rounded-2xl p-4 bg-yellow-50 text-yellow-900">
-          <div className="font-semibold">Access restricted</div>
-          <div className="text-sm mt-1">You must be an administrator to view this page.</div>
-          <div className="mt-3"><Link href="/" className="underline">Go back home</Link></div>
-        </div>
-      </div>
-    );
-  }
+  const me = await requireAdmin();
 
   // Comprehensive statistics
   const [

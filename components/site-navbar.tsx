@@ -2,10 +2,11 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { getAdminPath } from '@/lib/admin-route';
+import { isStaffRole, type AppRole } from '@/lib/permissions';
 import dkMessages from '@/messages/dk.json';
 import enMessages from '@/messages/en.json';
 
-export type NavUser = { id:number; firstName:string; lastName:string; email:string; role?: 'ADMIN'|'USER'; language?: string; type?: 'user' } | { id:number; comUserName:string; comName:string; type: 'partner' } | null;
+export type NavUser = { id:number; firstName:string; lastName:string; email:string; role?: AppRole; language?: string; type?: 'user' } | { id:number; comUserName:string; comName:string; type: 'partner' } | null;
 
 // Translation messages
 const messages = {
@@ -14,7 +15,7 @@ const messages = {
 };
 
 export default function SiteNavbar({ me }: { me: NavUser }){
-  const isAdmin = me?.type === 'user' && me?.role === 'ADMIN';
+  const isAdmin = me?.type === 'user' && isStaffRole(me?.role);
   const isPartner = me?.type === 'partner';
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);

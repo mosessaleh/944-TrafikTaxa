@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const me = await requireAdmin();
+    await requirePermission('payments.manage');
 
     const paymentMethodId = parseInt(params.id);
     if (isNaN(paymentMethodId)) {

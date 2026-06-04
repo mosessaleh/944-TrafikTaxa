@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { requirePermission } from '@/lib/auth';
+import { validateRequestOrigin } from '@/lib/security-headers';
+import { AuditEvent, AuditLogger } from '@/lib/audit-log';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const originCheck = validateRequestOrigin(request);
+    if (!originCheck.ok) {
+      return NextResponse.json({ ok: false, error: 'Invalid request origin' }, { status: 403 });
+    }
+
+    const admin = await requirePermission('drivers.manage');
     const driverId = parseInt(params.id);
     if (isNaN(driverId)) {
       return NextResponse.json({ ok: false, error: 'Invalid driver ID' }, { status: 400 });
@@ -44,6 +53,21 @@ export async function POST(
         id: true,
         bannedUntil: true,
       },
+    });
+
+    await AuditLogger.log({
+      event: AuditEvent.ADMIN_ACTION,
+      userId: String(admin.id),
+      ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('cf-connecting-ip') || undefined,
+      userAgent: request.headers.get('user-agent') || undefined,
+      metadata: {
+        action: bannedUntil ? 'driver_ban' : 'driver_unban',
+        driverId,
+        duration,
+        unit,
+        bannedUntil: updatedDriver.bannedUntil?.toISOString?.() || null
+      },
+      severity: 'high'
     });
 
     return NextResponse.json({

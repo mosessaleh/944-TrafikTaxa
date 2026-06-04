@@ -1,7 +1,7 @@
 import AdminSettingsClient from '@/components/admin-settings-client';
-import { requireAdmin } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 export default async function AdminSettingsPage(){
-  await requireAdmin();
+  await requirePermission('settings.read');
   return <AdminSettingsClient/>;
 }

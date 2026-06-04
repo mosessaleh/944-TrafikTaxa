@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { getUserFromCookie } from '@/lib/auth';
+import { requirePermission } from '@/lib/auth';
 
 type AdminPaymentType = 'card' | 'crypto' | 'paypal' | 'revolut' | 'invoice';
 
@@ -27,10 +27,7 @@ interface AdminPaymentItem {
 
 export async function GET(request: NextRequest) {
   try {
-    const me = await getUserFromCookie();
-    if (!me || me.type !== 'user' || (me as any).role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    await requirePermission('payments.read');
 
     const url = new URL(request.url);
     const methodFilter = url.searchParams.get('method'); // card|crypto|paypal|revolut|invoice

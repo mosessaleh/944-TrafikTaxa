@@ -1,8 +1,16 @@
 import { prisma } from '@/lib/db';
-import { decryptCPR } from '@/lib/crypto';
+import { requirePermission } from '@/lib/auth';
 import AdminDriversClient, { Driver } from '@/components/AdminDriversClient';
 
+function maskSensitive(value: string | null | undefined, visibleTail = 4) {
+  if (!value) return '';
+  if (value.length <= visibleTail) return '*'.repeat(value.length);
+  return `${'*'.repeat(Math.max(0, value.length - visibleTail))}${value.slice(-visibleTail)}`;
+}
+
 export default async function AdminDrivers() {
+  await requirePermission('drivers.read');
+
   const raw = await prisma.comDriver.findMany({
     include: {
       company: {
@@ -23,19 +31,11 @@ export default async function AdminDrivers() {
   });
 
   const drivers: Driver[] = await Promise.all(raw.map(async (d) => {
-    let decryptedCpr = d.cpr;
-    try {
-      decryptedCpr = decryptCPR(d.cpr);
-    } catch (error) {
-      console.error(`Failed to decrypt CPR for driver ${d.id}:`, error);
-      decryptedCpr = 'DECRYPTION_ERROR';
-    }
-
     return {
       id: d.id,
       comId: d.comId,
       companyName: d.company.comName,
-      cpr: decryptedCpr,
+      cpr: maskSensitive(d.cpr),
       drFname: d.drFname,
       drLname: d.drLname,
       sex: d.sex as 'MALE' | 'FEMALE',
@@ -53,7 +53,7 @@ export default async function AdminDrivers() {
       car: d.car,
       currentRideId: d.currentRideId,
       drUsername: d.drUsername,
-      apiKey: (d as any).apiKey,
+      apiKey: (d as any).apiKey ? maskSensitive((d as any).apiKey, 6) : null,
       createdAt: d.createdAt ? d.createdAt.toISOString() : null,
     };
   }));
