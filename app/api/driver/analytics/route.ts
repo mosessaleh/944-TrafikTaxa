@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import jwt from 'jsonwebtoken';
+import { verify, TokenExpiredError, JsonWebTokenError, NotBeforeError } from 'jsonwebtoken';
 import { getAuthSecret } from '@/lib/auth';
 
 const {
@@ -22,10 +22,22 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(
-      token,
-      JWT_SECRET
-    ) as { driverId?: number; id?: number; type?: string };
+    let decoded: { driverId?: number; id?: number; type?: string };
+
+    try {
+      decoded = verify(
+        token,
+        JWT_SECRET
+      ) as { driverId?: number; id?: number; type?: string };
+    } catch (error) {
+      if (error instanceof TokenExpiredError) {
+        return NextResponse.json({ error: 'Token expired' }, { status: 401 });
+      }
+      if (error instanceof JsonWebTokenError || error instanceof NotBeforeError) {
+        return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      }
+      throw error;
+    }
 
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {

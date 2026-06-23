@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import jwt from 'jsonwebtoken';
+import { verify, TokenExpiredError, JsonWebTokenError, NotBeforeError } from 'jsonwebtoken';
 import { Expo } from 'expo-server-sdk';
 import { getAuthSecret } from '@/lib/auth';
 
@@ -15,7 +15,20 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    let decoded: any;
+
+    try {
+      decoded = verify(token, JWT_SECRET) as any;
+    } catch (error) {
+      if (error instanceof TokenExpiredError) {
+        return NextResponse.json({ error: 'Token expired' }, { status: 401 });
+      }
+      if (error instanceof JsonWebTokenError || error instanceof NotBeforeError) {
+        return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      }
+      throw error;
+    }
+
     const driverId = Number(decoded?.driverId ?? decoded?.id);
 
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {

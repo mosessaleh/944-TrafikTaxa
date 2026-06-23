@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { requireDriverByJWT } from '@/lib/auth';
 
+const COMPLETED_HISTORY_STATUSES = ['COMPLETED', 'CANCELED'] as const;
+const RECENT_RIDE_STATUSES = [
+  'DISPATCHED',
+  'ONGOING',
+  'PICKED_UP',
+  'IN_PROGRESS',
+  'COMPLETED',
+] as const;
+
 export async function GET(req: NextRequest) {
   let driver;
   try {
@@ -15,37 +24,28 @@ export async function GET(req: NextRequest) {
     const startDate = searchParams.get('startDate');
     const endDate = searchParams.get('endDate');
     const allDrivers = searchParams.get('all') === 'true';
+    const includeActive = searchParams.get('includeActive') === 'true';
+    const historyStatuses = includeActive ? RECENT_RIDE_STATUSES : COMPLETED_HISTORY_STATUSES;
 
-    // Default period: from 26th of last month to 25th of current month or current date if before 25th
-    const now = new Date();
-    const currentDay = now.getDate();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+    const start = startDate ? new Date(`${startDate}T00:00:00.000`) : null;
+    const end = endDate ? new Date(`${endDate}T23:59:59.999`) : null;
 
-    let defaultStart: Date;
-    let defaultEnd: Date;
-
-    if (currentDay < 25) {
-      // If before 25th, show from 26th of last month to current date
-      defaultStart = new Date(currentYear, currentMonth - 1, 26);
-      defaultEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-    } else {
-      // Show from 26th of last month to 25th of current month
-      defaultStart = new Date(currentYear, currentMonth - 1, 26);
-      defaultEnd = new Date(currentYear, currentMonth, 25, 23, 59, 59);
+    if ((start && Number.isNaN(start.getTime())) || (end && Number.isNaN(end.getTime()))) {
+      return NextResponse.json({ ok: false, error: 'Invalid date range' }, { status: 400 });
     }
 
-    const start = startDate ? new Date(startDate) : defaultStart;
-    const end = endDate ? new Date(`${endDate}T23:59:59.999`) : defaultEnd;
+    const createdAtFilter: { gte?: Date; lte?: Date } = {};
+    if (start) createdAtFilter.gte = start;
+    if (end) createdAtFilter.lte = end;
+    const dateFilter = Object.keys(createdAtFilter).length > 0
+      ? { createdAt: createdAtFilter }
+      : {};
 
     const rides = await prisma.ride.findMany({
       where: {
         ...(allDrivers ? {} : { driverId: driver.id }),
-        status: { in: ['COMPLETED', 'CANCELED'] },
-        createdAt: {
-          gte: start,
-          lte: end,
-        },
+        status: { in: [...historyStatuses] },
+        ...dateFilter,
       },
       select: {
         id: true,
@@ -92,8 +92,8 @@ export async function GET(req: NextRequest) {
         totalRides,
         totalAmount,
         period: {
-          start: start.toISOString(),
-          end: end.toISOString(),
+          start: start ? start.toISOString() : null,
+          end: end ? end.toISOString() : null,
         },
       },
     });

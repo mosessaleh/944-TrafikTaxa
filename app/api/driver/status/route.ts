@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import jwt from 'jsonwebtoken';
+import { verify, TokenExpiredError, JsonWebTokenError, NotBeforeError } from 'jsonwebtoken';
 import { getAuthSecret } from '@/lib/auth';
 
 const {
@@ -11,20 +11,38 @@ const {
 const prisma = new PrismaClient();
 const JWT_SECRET = getAuthSecret();
 
+function verifyDriverToken(authHeader: string | null): { driverId?: number; id?: number; type?: string } {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw Object.assign(new Error('Missing or invalid authorization header'), { status: 401 });
+  }
+
+  const token = authHeader.substring(7);
+
+  try {
+    return verify(token, JWT_SECRET) as { driverId?: number; id?: number; type?: string };
+  } catch (error) {
+    if (error instanceof TokenExpiredError) {
+      throw Object.assign(new Error('Token expired'), { status: 401 });
+    }
+    if (error instanceof JsonWebTokenError || error instanceof NotBeforeError) {
+      throw Object.assign(new Error('Invalid token'), { status: 401 });
+    }
+    throw error;
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     await ensureDriverScheduleTables(prisma);
 
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    let decoded: { driverId?: number; id?: number; type?: string };
 
-  const token = authHeader.substring(7);
-  const decoded = jwt.verify(
-    token,
-    JWT_SECRET
-  ) as { driverId?: number; id?: number; type?: string };
+    try {
+      const authHeader = request.headers.get('authorization');
+      decoded = verifyDriverToken(authHeader);
+    } catch (error: any) {
+      return NextResponse.json({ error: error.message || 'Unauthorized' }, { status: error.status || 401 });
+    }
 
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
@@ -119,16 +137,14 @@ export async function POST(request: NextRequest) {
   try {
     await ensureDriverScheduleTables(prisma);
 
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    let decoded: { driverId?: number; id?: number; type?: string };
 
-  const token = authHeader.substring(7);
-  const decoded = jwt.verify(
-    token,
-    JWT_SECRET
-  ) as { driverId?: number; id?: number; type?: string };
+    try {
+      const authHeader = request.headers.get('authorization');
+      decoded = verifyDriverToken(authHeader);
+    } catch (error: any) {
+      return NextResponse.json({ error: error.message || 'Unauthorized' }, { status: error.status || 401 });
+    }
 
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
