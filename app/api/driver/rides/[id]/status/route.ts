@@ -5,6 +5,7 @@ import { verify } from 'jsonwebtoken';
 import { chargeSavedPaymentMethod, PaymentResult } from '@/lib/payment-processor';
 import { notifyUserInvoiceReady } from '@/lib/notify';
 import { getAuthSecret } from '@/lib/auth';
+import { notifyCustomerPickedUp, notifyCustomerCompleted } from '@/lib/whatsapp-notify';
 
 const JWT_SECRET = getAuthSecret();
 
@@ -13,6 +14,7 @@ const UpdateStatusSchema = z.object({
   pickedAt: z.string().optional(),
   droppedAt: z.string().optional(),
   droppedOnLocation: z.array(z.number()).optional(),
+  meterPrice: z.number().positive().optional(),
 });
 
 const allowedStatusTransitions: Record<string, string[]> = {
@@ -30,7 +32,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     }
 
     const body = await req.json();
-    const { status, pickedAt, droppedAt, droppedOnLocation } = UpdateStatusSchema.parse(body);
+    const { status, pickedAt, droppedAt, droppedOnLocation, meterPrice } = UpdateStatusSchema.parse(body);
 
     let paymentResult: PaymentResult | null = null;
 
@@ -88,10 +90,37 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const updateData: any = { status };
     if (status === 'PICKED_UP' && pickedAt) {
       updateData.pickedAt = new Date(pickedAt);
+      // WhatsApp notification delay - send after DB update
+      setTimeout(() => {
+        notifyCustomerPickedUp(rideId).catch(err =>
+          console.error('[WA Notify] Picked up error:', err)
+        );
+      }, 1000);
+
+      // Notify the chat room that the ride has started
+      try {
+        const io = (global as any).io;
+        if (io) {
+          io.to(`chat_${rideId}`).emit('newMessage', {
+            bookingId: rideId,
+            message: 'Ride has started. Chat closed.',
+            sender: 'system',
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch {}
     } else if (status === 'COMPLETED' && droppedAt) {
       updateData.droppedAt = new Date(droppedAt);
       if (droppedOnLocation) {
         updateData.droppedOnLocation = droppedOnLocation;
+      }
+      // Save meter price in driverNote and notify rider for confirmation
+      if (meterPrice && meterPrice > 0) {
+        const existingNote = ride.driverNote || '';
+        const baseNote = existingNote.includes('CASH')
+          ? existingNote.replace(/CASH.*/, '')
+          : existingNote;
+        updateData.driverNote = `CASH - METER RIDE - DRIVER:${meterPrice} DKK | PENDING_CONFIRMATION${baseNote ? ' | ' + baseNote : ''}`;
       }
     }
 
@@ -213,6 +242,55 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
           rideId,
           message: invoiceError?.message,
         });
+      }
+
+      // WhatsApp notification: ride completed + meter price confirmation
+      if (meterPrice && meterPrice > 0) {
+        // Send meter price confirmation to rider
+        try {
+          const rider = await prisma.user.findUnique({
+            where: { id: ride.userId },
+            select: { phone: true, firstName: true },
+          });
+          if (rider?.phone) {
+            const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+            const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
+            if (phoneId && token) {
+              const msgBody = `🚕 *Ride completed!*\n\nDriver reports meter price: *${meterPrice} DKK*\nEstimated price: ${ride.price} DKK\n📋 Ride #${rideId}\n\nIs this price correct?`;
+              const buttons = [
+                { type: 'reply', reply: { id: `meter_yes_${rideId}`, title: '✅ Yes' } },
+                { type: 'reply', reply: { id: `meter_no_${rideId}`, title: '❌ No' } },
+              ];
+              await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  messaging_product: 'whatsapp', recipient_type: 'individual', to: rider.phone,
+                  type: 'interactive',
+                  interactive: {
+                    type: 'button',
+                    body: { text: msgBody },
+                    action: { buttons },
+                  },
+                }),
+              }).catch(() => {});
+            }
+          }
+        } catch (e) { console.error('[Meter Confirm]', e); }
+      } else {
+        // Normal completion — send receipt
+        try {
+          const latestInvoice = await prisma.invoice.findFirst({
+            where: { rideId },
+            orderBy: { createdAt: 'desc' },
+            select: { id: true },
+          });
+          if (latestInvoice) {
+            notifyCustomerCompleted(rideId, latestInvoice.id).catch(err =>
+              console.error('[WA Notify] Complete error:', err)
+            );
+          }
+        } catch (waErr) { /* ignore */ }
       }
     }
 

@@ -115,6 +115,7 @@ const SCHEDULED_STAGE2_MAX_WINDOW_MINUTES = 24 * 60;
 const SCHEDULED_STAGE2_OFFER_TIMEOUT_MS = 3 * 60 * 1000;
 const SCHEDULED_STAGE2_MAX_ETA_MINUTES = 20;
 const SCHEDULED_STAGE3_OFFER_TIMEOUT_MS = 10 * 60 * 1000;
+const IMMEDIATE_MAX_PICKUP_ETA_MINUTES = 45;
 const SCHEDULED_STAGE3_POSTAL_PREFIX_LEN = 4;
 const SCHEDULED_STAGE3_FALLBACK_DISTANCE_PENALTY = 9999;
 const SCHEDULED_MAX_ETA_MINUTES = 30;
@@ -198,7 +199,8 @@ function buildRidePayload(ride) {
     stopLatLon: ride.stopLatLon || null,
     endLatLon: ride.endLatLon,
     vehicleTypeId: ride.vehicleTypeId,
-    pickupTime: ride.pickupTime
+    pickupTime: ride.pickupTime,
+    paymentMethod: ride.paymentMethod
   };
 }
 
@@ -3091,7 +3093,8 @@ async function autoAssignRide(ride, vehicleInfo) {
                 riderName: ride.riderName,
                 startLatLon: ride.startLatLon,
                 endLatLon: ride.endLatLon,
-                vehicleTypeId: ride.vehicleTypeId
+                vehicleTypeId: ride.vehicleTypeId,
+                paymentMethod: ride.paymentMethod
               },
               timestamp: Date.now(),
               timeoutMs: 30000 // 30 seconds timeout
@@ -3695,16 +3698,33 @@ async function checkForNewRides() {
           }
 
           if (vehicleInfo.length > 0) {
-            console.log(`Ride ${ride.id} will get one of these: ${vehicleInfo.join(', ')}`);
-            // Auto-assign the ride to the closest available driver
-            await autoAssignRide(ride, vehicleInfo);
-          } else {
-            if (ride.scheduled && minutesToPickup !== null && minutesToPickup <= scheduledDispatchLeadMinutes) {
-              console.log(`No vehicles available for scheduled ride ${ride.id} (${minutesToPickup} min) - canceling`);
-              await cancelRideWithRefund(ride, { reason: 'No vehicles available for scheduled ride' });
-            } else {
-              console.log(`Ride ${ride.id} has not been offered to any driver yet (no vehicles available)`);
+            // For immediate rides: filter out drivers too far from pickup
+            if (!ride.scheduled) {
+              vehicleInfo = vehicleInfo.filter((info) => {
+                const match = info.match(/\[(\d+),\s*(\d+),\s*(\d+|unknown)\]/);
+                if (match) {
+                  const etaMin = parseInt(match[3]);
+                  if (!isNaN(etaMin) && etaMin > IMMEDIATE_MAX_PICKUP_ETA_MINUTES) {
+                    console.log(`  Skipping vehicle ${match[1]} — ETA ${etaMin}min exceeds limit ${IMMEDIATE_MAX_PICKUP_ETA_MINUTES}min`);
+                    return false;
+                  }
+                }
+                return true;
+              });
             }
+
+            if (vehicleInfo.length > 0) {
+              console.log(`Ride ${ride.id} will get one of these: ${vehicleInfo.join(', ')}`);
+              await autoAssignRide(ride, vehicleInfo);
+              continue;
+            }
+          }
+
+          if (ride.scheduled && minutesToPickup !== null && minutesToPickup <= scheduledDispatchLeadMinutes) {
+            console.log(`No vehicles available for scheduled ride ${ride.id} (${minutesToPickup} min) - canceling`);
+            await cancelRideWithRefund(ride, { reason: 'No vehicles available for scheduled ride' });
+          } else {
+            console.log(`Ride ${ride.id} has not been offered to any driver yet (no vehicles available)`);
           }
         } catch (error) {
           console.error(`Error getting available vehicles for ride ${ride.id}:`, error);
@@ -4209,6 +4229,13 @@ app.prepare().then(() => {
                 data: { driverQueue: queueIds }
               });
             }
+            // Also set driverId/car on the ride so it appears in upcoming rides lists
+            if (candidate.car) {
+              await prisma.ride.update({
+                where: { id: data.rideId, driverId: null },
+                data: { driverId, car: candidate.car }
+              });
+            }
           } catch (error) {
             console.error(`Failed to persist scheduled acceptance for ride ${data.rideId}:`, error);
           }
@@ -4246,10 +4273,10 @@ app.prepare().then(() => {
         // Get driver info
         const driver = await prisma.comDriver.findUnique({
           where: { id: driverId },
-          include: {
-            company: true,
-            shifts: true
-          }
+          select: {
+            id: true, drFname: true, drLname: true, car: true, drPhone: true,
+            currentRideId: true, isOnline: true, isBusy: true,
+          },
         });
 
         if (!driver) {
@@ -4370,6 +4397,65 @@ app.prepare().then(() => {
           driver: driver,
           timestamp: new Date().toISOString()
         });
+
+        // WhatsApp notification: driver accepted with ETA
+        console.log(`[WA Notify] Attempting notification for ride #${data.rideId}, driver ${driverId}`);
+        try {
+          const rideForNotif = await prisma.ride.findUnique({
+            where: { id: data.rideId },
+            select: { id: true, pickupAddress: true, dropoffAddress: true, userId: true, startLatLon: true },
+          });
+          console.log(`[WA Notify] rideForNotif found:`, !!rideForNotif, 'userId:', rideForNotif?.userId);
+          if (rideForNotif) {
+            const user = await prisma.user.findUnique({
+              where: { id: rideForNotif.userId },
+              select: { phone: true, firstName: true },
+            });
+            console.log(`[WA Notify] user found:`, !!user, 'phone:', user?.phone);
+            if (user?.phone) {
+              const driverName = `${driver.drFname || ''} ${driver.drLname || ''}`.trim() || 'Driver';
+              const carInfo = driver.car || 'N/A';
+
+              // Calculate ETA
+              let etaMinutes = 0;
+              const driverLocation = connectedDrivers.get(driverId)?.location;
+              if (driverLocation && rideForNotif.startLatLon) {
+                try {
+                  const eta = await calculateETA(
+                    { lat: driverLocation.lat, lon: driverLocation.lng },
+                    rideForNotif.startLatLon.lat,
+                    rideForNotif.startLatLon.lon
+                  );
+                  if (eta && Number.isFinite(eta.timeMinutes)) {
+                    etaMinutes = Math.round(eta.timeMinutes);
+                  }
+                } catch {}
+              }
+
+              const etaText = etaMinutes > 0 ? `\n⏱ ETA: ~${etaMinutes} min` : '';
+              const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}${etaText}\n📋 Ride #${rideForNotif.id}\n📍 ${rideForNotif.pickupAddress} → ${rideForNotif.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat. To end the chat, send "endchat".`;
+
+              const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+              const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
+              console.log(`[WA Notify] Creds: phoneId=${!!phoneId}, token=${!!token}`);
+              if (phoneId && token) {
+                const res = await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: msg } }),
+                });
+                if (!res.ok) console.error('[WA Notify] Failed:', res.status, await res.text().catch(() => ''));
+                else console.log(`[WA Notify] Sent to ${user.phone} for ride #${data.rideId}`);
+              } else {
+                console.log('[WA Notify] No creds available — skipping');
+              }
+            } else {
+              console.log('[WA Notify] No user phone found — skipping');
+            }
+          } else {
+            console.log('[WA Notify] rideForNotif not found — skipping');
+          }
+        } catch (waErr) { console.error('[WA Notify] Accept error:', waErr); }
 
         // Send initial driver info update
         const driverInfo = await prisma.comDriver.findUnique({
@@ -4694,6 +4780,46 @@ app.prepare().then(() => {
       };
       io.to(`chat_${bookingId}`).emit('newMessage', messageData);
       console.log(`Message sent in chat ${bookingId}`);
+
+      // Persist message to DB
+      try {
+        await prisma.chatMessage.create({
+          data: {
+            rideId: bookingId,
+            sender: sender,
+            message: message,
+            source: 'socket',
+          }
+        });
+
+        // If sender is driver, also notify rider via WhatsApp
+        if (sender === 'driver' || sender.startsWith('Driver')) {
+          const ride = await prisma.ride.findUnique({
+            where: { id: bookingId },
+            select: { userId: true },
+          });
+          if (ride) {
+            const user = await prisma.user.findUnique({
+              where: { id: ride.userId },
+              select: { phone: true },
+            });
+            if (user?.phone) {
+              const waMsg = `💬 *Message from driver:*\n\n"${message}"\n\n📋 Ride #${bookingId}\n\nReply to this chat to message the driver. Send "endchat" to stop.`;
+              const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+              const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
+              if (phoneId && token) {
+                await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: waMsg } }),
+                }).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[Chat] DB persist failed:', e);
+      }
     });
 
     socket.on('disconnect', () => {
@@ -4787,6 +4913,64 @@ app.prepare().then(() => {
         global.checkOngoingRidesDistances();
       }
     }, 30000);
+
+    // ===== Ride Reminders ====
+    async function checkRideReminders() {
+      try {
+        const now = new Date();
+        const windowStart = new Date(now.getTime() + 14 * 60 * 1000);
+        const windowEnd = new Date(now.getTime() + 16 * 60 * 1000);
+
+        const rides = await prisma.ride.findMany({
+          where: {
+            status: 'CONFIRMED',
+            scheduled: true,
+            pickupTime: { gte: windowStart, lte: windowEnd },
+          },
+          select: { id: true, pickupTime: true, userId: true, explanation: true },
+        });
+
+        for (const ride of rides) {
+          try {
+            if (ride.explanation?.includes('[REMINDED]')) continue;
+
+            const user = await prisma.user.findUnique({
+              where: { id: ride.userId },
+              select: { phone: true },
+            });
+            if (!user?.phone) continue;
+
+            const pickupTime = new Date(ride.pickupTime);
+            const timeStr = pickupTime.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
+            const msg = `⏰ Reminder: Your ride is in 15 minutes! 🚕\n\nBooking: #${ride.id}\nTime: ${timeStr}`;
+
+            const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+            const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
+            if (phoneId && token) {
+              await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: msg } }),
+              }).catch(() => {});
+            }
+
+            await prisma.ride.update({
+              where: { id: ride.id },
+              data: { explanation: `[REMINDED] ${ride.explanation || ''}` },
+            });
+
+            console.log(`[Reminder] Sent to booking #${ride.id}`);
+          } catch (e) {
+            console.error(`[Reminder] Error for ride #${ride.id}:`, e);
+          }
+        }
+      } catch (e) {
+        console.error('[Reminder] Check failed:', e);
+      }
+    }
+
+    // Check ride reminders every 45 seconds
+    setInterval(checkRideReminders, 45000);
 
     // Check scheduled ride late warnings every 20 seconds
     setInterval(() => {

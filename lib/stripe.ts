@@ -83,3 +83,38 @@ export async function createCheckoutSession(params: {
     metadata,
   });
 }
+
+export async function createWhatsAppPaymentSession(params: {
+  bookingId: number;
+  amount: number;
+  userPhone: string;
+  baseUrl: string;
+}): Promise<{ url: string }> {
+  const { bookingId, amount, userPhone, baseUrl } = params;
+
+  const session = await createCheckoutSession({
+    amount,
+    currency: 'dkk',
+    successUrl: `${baseUrl}/booking-confirmed?id=${bookingId}`,
+    cancelUrl: `${baseUrl}/booking-cancelled?id=${bookingId}`,
+    metadata: {
+      bookingId: String(bookingId),
+      source: 'whatsapp',
+      userPhone,
+    },
+  });
+
+  return { url: session.url || '' };
+}
+
+export async function retrieveCheckoutSession(sessionId: string) {
+  const stripe = getStripe();
+  return await stripe.checkout.sessions.retrieve(sessionId);
+}
+
+export function constructWebhookEvent(payload: Buffer, signature: string) {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) throw new Error('STRIPE_WEBHOOK_SECRET not configured');
+  const stripe = getStripe();
+  return stripe.webhooks.constructEvent(payload, signature, secret);
+}

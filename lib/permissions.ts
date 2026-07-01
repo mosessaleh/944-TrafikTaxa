@@ -37,6 +37,7 @@ export type Permission =
   | 'crypto.manage'
   | 'news.manage'
   | 'audit.read'
+  | 'messages.read'
   | 'danger.manage';
 
 const ROLE_PERMISSIONS: Record<StaffRole, Permission[]> = {

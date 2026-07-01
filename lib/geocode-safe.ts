@@ -21,7 +21,7 @@ async function osrmDistance(lat1:number, lon1:number, lat2:number, lon2:number){
   return { distanceKm, durationMin };
 }
 
-async function geocode(addr:string){
+async function geocode(addr:string): Promise<{ lat: number; lon: number }> {
   // Check cache first
   const cached = CacheManager.getGeoCache(addr);
   if (cached) {
@@ -36,11 +36,31 @@ async function geocode(addr:string){
   if(!r.ok) throw new Error('Geocode failed');
   const j:any[] = await r.json();
   const p = j?.[0]; if(!p) throw new Error('No geocode');
+
+  // Validate match quality — reject low-confidence results
+  const displayName = (p.display_name || '').toLowerCase();
+  const queryLower = addr.toLowerCase();
+  const osmType = (p.type || '');
+
+  // If result is just a city/town/postcode but user typed a street, reject
+  const broadTypes = ['administrative', 'city', 'town', 'municipality', 'county', 'postcode', 'boundary', 'postal_code'];
+  const isBroadResult = broadTypes.includes(osmType);
+  const hasStreetTerms = /\b(vej|gade|stræde|alle|boulevard|plads|torv|road|street|avenue|lane|drive|court|way|close|park|plaats|شا|شارع|طريق|ساحة|weg|steeg|gracht|kade|singel|laan|hof|pad|dreef|plantsoen)\b/i.test(queryLower);
+  // Also detect if user typed numbers that look like a street number (e.g. "18", "137") not present in result
+  const hasStreetNumber = /\b\d{1,4}\b/.test(queryLower);
+  const resultHasStreetNumber = /\b\d{1,4}\b/.test(displayName);
+
+  if (isBroadResult && hasStreetTerms) {
+    throw new Error(`Broad match for specific query: "${addr}" → "${displayName}" (${osmType})`);
+  }
+
+  // If user typed a street number but result doesn't contain one, likely a non-existent address
+  if (hasStreetNumber && !resultHasStreetNumber && hasStreetTerms) {
+    throw new Error(`Missing street number in result: "${addr}" → "${displayName}"`);
+  }
+
   const result = { lat: Number(p.lat), lon: Number(p.lon) };
-
-  // Cache the result
   CacheManager.setGeoCache(addr, result);
-
   return result;
 }
 

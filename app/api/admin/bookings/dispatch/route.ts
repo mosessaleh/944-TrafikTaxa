@@ -5,6 +5,8 @@ import { requirePermission } from '@/lib/auth';
 import { getSocketServer } from '@/lib/socket-server';
 import { sendPushToDriver } from '@/lib/notification-service';
 
+const WHATSAPP_API_VERSION = 'v22.0';
+
 const { connectedDrivers } = require('@/lib/connected-drivers');
 
 const DispatchSchema = z.discriminatedUnion('mode', [
@@ -173,6 +175,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (updatedRide?.driverId && updatedRide.status === 'DISPATCHED') {
+        notifyRiderWhatsApp(updatedRide.id, Number(updatedRide.driverId)).catch(() => {});
         return NextResponse.json({
           ok: true,
           ride: updatedRide,
@@ -331,6 +334,9 @@ export async function POST(req: NextRequest) {
       console.warn('[dispatch] immediate driver push failed', error);
     }
 
+    // Send WhatsApp notification to rider when driver is dispatched (manual mode)
+    notifyRiderWhatsApp(ride.id, driver.id).catch(err => console.error('[WA Dispatch] Error:', err));
+
     return NextResponse.json({
       ok: true,
       ride,
@@ -338,5 +344,42 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || 'Invalid' }, { status: 400 });
+  }
+}
+
+async function notifyRiderWhatsApp(rideId: number, driverId: number) {
+  try {
+    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+    const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
+    if (!phoneId || !token) return;
+
+    const ride = await prisma.ride.findUnique({
+      where: { id: rideId },
+      select: { id: true, pickupAddress: true, dropoffAddress: true, userId: true },
+    });
+    if (!ride) return;
+
+    const user = await prisma.user.findUnique({
+      where: { id: ride.userId },
+      select: { phone: true, firstName: true },
+    });
+    if (!user?.phone) return;
+
+    const driver = await prisma.comDriver.findUnique({
+      where: { id: driverId },
+      select: { drFname: true, drLname: true, car: true },
+    });
+    const driverName = driver ? `${driver.drFname} ${driver.drLname}`.trim() : 'Driver';
+    const carInfo = driver?.car || 'N/A';
+
+    const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}\n📋 Ride #${ride.id}\n📍 ${ride.pickupAddress} → ${ride.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat. To end the chat, send "endchat".`;
+
+    await fetch(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: msg } }),
+    });
+  } catch (e) {
+    console.error('[WA Dispatch]', e);
   }
 }

@@ -248,6 +248,7 @@ model Ride {
 
   complaints Complaint[]
   invoices   Invoice[]
+  chatMessages ChatMessage[]
   savedPaymentMethod UserPaymentMethod? @relation(fields: [savedPaymentMethodId], references: [id])
 
   // Optimized indexes for common queries
@@ -607,5 +608,18 @@ model driversvagt {
 
   @@index([drId])
   @@index([date])
+}
+
+model ChatMessage {
+  id        Int      @id @default(autoincrement())
+  rideId    Int
+  sender    String
+  message   String
+  timestamp DateTime @default(now())
+  source    String   @default("socket")
+
+  ride      Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([rideId, timestamp])
 }
 
