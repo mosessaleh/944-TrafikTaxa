@@ -1,22 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-
-// WhatsApp send function (duplicated to avoid circular imports)
-const WHATSAPP_API_VERSION = 'v22.0';
-
-async function sendWA(to: string, text: string) {
-  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-  const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
-  if (!phoneId || !token) return;
-
-  try {
-    await fetch(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body: text } }),
-    });
-  } catch {}
-}
+import { sendWAText } from '@/lib/wa-client';
 
 export async function GET() {
   try {
@@ -50,7 +34,7 @@ export async function GET() {
 
         const msg = `⏰ Reminder: Your ride is in 15 minutes! 🚕\n\nBooking: #${ride.id}\nTime: ${timeStr}`;
 
-        await sendWA(user.phone, msg);
+        await sendWAText(user.phone, msg);
 
         await (prisma as any).ride.update({
           where: { id: ride.id },

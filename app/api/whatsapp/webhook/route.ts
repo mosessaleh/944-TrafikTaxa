@@ -1,11 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { prisma } from '@/lib/db';
 import { hashPassword } from '@/lib/auth';
 import { processMessage } from '@/lib/whatsapp-ai';
 import { createWhatsAppPaymentSession } from '@/lib/stripe';
+import { sendWAText as sendWA, sendWAButtons } from '@/lib/wa-client';
 import type { AIResponse } from '@/lib/whatsapp-ai';
 
-const WHATSAPP_API_VERSION = 'v22.0';
+function verifyWhatsAppSignature(body: string, signatureHeader: string): boolean {
+  const secret = process.env.WHATSAPP_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error('[WhatsApp] WEBHOOK_SECRET not configured - rejecting request');
+    return false;
+  }
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', secret)
+    .update(body, 'utf-8')
+    .digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signatureHeader));
+  } catch {
+    return false;
+  }
+}
 
 // ========================
 // Language detection
@@ -1319,49 +1336,7 @@ async function doCreateBooking(
 // WhatsApp Messaging
 // ========================
 
-let waPhoneId = '', waToken = '';
-function initWACreds() {
-  waPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-  waToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
-}
 
-async function sendWA(to: string, text: string) {
-  if (!waPhoneId) initWACreds();
-  if (!waPhoneId || !waToken) return;
-
-  try {
-    await fetch(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${waPhoneId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${waToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body: text } }),
-    });
-  } catch {}
-}
-
-async function sendWAButtons(to: string, bodyText: string, buttons: { id: string; title: string }[], footerText?: string) {
-  if (!waPhoneId) initWACreds();
-  if (!waPhoneId || !waToken) {
-    // Fallback: send as text with numbered list
-    const btnList = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
-    await sendWA(to, `${bodyText}\n\n${btnList}${footerText ? '\n' + footerText : ''}`);
-    return;
-  }
-
-  try {
-    const interactive: any = {
-      type: 'button',
-      body: { text: bodyText },
-      action: { buttons: buttons.map(b => ({ type: 'reply', reply: { id: b.id, title: b.title.substring(0, 20) } })) },
-    };
-    if (footerText) interactive.footer = { text: footerText };
-
-    await fetch(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${waPhoneId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${waToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'interactive', interactive }),
-    });
-  } catch {}
-}
 
 // ========================
 // Quick keyword replies — now use RESET_MSG for greetings
@@ -1980,7 +1955,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const rawBody = await request.text();
+    const signature = request.headers.get('X-Hub-Signature-256');
+    if (!signature || !verifyWhatsAppSignature(rawBody, signature)) {
+      return NextResponse.json({ status: 'error' }, { status: 403 });
+    }
+    const body = JSON.parse(rawBody);
     if (body.object !== 'whatsapp_business_account') {
       return NextResponse.json({ status: 'ok' });
     }

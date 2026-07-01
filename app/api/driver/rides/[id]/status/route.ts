@@ -6,6 +6,7 @@ import { chargeSavedPaymentMethod, PaymentResult } from '@/lib/payment-processor
 import { notifyUserInvoiceReady } from '@/lib/notify';
 import { getAuthSecret } from '@/lib/auth';
 import { notifyCustomerPickedUp, notifyCustomerCompleted } from '@/lib/whatsapp-notify';
+import { sendWAButtons } from '@/lib/wa-client';
 
 const JWT_SECRET = getAuthSecret();
 
@@ -253,30 +254,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             select: { phone: true, firstName: true },
           });
           if (rider?.phone) {
-            const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-            const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
-            if (phoneId && token) {
               const msgBody = `🚕 *Ride completed!*\n\nDriver reports meter price: *${meterPrice} DKK*\nEstimated price: ${ride.price} DKK\n📋 Ride #${rideId}\n\nIs this price correct?`;
               const buttons = [
-                { type: 'reply', reply: { id: `meter_yes_${rideId}`, title: '✅ Yes' } },
-                { type: 'reply', reply: { id: `meter_no_${rideId}`, title: '❌ No' } },
+                { id: `meter_yes_${rideId}`, title: '✅ Yes' },
+                { id: `meter_no_${rideId}`, title: '❌ No' },
               ];
-              await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  messaging_product: 'whatsapp', recipient_type: 'individual', to: rider.phone,
-                  type: 'interactive',
-                  interactive: {
-                    type: 'button',
-                    body: { text: msgBody },
-                    action: { buttons },
-                  },
-                }),
-              }).catch(() => {});
+              sendWAButtons(rider.phone, msgBody, buttons).catch(() => {});
             }
-          }
-        } catch (e) { console.error('[Meter Confirm]', e); }
+          } catch (e) { console.error('[Meter Confirm]', e); }
       } else {
         // Normal completion — send receipt
         try {

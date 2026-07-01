@@ -1,32 +1,5 @@
 import { prisma } from '@/lib/db';
-
-const WHATSAPP_API_VERSION = 'v22.0';
-
-let cachedPhoneId = '';
-let cachedToken = '';
-
-function getWACreds() {
-  if (!cachedPhoneId) {
-    cachedPhoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-    cachedToken = process.env.WHATSAPP_ACCESS_TOKEN || '';
-  }
-  return { phoneId: cachedPhoneId, token: cachedToken };
-}
-
-async function sendMessage(to: string, text: string) {
-  const { phoneId, token } = getWACreds();
-  if (!phoneId || !token) return;
-
-  try {
-    await fetch(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body: text } }),
-    });
-  } catch (e) {
-    console.error('[WA Notify] Send failed:', e);
-  }
-}
+import { sendWAText } from '@/lib/wa-client';
 
 /**
  * Notify customer that a driver accepted their ride
@@ -64,7 +37,7 @@ export async function notifyDriverAccepted(rideId: number) {
       + `📍 ${ride.pickupAddress} → ${ride.dropoffAddress}\n\n`
       + `The driver is on the way to pick you up.`;
 
-    await sendMessage(ride.user.phone, msg);
+    await sendWAText(ride.user.phone, msg);
   } catch (e) {
     console.error('[WA Notify] Driver accepted error:', e);
   }
@@ -91,7 +64,7 @@ export async function notifyCustomerPickedUp(rideId: number) {
       + `📍 Heading to: ${ride.dropoffAddress}\n\n`
       + `Enjoy your ride! 🚕`;
 
-    await sendMessage(ride.user.phone, msg);
+    await sendWAText(ride.user.phone, msg);
   } catch (e) {
     console.error('[WA Notify] Picked up error:', e);
   }
@@ -127,7 +100,7 @@ export async function notifyCustomerCompleted(rideId: number, invoiceId: number)
       + `🧾 *Receipt:* ${invoiceLink}\n\n`
       + `Thank you for choosing 944 Trafik! 🚕`;
 
-    await sendMessage(ride.user.phone, msg);
+    await sendWAText(ride.user.phone, msg);
   } catch (e) {
     console.error('[WA Notify] Completed error:', e);
   }
