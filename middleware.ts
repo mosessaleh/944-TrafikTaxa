@@ -148,7 +148,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // Light rate limiting for invoices and payment APIs
-  const rateLimitedPrefixes = ['/api/invoices', '/api/payments'];
+  const rateLimitedPrefixes = ['/api/invoices', '/api/payments', '/api/whatsapp/webhook'];
   const matchedPrefix = rateLimitedPrefixes.find(prefix => pathname.startsWith(prefix));
 
   if (matchedPrefix) {

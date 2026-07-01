@@ -5,6 +5,7 @@ import { safeEstimateDistance } from '@/lib/geocode-safe';
 import { computePrice } from '@/lib/price';
 import { sanitizeInput } from '@/lib/sanitize';
 import { notifyBookingConfirmedUnified } from '@/lib/notification-service';
+import { getUserSessionByToken } from '@/lib/wa-sessions';
 
 const prismaAny = prisma as any;
 
@@ -25,13 +26,26 @@ const createBookingSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Auth via WhatsApp headers
-    const userId = parseInt(request.headers.get('x-whatsapp-user-id') || '0');
-    if (!userId) {
-      return NextResponse.json(
-        { ok: false, error: 'Missing WhatsApp user ID' },
-        { status: 401 }
-      );
+    const sessionToken = request.headers.get('x-whatsapp-session-token');
+    let userId: number;
+
+    if (sessionToken) {
+      const session = getUserSessionByToken(sessionToken);
+      if (!session || !session.userId) {
+        return NextResponse.json(
+          { ok: false, error: 'Invalid or expired WhatsApp session' },
+          { status: 401 }
+        );
+      }
+      userId = session.userId;
+    } else {
+      userId = parseInt(request.headers.get('x-whatsapp-user-id') || '0');
+      if (!userId) {
+        return NextResponse.json(
+          { ok: false, error: 'Missing authentication' },
+          { status: 401 }
+        );
+      }
     }
 
     const user = await prisma.user.findUnique({

@@ -1,5 +1,18 @@
 import { prisma } from '@/lib/db';
-import { sendWAText } from '@/lib/wa-client';
+import { sendWAText, sendWATemplate } from '@/lib/wa-client';
+import { logWAError } from '@/lib/wa-logger';
+
+async function sendTemplateOrText(
+  phone: string,
+  templateName: string,
+  params: string[],
+  fallbackText: string,
+): Promise<void> {
+  const sent = await sendWATemplate(phone, templateName, 'en', params);
+  if (!sent) {
+    await sendWAText(phone, fallbackText);
+  }
+}
 
 /**
  * Notify customer that a driver accepted their ride
@@ -37,9 +50,15 @@ export async function notifyDriverAccepted(rideId: number) {
       + `📍 ${ride.pickupAddress} → ${ride.dropoffAddress}\n\n`
       + `The driver is on the way to pick you up.`;
 
-    await sendWAText(ride.user.phone, msg);
+    await sendTemplateOrText(ride.user.phone, 'driver_assigned', [
+      driverName,
+      carInfo,
+      String(ride.id),
+      ride.pickupAddress,
+      ride.dropoffAddress,
+    ], msg);
   } catch (e) {
-    console.error('[WA Notify] Driver accepted error:', e);
+    logWAError('[WA Notify] Driver accepted error:', e);
   }
 }
 
@@ -64,9 +83,12 @@ export async function notifyCustomerPickedUp(rideId: number) {
       + `📍 Heading to: ${ride.dropoffAddress}\n\n`
       + `Enjoy your ride! 🚕`;
 
-    await sendWAText(ride.user.phone, msg);
+    await sendTemplateOrText(ride.user.phone, 'ride_picked_up', [
+      String(ride.id),
+      ride.dropoffAddress,
+    ], msg);
   } catch (e) {
-    console.error('[WA Notify] Picked up error:', e);
+    logWAError('[WA Notify] Picked up error:', e);
   }
 }
 
@@ -100,8 +122,12 @@ export async function notifyCustomerCompleted(rideId: number, invoiceId: number)
       + `🧾 *Receipt:* ${invoiceLink}\n\n`
       + `Thank you for choosing 944 Trafik! 🚕`;
 
-    await sendWAText(ride.user.phone, msg);
+    await sendTemplateOrText(ride.user.phone, 'ride_completed', [
+      String(ride.id),
+      priceDisplay,
+      invoiceLink,
+    ], msg);
   } catch (e) {
-    console.error('[WA Notify] Completed error:', e);
+    logWAError('[WA Notify] Completed error:', e);
   }
 }

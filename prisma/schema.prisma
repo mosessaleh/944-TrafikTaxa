@@ -83,6 +83,7 @@ model User {
   notifications Notification[]
   notificationSettings NotificationSettings?
   paymentMethods UserPaymentMethod[]
+  whatsappMessages WhatsAppMessage[]
 
   // Optimized indexes for common queries
   @@index([role])
@@ -217,6 +218,12 @@ model Ride {
   paymentMethod  String?
   savedPaymentMethodId Int?
   driverNote     String?
+
+  // Meter price confirmation fields
+  meterPriceDriver      Float?
+  meterPriceRider       Float?
+  meterPriceStatus      String?   // PENDING | CONFIRMED | DISPUTED
+  meterPriceConfirmedAt DateTime?
   customerRating Int?
   customerReview String?
   customerRatedAt DateTime?
@@ -249,6 +256,7 @@ model Ride {
   complaints Complaint[]
   invoices   Invoice[]
   chatMessages ChatMessage[]
+  whatsappMessages WhatsAppMessage[]
   savedPaymentMethod UserPaymentMethod? @relation(fields: [savedPaymentMethodId], references: [id])
 
   // Optimized indexes for common queries
@@ -621,5 +629,29 @@ model ChatMessage {
   ride      Ride     @relation(fields: [rideId], references: [id], onDelete: Cascade)
 
   @@index([rideId, timestamp])
+}
+
+model WhatsAppMessage {
+  id            Int       @id @default(autoincrement())
+  createdAt     DateTime  @default(now())
+  phone         String
+  direction     String                        // inbound | outbound
+  type          String                        // text | template | interactive | notification
+  content       String    @db.Text
+  status        String    @default("sent")    // sent | delivered | read | failed
+  metaMessageId String?
+  userId        Int?
+  rideId        Int?
+  errorMessage  String?
+
+  user          User?     @relation(fields: [userId], references: [id])
+  ride          Ride?     @relation(fields: [rideId], references: [id])
+
+  @@index([phone])
+  @@index([createdAt])
+  @@index([direction])
+  @@index([status])
+  @@index([userId])
+  @@index([rideId])
 }
 

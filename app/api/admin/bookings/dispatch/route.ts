@@ -4,8 +4,8 @@ import { prisma } from '@/lib/db';
 import { requirePermission } from '@/lib/auth';
 import { getSocketServer } from '@/lib/socket-server';
 import { sendPushToDriver } from '@/lib/notification-service';
-
-const WHATSAPP_API_VERSION = 'v22.0';
+import { sendWAText } from '@/lib/wa-client';
+import { logWAError } from '@/lib/wa-logger';
 
 const { connectedDrivers } = require('@/lib/connected-drivers');
 
@@ -89,6 +89,7 @@ function clearScheduledOfferState(rideId: number) {
     }
   }
 }
+
 
 export async function POST(req: NextRequest) {
   try {
@@ -335,7 +336,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Send WhatsApp notification to rider when driver is dispatched (manual mode)
-    notifyRiderWhatsApp(ride.id, driver.id).catch(err => console.error('[WA Dispatch] Error:', err));
+    notifyRiderWhatsApp(ride.id, driver.id).catch(err => logWAError('dispatch_notify_rider', err));
 
     return NextResponse.json({
       ok: true,
@@ -349,10 +350,6 @@ export async function POST(req: NextRequest) {
 
 async function notifyRiderWhatsApp(rideId: number, driverId: number) {
   try {
-    const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-    const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
-    if (!phoneId || !token) return;
-
     const ride = await prisma.ride.findUnique({
       where: { id: rideId },
       select: { id: true, pickupAddress: true, dropoffAddress: true, userId: true },
@@ -374,12 +371,8 @@ async function notifyRiderWhatsApp(rideId: number, driverId: number) {
 
     const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}\n📋 Ride #${ride.id}\n📍 ${ride.pickupAddress} → ${ride.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat. To end the chat, send "endchat".`;
 
-    await fetch(`https://graph.facebook.com/${WHATSAPP_API_VERSION}/${phoneId}/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: msg } }),
-    });
+    sendWAText(user.phone, msg).catch(() => {});
   } catch (e) {
-    console.error('[WA Dispatch]', e);
+    logWAError('dispatch_wa_notify', e);
   }
 }

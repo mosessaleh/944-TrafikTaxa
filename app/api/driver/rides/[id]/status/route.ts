@@ -115,13 +115,10 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       if (droppedOnLocation) {
         updateData.droppedOnLocation = droppedOnLocation;
       }
-      // Save meter price in driverNote and notify rider for confirmation
+      // Save meter price and notify rider for confirmation
       if (meterPrice && meterPrice > 0) {
-        const existingNote = ride.driverNote || '';
-        const baseNote = existingNote.includes('CASH')
-          ? existingNote.replace(/CASH.*/, '')
-          : existingNote;
-        updateData.driverNote = `CASH - METER RIDE - DRIVER:${meterPrice} DKK | PENDING_CONFIRMATION${baseNote ? ' | ' + baseNote : ''}`;
+        updateData.meterPriceDriver = meterPrice;
+        updateData.meterPriceStatus = 'PENDING';
       }
     }
 

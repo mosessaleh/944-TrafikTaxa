@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
-import { sendWAText } from '@/lib/wa-client';
+import { sendWAText, sendWATemplate } from '@/lib/wa-client';
+import { logWAError } from '@/lib/wa-logger';
 
 export async function GET() {
   try {
@@ -34,7 +35,13 @@ export async function GET() {
 
         const msg = `⏰ Reminder: Your ride is in 15 minutes! 🚕\n\nBooking: #${ride.id}\nTime: ${timeStr}`;
 
-        await sendWAText(user.phone, msg);
+        const templateSent = await sendWATemplate(user.phone, 'ride_reminder', 'en', [
+          String(ride.id),
+          timeStr,
+        ]);
+        if (!templateSent) {
+          await sendWAText(user.phone, msg);
+        }
 
         await (prisma as any).ride.update({
           where: { id: ride.id },
@@ -47,7 +54,7 @@ export async function GET() {
 
     return NextResponse.json({ ok: true, reminded, checked: rides.length });
   } catch (e: any) {
-    console.error('[Cron Reminders]', e);
+    logWAError('cron_reminders', e);
     return NextResponse.json({ ok: false, error: e?.message }, { status: 500 });
   }
 }

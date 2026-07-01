@@ -1,7 +1,42 @@
+import { logWAError, logWAWarning } from '@/lib/wa-logger';
+
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v22.0';
 
 let cachedPhoneId = '';
 let cachedToken = '';
+let _prisma: any = null;
+
+function getPrisma() {
+  if (!_prisma) {
+    import('@/lib/db').then(m => { _prisma = m.prisma; }).catch(() => {});
+  }
+}
+
+function logMessage(params: {
+  phone: string;
+  direction: 'inbound' | 'outbound';
+  type: 'text' | 'template' | 'interactive' | 'notification';
+  content: string;
+  status: 'sent' | 'failed';
+  userId?: number;
+  rideId?: number;
+  errorMessage?: string;
+}) {
+  getPrisma();
+  if (!_prisma) return;
+  (_prisma as any).whatsAppMessage.create({
+    data: {
+      phone: params.phone,
+      direction: params.direction,
+      type: params.type,
+      content: params.content,
+      status: params.status,
+      userId: params.userId || null,
+      rideId: params.rideId || null,
+      errorMessage: params.errorMessage || null,
+    },
+  }).catch(() => {});
+}
 
 function getWACreds() {
   if (!cachedPhoneId) {
@@ -11,35 +46,57 @@ function getWACreds() {
   return { phoneId: cachedPhoneId, token: cachedToken };
 }
 
+const RETRY_MAX = 3;
+const RETRY_DELAYS = [1000, 2000, 4000];
+
 async function waFetch(endpoint: string, body: Record<string, unknown>): Promise<boolean> {
   const { phoneId, token } = getWACreds();
   if (!phoneId || !token) return false;
 
-  try {
-    const res = await fetch(`https://graph.facebook.com/${API_VERSION}/${phoneId}/${endpoint}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      console.error(`[WA Client] ${endpoint} failed:`, res.status, await res.text().catch(() => ''));
-      return false;
+  for (let attempt = 0; attempt < RETRY_MAX; attempt++) {
+    try {
+      const res = await fetch(`https://graph.facebook.com/${API_VERSION}/${phoneId}/${endpoint}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (res.ok) return true;
+
+      if (res.status >= 400 && res.status < 500 && res.status !== 429) {
+        logWAError(`client_error_${res.status}`, new Error(await res.text().catch(() => '')), { endpoint });
+        return false;
+      }
+
+      if (attempt < RETRY_MAX - 1) {
+        logWAWarning(`retry_${res.status}`, { endpoint, attempt: attempt + 1, max: RETRY_MAX - 1 });
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+      } else {
+        logWAError('all_retries_failed', new Error(`Status ${res.status}`), { endpoint });
+      }
+    } catch (e) {
+      if (attempt < RETRY_MAX - 1) {
+        logWAWarning('network_retry', { endpoint, attempt: attempt + 1, max: RETRY_MAX - 1 });
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+      } else {
+        logWAError('network_all_retries_failed', e, { endpoint });
+      }
     }
-    return true;
-  } catch (e) {
-    console.error(`[WA Client] ${endpoint} error:`, e);
-    return false;
   }
+
+  return false;
 }
 
 export async function sendWAText(to: string, text: string): Promise<boolean> {
-  return waFetch('messages', {
+  const ok = await waFetch('messages', {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
     to,
     type: 'text',
     text: { preview_url: false, body: text },
   });
+  logMessage({ phone: to, direction: 'outbound', type: 'text', content: text, status: ok ? 'sent' : 'failed', errorMessage: ok ? undefined : 'send failed' });
+  return ok;
 }
 
 export async function sendWAButtons(
@@ -101,4 +158,30 @@ export async function sendWAList(
       },
     },
   });
+}
+
+export async function sendWATemplate(
+  to: string,
+  templateName: string,
+  languageCode: string,
+  parameters: string[],
+): Promise<boolean> {
+  const ok = await waFetch('messages', {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      components: [
+        {
+          type: 'body',
+          parameters: parameters.map(text => ({ type: 'text', text })),
+        },
+      ],
+    },
+  });
+  logMessage({ phone: to, direction: 'outbound', type: 'template', content: `[${templateName}] ${parameters.join(' | ')}`, status: ok ? 'sent' : 'failed' });
+  return ok;
 }

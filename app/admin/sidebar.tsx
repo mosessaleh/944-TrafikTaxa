@@ -24,7 +24,8 @@ import {
   FileText,
   MapPin,
   ScrollText,
-  MessageSquare
+  MessageSquare,
+  MessageCircle
 } from 'lucide-react';
 
 export default function AdminSidebar({ role }: { role: AppRole }) {
@@ -112,6 +113,7 @@ export default function AdminSidebar({ role }: { role: AppRole }) {
         <div className={`overflow-hidden transition-all duration-300 ease-in-out ${systemExpanded ? 'max-h-[40vh] opacity-100 overflow-y-auto pr-1' : 'max-h-0 opacity-0'}`}>
           <PermissionLink role={role} permission="settings.read" href={getAdminPath('/settings')} icon={<Settings size={18} />} label="Settings" />
           <PermissionLink role={role} permission="messages.read" href={getAdminPath('/messages')} icon={<MessageSquare size={18} />} label="Chat Messages" />
+          <PermissionLink role={role} permission="messages.read" href={getAdminPath('/whatsapp')} icon={<MessageCircle size={18} />} label="WhatsApp" />
           <PermissionLink role={role} permission="audit.read" href={getAdminPath('/audit')} icon={<ScrollText size={18} />} label="Audit Log" />
           <PermissionLink role={role} permission="danger.manage" href={getAdminPath('/clear-data')} icon={<Trash2 size={18} />} label="Clear Data" variant="danger" />
         </div>
