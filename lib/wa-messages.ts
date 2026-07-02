@@ -111,6 +111,11 @@ export const MSG = {
     dk: 'Ingen aktiv booking at annullere.',
     en: 'No active booking to cancel.',
   },
+  minimumFareNote: {
+    ar: (minPrice: number) => `⚠️ السعر المحسوب أقل من ${minPrice} كرون، وهو الحد الأدنى للأجرة. سيتم تطبيق الحد الأدنى ${minPrice} DKK.`,
+    dk: (minPrice: number) => `⚠️ Den beregnede pris er under ${minPrice} kr., som er minimumsprisen. Minimumsprisen på ${minPrice} DKK vil blive anvendt.`,
+    en: (minPrice: number) => `⚠️ The calculated fare is below the ${minPrice} DKK minimum. The minimum fare of ${minPrice} DKK will be applied.`,
+  },
 };
 
 export const RESET_MSG: Record<string, string> = {

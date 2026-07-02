@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { sendWAText, sendWATemplate } from '@/lib/wa-client';
 import { logWAError } from '@/lib/wa-logger';
+import { resetSession } from '@/lib/wa-sessions';
 
 async function sendTemplateOrText(
   phone: string,
@@ -127,6 +128,9 @@ export async function notifyCustomerCompleted(rideId: number, invoiceId: number)
       priceDisplay,
       invoiceLink,
     ], msg);
+
+    // Reset WhatsApp session so customer can start fresh
+    try { resetSession(ride.user.phone); } catch {}
   } catch (e) {
     logWAError('[WA Notify] Completed error:', e);
   }

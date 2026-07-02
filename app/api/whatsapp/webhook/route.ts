@@ -12,7 +12,7 @@ import { detectLanguage, MSG, RESET_MSG, HELP_MSG, isGreeting } from '@/lib/wa-m
 import { logWAError, logWAWarning } from '@/lib/wa-logger';
 import { sendEmail } from '@/lib/email';
 import { safeEstimateDistance } from '@/lib/geocode-safe';
-import { computePrice } from '@/lib/price';
+import { computePrice, computePriceWithDetails } from '@/lib/price';
 import { trackRegistrationCompleted, trackBookingCreated, trackBookingFailed } from '@/lib/wa-analytics';
 
 function verifyWhatsAppSignature(body: string, signatureHeader: string): boolean {
@@ -399,189 +399,108 @@ async function handleEditAddressInput(phone: string, msg: string) {
         : `\n\n💰 New estimated price: ${estimate.price} DKK (distance: ~${Math.round(estimate.distance * 10) / 10} km)\n(Previous price: ${ride.price} DKK)`;
     replyText += priceLine;
     s.collected['_estimatedPrice'] = String(estimate.price);
+  } else {
+    replyText += lang === 'ar'
+      ? '\n\n⚠️ تعذر حساب السعر التقديري.'
+      : lang === 'dk'
+        ? '\n\n⚠️ Kunne ikke beregne estimeret pris.'
+        : '\n\n⚠️ Could not calculate estimated price.';
   }
 
+  // Send edit confirmation buttons
   const confirmButtons: { id: string; title: string }[] = lang === 'ar'
-    ? [{ id: 'confirm', title: '✅ تأكيد' }, { id: 'discard', title: '❌ إلغاء' }]
+    ? [{ id: 'confirm', title: '✅ تأكيد التعديل' }, { id: 'discard', title: '❌ إلغاء' }]
     : lang === 'dk'
-      ? [{ id: 'confirm', title: '✅ Bekræft' }, { id: 'discard', title: '❌ Annuller' }]
-      : [{ id: 'confirm', title: '✅ Confirm' }, { id: 'discard', title: '❌ Discard' }];
-
+      ? [{ id: 'confirm', title: '✅ Bekræft ændring' }, { id: 'discard', title: '❌ Annuller' }]
+      : [{ id: 'confirm', title: '✅ Confirm change' }, { id: 'discard', title: '❌ Discard' }];
   await sendWAButtons(phone, replyText, confirmButtons);
   return true;
 }
 
 async function handleEditRideConfirm(phone: string) {
   const s = getUserSession(phone);
-  if (!s || !s.collected['_editRideId'] || !s.collected['_editNewAddress'] || !s.collected['_editNewField']) return;
+  if (!s || !s.collected['_editRideId']) return;
   const lang = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
   const rideId = parseInt(s.collected['_editRideId']);
-  const field = s.collected['_editNewField'];
   const newAddress = s.collected['_editNewAddress'];
-
-  // Re-resolve address for coordinates
-  const resolved = await resolveAddress(newAddress, s.userId, '');
-  if (!resolved) {
-    await sendWA(phone, lang === 'ar' ? '❌ فشل تعديل العنوان.' : lang === 'dk' ? '❌ Kunne ikke opdatere adressen.' : '❌ Failed to update address.');
-    return;
-  }
+  const field = s.collected['_editNewField'];
+  const estimatedPrice = s.collected['_estimatedPrice'];
 
   const updateData: any = {};
-  if (field === 'pickup') {
-    updateData.pickupAddress = resolved.address;
-    updateData.startLatLon = { lat: resolved.lat, lon: resolved.lon };
-  } else if (field === 'dropoff') {
-    updateData.dropoffAddress = resolved.address;
-    updateData.endLatLon = { lat: resolved.lat, lon: resolved.lon };
-  } else if (field === 'stop') {
-    updateData.stopAddress = resolved.address;
-    updateData.stopLatLon = { lat: resolved.lat, lon: resolved.lon };
-  }
+  if (field === 'pickup') updateData.pickupAddress = newAddress;
+  else if (field === 'dropoff') updateData.dropoffAddress = newAddress;
+  else if (field === 'stop') updateData.stopAddress = newAddress;
+  if (estimatedPrice) updateData.price = Number(estimatedPrice);
 
-  // Recalculate price
   try {
-    const updatedRide = await (prisma as any).ride.findUnique({ where: { id: rideId }, select: { pickupAddress: true, dropoffAddress: true, stopAddress: true, vehicleTypeId: true, pickupTime: true, startLatLon: true, endLatLon: true, scheduled: true } });
-    const merged = { ...updatedRide, ...updateData };
-    const tempSession: BotSession = {
-      ...s,
-      collected: {
-        pickupAddress: merged.pickupAddress,
-        dropoffAddress: merged.dropoffAddress,
-        stopAddress: merged.stopAddress || '',
-        vehicleTypeId: merged.vehicleTypeId,
-      },
-    };
-    const estimate = await computePriceEstimate(tempSession);
-
-    await (prisma as any).ride.update({
-      where: { id: rideId },
-      data: { ...updateData, price: estimate?.price || updatedRide.price }
-    });
-
-    delete s.collected['_editRideId']; delete s.collected['_editNewAddress'];
-    delete s.collected['_editNewField']; delete s.collected['_editOriginalPickup'];
-    delete s.collected['_editOriginalDropoff']; delete s.collected['_editOriginalStop'];
-    delete s.collected['_awaitingConfirm']; delete s.collected['_estimatedPrice'];
-    s.stage = 'booking'; s.chatHistory = [];
-    touchSession(s);
-
-    const successMsg = lang === 'ar'
-      ? `✅ تم تعديل العنوان بنجاح!\n\nالسعر الجديد: ${estimate?.price || 'N/A'} DKK`
-      : lang === 'dk'
-        ? `✅ Adresse opdateret!\n\nNy pris: ${estimate?.price || 'N/A'} DKK`
-        : `✅ Address updated successfully!\n\nNew price: ${estimate?.price || 'N/A'} DKK`;
+    await (prisma as any).ride.update({ where: { id: rideId }, data: updateData });
+    const successMsg = lang === 'ar' ? '✅ تم تعديل العنوان بنجاح.' : lang === 'dk' ? '✅ Adressen er opdateret.' : '✅ Address updated successfully.';
     await sendWA(phone, successMsg);
   } catch (e) {
-    await sendWA(phone, lang === 'ar' ? '❌ فشل تعديل العنوان.' : lang === 'dk' ? '❌ Kunne ikke opdatere adressen.' : '❌ Failed to update address.');
-    logWAError('edit_ride_failed', e);
+    logWAError('edit_ride_confirm_failed', e);
+    const errMsg = lang === 'ar' ? '❌ فشل تعديل العنوان.' : lang === 'dk' ? '❌ Kunne ikke opdatere adressen.' : '❌ Failed to update address.';
+    await sendWA(phone, errMsg);
   }
+
+  delete s.collected['_editRideId']; delete s.collected['_editNewAddress'];
+  delete s.collected['_editNewField']; delete s.collected['_editOriginalPickup'];
+  delete s.collected['_editOriginalDropoff']; delete s.collected['_editOriginalStop'];
+  delete s.collected['_estimatedPrice'];
+  s.stage = 'booking';
+  touchSession(s);
 }
 
 async function handleRebook(phone: string, rideId: number) {
-  // Find user by phone
-  const user = await findUserByPhone(phone);
-  if (!user) {
-    await sendWA(phone, 'You are not registered. Send /reset to start registration.');
-    return;
-  }
-  if (!user.emailVerified) {
-    await sendWA(phone, 'Please verify your email first. Send /reset to restart.');
-    return;
-  }
-
-  // Get or create session for language detection
-  let s = getUserSession(phone);
-  const lang = (s?.collected?.['_language'] as 'ar' | 'dk' | 'en') || detectLanguage('');
-  if (!s) {
-    s = createSession(phone, { stage: 'menu', userId: user.id, userExists: true, firstName: user.firstName, collected: { _language: lang } });
-    touchSession(s);
-  }
-
-  // Fetch the ride
   const ride = await (prisma as any).ride.findUnique({
     where: { id: rideId },
-    select: {
-      id: true, userId: true, pickupAddress: true, dropoffAddress: true, stopAddress: true,
-      startLatLon: true, endLatLon: true,
-      vehicleTypeId: true, paymentMethod: true,
-      status: true, price: true, distanceKm: true, passengers: true,
+    select: { pickupAddress: true, dropoffAddress: true, stopAddress: true, vehicleTypeId: true, paymentMethod: true, userId: true },
+  });
+  if (!ride) {
+    await sendWA(phone, 'Ride not found. Send /reset to start over.');
+    return;
+  }
+
+  const existing = getUserSession(phone);
+  const lang = (existing?.collected?.['_language'] as 'ar' | 'dk' | 'en') || 'en';
+
+  const s = createSession(phone, {
+    stage: 'booking',
+    userId: ride.userId,
+    userExists: true,
+    collected: {
+      _language: lang,
+      pickupAddress: ride.pickupAddress,
+      dropoffAddress: ride.dropoffAddress,
+      stopAddress: ride.stopAddress || 'none',
+      vehicleTypeId: String(ride.vehicleTypeId || 1),
     },
   });
-
-  if (!ride) {
-    const msg2 = lang === 'ar' ? '❌ الحجز غير موجود.' : lang === 'dk' ? '❌ Bookingen findes ikke.' : '❌ Booking not found.';
-    await sendWA(phone, msg2);
-    return;
-  }
-
-  // Check ownership
-  if (ride.userId !== user.id) {
-    const msg2 = lang === 'ar' ? '❌ هذا الحجز ليس لك.' : lang === 'dk' ? '❌ Denne booking er ikke din.' : '❌ This is not your booking.';
-    await sendWA(phone, msg2);
-    return;
-  }
-
-  // Check status - must be COMPLETED or CANCELLED (case-insensitive)
-  const allowedStatuses = ['completed', 'cancelled', 'paid', 'canceled'];
-  const rideStatus = (ride.status || '').toLowerCase();
-  if (!allowedStatuses.includes(rideStatus)) {
-    const msg2 = lang === 'ar'
-      ? `❌ الحجز رقم ${rideId} ما زال نشطاً (${ride.status}). لا يمكن إعادة حجزه.`
-      : lang === 'dk'
-        ? `❌ Booking #${rideId} er stadig aktiv (${ride.status}). Kan ikke genoprettes.`
-        : `❌ Booking #${rideId} is still active (${ride.status}). Cannot rebook it.`;
-    await sendWA(phone, msg2);
-    return;
-  }
-
-  // Copy ride details to session
-  s.collected.pickupAddress = ride.pickupAddress;
-  s.collected.dropoffAddress = ride.dropoffAddress;
-  if (ride.stopAddress) s.collected.stopAddress = ride.stopAddress;
-  s.collected.vehicleTypeId = String(ride.vehicleTypeId || 1);
-  s.collected.paymentPreference = ride.paymentMethod === 'card' ? 'fixed' : 'meter';
-  s.collected.pickupTime = 'now';
-  delete s.collected.pickupTimeISO;
-  delete s.collected['_awaitingConfirm'];
-  s.collected['_awaitingConfirm'] = 'true';
-  s.stage = 'payment';
   touchSession(s);
 
-  const stopLine = ride.stopAddress ? (lang === 'ar' ? `\n🛑 محطة: ${ride.stopAddress}` : lang === 'dk' ? `\n🛑 Stop: ${ride.stopAddress}` : `\n🛑 Stop: ${ride.stopAddress}`) : '';
-
-  // Show summary with updated price
   const estimate = await computePriceEstimate(s);
-  let replyText = lang === 'ar'
-    ? `🔄 إعادة حجز الرحلة ${rideId}\n\n📍 من: ${ride.pickupAddress}${stopLine}\n📍 إلى: ${ride.dropoffAddress}`
-    : lang === 'dk'
-      ? `🔄 Genopretter booking ${rideId}\n\n📍 Fra: ${ride.pickupAddress}${stopLine}\n📍 Til: ${ride.dropoffAddress}`
-      : `🔄 Rebooking ride #${rideId}\n\n📍 From: ${ride.pickupAddress}${stopLine}\n📍 To: ${ride.dropoffAddress}`;
-
   if (estimate) {
-    const priceLine = lang === 'ar'
-      ? `\n\n🚕 ${estimate.vtName}\n💰 السعر التقديري: ${estimate.price} DKK (المسافة: ~${Math.round(estimate.distance * 10) / 10} كم)`
-      : lang === 'dk'
-        ? `\n\n🚕 ${estimate.vtName}\n💰 Estimeret pris: ${estimate.price} DKK (afstand: ~${Math.round(estimate.distance * 10) / 10} km)`
-        : `\n\n🚕 ${estimate.vtName}\n💰 Estimated price: ${estimate.price} DKK (distance: ~${Math.round(estimate.distance * 10) / 10} km)`;
-    replyText += priceLine;
-    replyText += lang === 'ar'
-      ? `\n(السعر السابق: ${ride.price} DKK)`
-      : lang === 'dk'
-        ? `\n(Tidligere pris: ${ride.price} DKK)`
-        : `\n(Previous price: ${ride.price} DKK)`;
     s.collected['_estimatedPrice'] = String(estimate.price);
+    s.collected['_awaitingConfirm'] = 'true';
+    touchSession(s);
+
+    const summaryText = lang === 'ar'
+      ? `📋 إعادة حجز الرحلة #${rideId}\n\n📍 من: ${ride.pickupAddress}\n📍 إلى: ${ride.dropoffAddress}\n🚕 ${estimate.vtName}\n💰 السعر التقديري: ${estimate.price} DKK`
+      : lang === 'dk'
+        ? `📋 Genbestil tur #${rideId}\n\n📍 Fra: ${ride.pickupAddress}\n📍 Til: ${ride.dropoffAddress}\n🚕 ${estimate.vtName}\n💰 Estimeret pris: ${estimate.price} DKK`
+        : `📋 Rebook ride #${rideId}\n\n📍 From: ${ride.pickupAddress}\n📍 To: ${ride.dropoffAddress}\n🚕 ${estimate.vtName}\n💰 Estimated price: ${estimate.price} DKK`;
+
+    const buttons = lang === 'ar'
+      ? [{ id: 'confirm', title: '✅ تأكيد الحجز' }, { id: 'discard', title: '❌ إلغاء' }]
+      : lang === 'dk'
+        ? [{ id: 'confirm', title: '✅ Bekræft' }, { id: 'discard', title: '❌ Annuller' }]
+        : [{ id: 'confirm', title: '✅ Confirm' }, { id: 'discard', title: '❌ Discard' }];
+    await sendWAButtons(phone, summaryText, buttons);
+  } else {
+    await sendWA(phone, lang === 'ar' ? '❌ تعذر حساب السعر. حاول مرة أخرى.' : lang === 'dk' ? '❌ Kunne ikke beregne pris. Prøv igen.' : '❌ Could not calculate price. Try again.');
   }
-
-  const summaryButtons: { id: string; title: string }[] = lang === 'ar'
-    ? [{ id: 'confirm', title: '✅ تأكيد الحجز' }, { id: 'discard', title: '❌ إلغاء' }]
-    : lang === 'dk'
-      ? [{ id: 'confirm', title: '✅ Bekræft' }, { id: 'discard', title: '❌ Annuller' }]
-      : [{ id: 'confirm', title: '✅ Confirm' }, { id: 'discard', title: '❌ Discard' }];
-
-  await sendWAButtons(phone, replyText, summaryButtons);
 }
 
-async function computePriceEstimate(s: BotSession): Promise<{ price: number; distance: number; vtName: string } | null> {
+async function computePriceEstimate(s: BotSession): Promise<{ price: number; distance: number; vtName: string; minimumApplied: boolean; originalPrice: number } | null> {
   const rawPickup = s.collected.pickupAddress || '';
   const rawDropoff = s.collected.dropoffAddress || '';
   console.log('[WA estimate] pickup:', rawPickup, 'dropoff:', rawDropoff);
@@ -589,33 +508,36 @@ async function computePriceEstimate(s: BotSession): Promise<{ price: number; dis
 
   const uid = s.userId!;
 
-  let pickupResolved: ResolvedAddress | null = await resolveAddress(rawPickup, uid);
-  let dropoffResolved: ResolvedAddress | null = await resolveAddress(rawDropoff, uid);
+  let pickupResolved: ResolvedAddress | null = await resolveAddress(rawPickup, uid, '');
+  let dropoffResolved: ResolvedAddress | null = await resolveAddress(rawDropoff, uid, '');
   let stopResolved: ResolvedAddress | null = null;
   const rawStop = s.collected.stopAddress;
   if (rawStop && rawStop !== 'none' && rawStop !== 'لا' && rawStop !== 'no') {
-    stopResolved = await resolveAddress(rawStop, uid);
+    stopResolved = await resolveAddress(rawStop, uid, '');
   }
 
-  // Calculate distance — with stop if present (pickup → stop → dropoff)
   let dist = 0, dur = 0;
   try {
+    if (!pickupResolved || !dropoffResolved) {
+      console.log('[WA estimate] address resolution failed');
+      return null;
+    }
 
     if (stopResolved) {
       const leg1 = await safeEstimateDistance(
-        { address: pickupResolved.address, lat: pickupResolved.lat, lon: pickupResolved.lon },
+        { address: pickupResolved!.address, lat: pickupResolved!.lat, lon: pickupResolved!.lon },
         { address: stopResolved.address, lat: stopResolved.lat, lon: stopResolved.lon }
       );
       const leg2 = await safeEstimateDistance(
         { address: stopResolved.address, lat: stopResolved.lat, lon: stopResolved.lon },
-        { address: dropoffResolved.address, lat: dropoffResolved.lat, lon: dropoffResolved.lon }
+        { address: dropoffResolved!.address, lat: dropoffResolved!.lat, lon: dropoffResolved!.lon }
       );
       dist = leg1.distanceKm + leg2.distanceKm;
       dur = leg1.durationMin + leg2.durationMin;
     } else {
       const r = await safeEstimateDistance(
-        { address: pickupResolved.address, lat: pickupResolved.lat, lon: pickupResolved.lon },
-        { address: dropoffResolved.address, lat: dropoffResolved.lat, lon: dropoffResolved.lon }
+        { address: pickupResolved!.address, lat: pickupResolved!.lat, lon: pickupResolved!.lon },
+        { address: dropoffResolved!.address, lat: dropoffResolved!.lat, lon: dropoffResolved!.lon }
       );
       dist = r.distanceKm;
       dur = r.durationMin;
@@ -626,10 +548,27 @@ async function computePriceEstimate(s: BotSession): Promise<{ price: number; dis
   if (dist < 0.1) { console.log('[WA estimate] distance too short (<0.1km), returning null'); return null; }
 
   const pTime = new Date();
-  const price = await computePrice(dist, dur, pTime, vid, { isScheduled: false });
-  console.log('[WA estimate] price:', price, 'DKK, vehicle:', vtName, 'id:', vid);
+  let vtName = 'Standard';
+  let vid: number | undefined;
+  if (s.collected.vehicleTypePreference) {
+    const result = await resolveVehicleType(s.collected.vehicleTypePreference);
+    if (result.vt) {
+      vid = result.vt.id;
+      vtName = result.vt.title;
+      s.collected.vehicleTypeId = String(vid);
+    }
+  }
+  if (!vid) {
+    const defaultVt = await (prisma as any).vehicleType.findFirst({ where: { active: true }, orderBy: { id: 'asc' }, select: { id: true, title: true } });
+    if (defaultVt) { vid = defaultVt.id; vtName = defaultVt.title; }
+  }
+  const priceDetails = await computePriceWithDetails(dist, dur, pTime, vid, { isScheduled: false });
+  const price = priceDetails.finalPrice;
+  const minimumApplied = priceDetails.finalPrice > priceDetails.originalPrice;
+  const originalPrice = priceDetails.originalPrice;
+  console.log('[WA estimate] price:', price, 'DKK, vehicle:', vtName, 'id:', vid, 'minApplied:', minimumApplied, 'original:', originalPrice);
 
-  return { price, distance: dist, vtName };
+  return { price, distance: dist, vtName, minimumApplied, originalPrice };
 }
 
 async function handleConfirmBooking(s: BotSession, phone: string, lang: 'ar' | 'dk' | 'en') {
@@ -1047,7 +986,13 @@ async function doCreateBooking(
 
 async function processInBackground(phone: string, text: string, contactName: string) {
   try { await handleMessage(phone, text, contactName); }
-  catch (e) { logWAError('background_process_failed', e); }
+  catch (e) {
+    logWAError('background_process_failed', e);
+    // Notify user about the error instead of silent failure
+    try {
+      await sendWA(phone, '⚠️ An unexpected error occurred. Please send /reset to start over.');
+    } catch {}
+  }
 }
 
 // ========================
@@ -1131,41 +1076,6 @@ async function handleMessage(phone: string, text: string, contactName: string) {
     if (existing?.collected?.['_meterDisputeRideId']) {
       const handled = await handleMeterDisputeInput(phone, msg);
       if (handled) return;
-    }
-  }
-
-  // Forward to driver if rider has an active dispatched/ongoing ride that hasn't been picked up yet
-  if (msg.length > 0 && !msg.startsWith('/')
-      && cancelLower !== 'cancel' && cancelLower !== 'confirm'
-      && cancelLower !== 'discard' && cancelLower !== 'resend'
-      && cancelLower !== 'endchat' && cancelLower !== 'إنهاء' && cancelLower !== 'انهاء' && cancelLower !== 'slut') {
-
-    const user = await findUserByPhone(phone);
-    if (user) {
-      const activeRide = await (prisma as any).ride.findFirst({
-        where: {
-          userId: user.id,
-          status: { in: ['DISPATCHED', 'ONGOING'] },
-          driverId: { not: null },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true, status: true },
-      });
-
-      if (activeRide) {
-        const io = (global as any).io;
-        if (io) {
-          io.to(`chat_${activeRide.id}`).emit('newMessage', {
-            bookingId: activeRide.id, message: msg, sender: user.firstName || 'Customer', timestamp: new Date().toISOString()
-          });
-          try {
-            await (prisma as any).chatMessage.create({
-              data: { rideId: activeRide.id, sender: 'rider', message: msg, source: 'whatsapp' }
-            });
-          } catch {}
-        }
-        return;
-      }
     }
   }
 
@@ -1438,6 +1348,142 @@ async function handleMessage(phone: string, text: string, contactName: string) {
     return;
   }
 
+  // ---- Payment button handling (from WhatsApp interactive buttons) ----
+  if ((cancelLower === 'meter' || cancelLower === 'fixed') && s.stage === 'payment') {
+    s.collected.paymentPreference = cancelLower;
+    // Remove awaiting confirm if present (from clicking a payment button while at summary)
+    delete s.collected['_awaitingConfirm'];
+    touchSession(s);
+
+    // Check if all required fields are collected → show summary directly
+    if (s.collected.pickupAddress && s.collected.dropoffAddress && s.collected.pickupTime && s.collected.vehicleTypePreference && s.collected.paymentPreference) {
+      s.collected['_awaitingConfirm'] = 'true';
+      touchSession(s);
+      const estimate = await computePriceEstimate(s);
+      let replyText = s.chatHistory.length > 0 ? '' : '📋 ';
+      if (estimate) {
+        const plang = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
+        const priceLine = plang === 'ar'
+          ? `🚕 ${estimate.vtName}\n💰 السعر التقديري: ${estimate.price} DKK (المسافة: ~${Math.round(estimate.distance * 10) / 10} كم)`
+          : plang === 'dk'
+            ? `🚕 ${estimate.vtName}\n💰 Estimeret pris: ${estimate.price} DKK (afstand: ~${Math.round(estimate.distance * 10) / 10} km)`
+            : `🚕 ${estimate.vtName}\n💰 Estimated price: ${estimate.price} DKK (distance: ~${Math.round(estimate.distance * 10) / 10} km)`;
+        replyText += priceLine;
+        s.collected['_estimatedPrice'] = String(estimate.price);
+        if (estimate.minimumApplied) {
+          replyText += '\n' + MSG.minimumFareNote[plang](estimate.price);
+        }
+      } else {
+        const plang = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
+        replyText += plang === 'ar' ? '\n\n⚠️ تعذر حساب السعر التقديري.' : plang === 'dk' ? '\n\n⚠️ Kunne ikke beregne estimeret pris.' : '\n\n⚠️ Could not calculate estimated price.';
+      }
+      const sumLang = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
+      const summaryButtons: { id: string; title: string }[] = sumLang === 'ar'
+        ? [{ id: 'confirm', title: '✅ تأكيد الحجز' }, { id: 'discard', title: '❌ إلغاء' }]
+        : sumLang === 'dk'
+          ? [{ id: 'confirm', title: '✅ Bekræft' }, { id: 'discard', title: '❌ Annuller' }]
+          : [{ id: 'confirm', title: '✅ Confirm' }, { id: 'discard', title: '❌ Discard' }];
+      await sendWAButtons(phone, replyText, summaryButtons);
+    } else {
+      // Need more info - let AI handle it
+      let aiFallback: AIResponse;
+      try {
+        aiFallback = await processMessage({
+          userMessage: msg, userExists: s.userExists, stage: 'booking',
+          collected: s.collected, chatHistory: s.chatHistory,
+        });
+      } catch {
+        await sendWA(phone, 'Sorry, an error occurred. Send /reset to start over.');
+        return;
+      }
+      if (aiFallback.collected) {
+        for (const [k, v] of Object.entries(aiFallback.collected)) {
+          if (v) s.collected[k] = String(v);
+        }
+      }
+      s.chatHistory.push({ role: 'user', content: msg }, { role: 'assistant', content: aiFallback.reply });
+      if (s.chatHistory.length > 20) s.chatHistory = s.chatHistory.slice(-20);
+      const newLang = aiFallback.language || 'en';
+      s.collected['_language'] = newLang;
+      if (aiFallback.action === 'show_summary') {
+        s.stage = 'payment';
+        s.collected['_awaitingConfirm'] = 'true';
+        touchSession(s);
+        const est = await computePriceEstimate(s);
+        let rText = aiFallback.reply;
+        if (est) {
+          const pl = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
+          rText += pl === 'ar'
+            ? `\n\n🚕 ${est.vtName}\n💰 السعر التقديري: ${est.price} DKK (~${Math.round(est.distance * 10) / 10} كم)`
+            : pl === 'dk'
+              ? `\n\n🚕 ${est.vtName}\n💰 Estimeret pris: ${est.price} DKK (~${Math.round(est.distance * 10) / 10} km)`
+              : `\n\n🚕 ${est.vtName}\n💰 Estimated price: ${est.price} DKK (~${Math.round(est.distance * 10) / 10} km)`;
+          s.collected['_estimatedPrice'] = String(est.price);
+          if (est.minimumApplied) {
+            rText += '\n' + MSG.minimumFareNote[pl](est.price);
+          }
+        }
+        const sl = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
+        const sBtns = sl === 'ar'
+          ? [{ id: 'confirm', title: '✅ تأكيد الحجز' }, { id: 'discard', title: '❌ إلغاء' }]
+          : sl === 'dk'
+            ? [{ id: 'confirm', title: '✅ Bekræft' }, { id: 'discard', title: '❌ Annuller' }]
+            : [{ id: 'confirm', title: '✅ Confirm' }, { id: 'discard', title: '❌ Discard' }];
+        await sendWAButtons(phone, rText, sBtns);
+      } else {
+        await sendWA(phone, aiFallback.reply);
+        touchSession(s);
+      }
+    }
+    return;
+  }
+
+  // ---- Chat forwarding: only forward to driver if user has active ride AND is NOT in booking flow ----
+  {
+    const inBookingFlow = s.collected['_awaitingConfirm'] === 'true'
+      || (s.collected.pickupAddress && s.collected.dropoffAddress)
+      || s.stage === 'payment'
+      || s.stage === 'booking';
+
+    if (!inBookingFlow && msg.length > 0 && !msg.startsWith('/')
+        && cancelLower !== 'cancel' && cancelLower !== 'confirm'
+        && cancelLower !== 'discard' && cancelLower !== 'resend'
+        && cancelLower !== 'endchat' && cancelLower !== 'إنهاء' && cancelLower !== 'انهاء' && cancelLower !== 'slut'
+        && cancelLower !== 'meter' && cancelLower !== 'fixed') {
+
+      const chatUser = s.userExists ? (await findUserByPhone(phone)) : null;
+      if (chatUser) {
+        const activeRide = await (prisma as any).ride.findFirst({
+          where: {
+            userId: chatUser.id,
+            status: { in: ['DISPATCHED', 'ONGOING'] },
+            driverId: { not: null },
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, status: true },
+        });
+
+        if (activeRide) {
+          const io = (global as any).io;
+          if (io && chatUser.id) {
+            io.to(`user:${chatUser.id}`).emit('riderMessage', {
+              rideId: activeRide.id,
+              message: msg,
+              sender: 'rider',
+              timestamp: new Date().toISOString(),
+            });
+            try {
+              await (prisma as any).chatMessage.create({
+                data: { rideId: activeRide.id, sender: 'rider', message: msg, source: 'whatsapp' }
+              });
+            } catch {}
+          }
+          return;
+        }
+      }
+    }
+  }
+
   // ---- AI Processing ----
   let ai: AIResponse;
   try {
@@ -1578,6 +1624,9 @@ async function handleMessage(phone: string, text: string, contactName: string) {
             : `\n\n🚕 ${estimate.vtName}\n💰 Estimated price: ${estimate.price} DKK (distance: ~${Math.round(estimate.distance * 10) / 10} km)`;
         replyText += priceLine;
         s.collected['_estimatedPrice'] = String(estimate.price);
+        if (estimate.minimumApplied) {
+          replyText += '\n' + MSG.minimumFareNote[detectedLang](estimate.price);
+        }
       } else {
         replyText += detectedLang === 'ar'
           ? '\n\n⚠️ تعذر حساب السعر التقديري.'
