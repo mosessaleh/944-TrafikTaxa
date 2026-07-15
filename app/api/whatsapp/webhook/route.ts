@@ -12,6 +12,7 @@ import { detectLanguage, MSG, RESET_MSG, HELP_MSG, isGreeting } from '@/lib/wa-m
 import { logWAError, logWAWarning } from '@/lib/wa-logger';
 import { sendEmail } from '@/lib/email';
 import { safeEstimateDistance } from '@/lib/geocode-safe';
+import { handleRatingClick, handleRatingComplaintInput, handleComplaintConfirm, sendRatingButtons } from '@/lib/wa-rating';
 import { computePrice, computePriceWithDetails } from '@/lib/price';
 import { trackRegistrationCompleted, trackBookingCreated, trackBookingFailed } from '@/lib/wa-analytics';
 
@@ -215,6 +216,7 @@ async function handleMeterConfirmation(phone: string, rideId: number, isYes: boo
       },
     });
     await sendWA(phone, `✅ Price confirmed: ${driverPrice} DKK. Thank you for your honesty!`);
+    sendRatingButtons(phone, rideId).catch(() => {});
   } else {
     const s = getUserSession(phone) || createSession(phone, { stage: 'booking', userId: user.id, userExists: true, firstName: user.firstName || '' });
     s.collected['_meterDisputeRideId'] = String(rideId);
@@ -271,6 +273,7 @@ async function handleMeterDisputeInput(phone: string, msg: string) {
   touchSession(s);
 
   await sendWA(phone, `Noted. The price has been recorded as ${entered} DKK. Our team will investigate and contact you if needed. Thank you.`);
+  sendRatingButtons(phone, rideId).catch(() => {});
   return true;
 }
 
@@ -1075,6 +1078,37 @@ async function handleMessage(phone: string, text: string, contactName: string) {
     const existing = getUserSession(phone);
     if (existing?.collected?.['_meterDisputeRideId']) {
       const handled = await handleMeterDisputeInput(phone, msg);
+      if (handled) return;
+    }
+  }
+
+  // ---- Rating: star button clicks ----
+  {
+    const rateMatch = msg.match(/^rate_([1-5])_(\d+)$/);
+    if (rateMatch) {
+      const starRating = parseInt(rateMatch[1]);
+      const rateRideId = parseInt(rateMatch[2]);
+      await handleRatingClick(phone, rateRideId, starRating);
+      return;
+    }
+  }
+
+  // ---- Rating: complaint confirmation buttons ----
+  {
+    const complaintYesMatch = msg.match(/^complaint_yes_(\d+)$/);
+    const complaintNoMatch = msg.match(/^complaint_no_(\d+)$/);
+    if (complaintYesMatch || complaintNoMatch) {
+      const complaintRideId = parseInt(complaintYesMatch ? complaintYesMatch[1] : complaintNoMatch![1]);
+      await handleComplaintConfirm(phone, complaintRideId, !!complaintYesMatch);
+      return;
+    }
+  }
+
+  // ---- Rating: rider entering complaint description ----
+  {
+    const existing = getUserSession(phone);
+    if (existing?.collected?.['_ratingAwaitingComplaint']) {
+      const handled = await handleRatingComplaintInput(phone, msg);
       if (handled) return;
     }
   }

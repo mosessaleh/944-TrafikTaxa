@@ -4552,7 +4552,9 @@ app.prepare().then(() => {
             currentRideId: null,
             bannedUntil,
             rideAccepted: 0,
-            isBusy: false
+            isBusy: false,
+            rejectedRides: { increment: 1 },
+            acceptedStreak: 0
           }
         });
         invalidateDriverScheduleCache(driverId);

@@ -55,6 +55,43 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ ok: false, error: 'Access denied' }, { status: 403 });
     }
 
+    // Allow canceling CONFIRMED scheduled rides (driver releasing before dispatch)
+    if (ride.status === 'CONFIRMED' && ride.scheduled) {
+      await prisma.$transaction(async (tx) => {
+        await tx.ride.update({
+          where: { id: rideId },
+          data: {
+            driverId: null,
+            car: null,
+            driverQueue: []
+          }
+        });
+        await tx.comDriver.update({
+          where: { id: driver.id },
+          data: {
+            currentRideId: null
+          }
+        });
+      });
+
+      const io = getSocketServer();
+      if (io) {
+        io.to(`driver_${driver.id}`).emit('driverStatusUpdate', {
+          currentRideId: null,
+          isBusy: false,
+          isOnline: true
+        });
+      }
+
+      return NextResponse.json({
+        ok: true,
+        data: {
+          message: 'Scheduled ride released successfully',
+          cost: 0
+        }
+      });
+    }
+
     // Check if ride is in correct status (DISPATCHED or ONGOING)
     if (ride.status !== 'DISPATCHED' && ride.status !== 'ONGOING') {
       return NextResponse.json({ ok: false, error: 'Ride cannot be canceled' }, { status: 400 });

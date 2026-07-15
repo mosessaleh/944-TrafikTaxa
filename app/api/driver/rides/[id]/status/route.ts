@@ -7,6 +7,7 @@ import { notifyUserInvoiceReady } from '@/lib/notify';
 import { getAuthSecret } from '@/lib/auth';
 import { notifyCustomerPickedUp, notifyCustomerCompleted } from '@/lib/whatsapp-notify';
 import { sendWAButtons } from '@/lib/wa-client';
+import { sendRatingButtons } from '@/lib/wa-rating';
 
 const JWT_SECRET = getAuthSecret();
 
@@ -110,6 +111,26 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
           });
         }
       } catch {}
+      // Increment acceptance counters when driver picks up
+      try {
+        const driverRecord = await (prisma as any).comDriver.findUnique({
+          where: { id: driver.id },
+          select: { acceptedRides: true, rejectedRides: true, acceptedStreak: true },
+        });
+        const newStreak = (driverRecord?.acceptedStreak || 0) + 1;
+        const updateDriverData: any = {
+          acceptedRides: { increment: 1 },
+          acceptedStreak: newStreak,
+        };
+        if (newStreak >= 10 && (driverRecord?.rejectedRides || 0) > 0) {
+          updateDriverData.rejectedRides = { decrement: 1 };
+          updateDriverData.acceptedStreak = 0;
+        }
+        await (prisma as any).comDriver.update({
+          where: { id: driver.id },
+          data: updateDriverData,
+        });
+      } catch (e) { console.error('[Accept Counter] Error:', e); }
     } else if (status === 'COMPLETED' && droppedAt) {
       updateData.droppedAt = new Date(droppedAt);
       if (droppedOnLocation) {
@@ -273,6 +294,18 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
             );
           }
         } catch (waErr) { /* ignore */ }
+        // Send rating buttons for non-meter rides
+        try {
+          const rider = await prisma.user.findUnique({
+            where: { id: ride.userId },
+            select: { phone: true },
+          });
+          if (rider?.phone) {
+            setTimeout(() => {
+              sendRatingButtons(rider.phone, rideId).catch(() => {});
+            }, 2000);
+          }
+        } catch (e) { console.error('[Rating] Send error:', e); }
       }
     }
 

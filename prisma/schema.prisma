@@ -538,6 +538,7 @@ model comDriver {
   licenceNr      String
   drCard         String
   rating         Decimal     @default(5.00) @db.Decimal(3, 2)
+  fiveStarCount  Int         @default(0)
   isOnline       Boolean     @default(false)
   isActive       Boolean     @default(true)
   isBusy         Boolean     @default(false)
@@ -546,6 +547,9 @@ model comDriver {
   car            String?     // Car ID or license plate
   currentRideId  Int?
   rideAccepted   Int         @default(0) // Number of rides accepted by this driver
+  acceptedRides  Int         @default(0) // Cumulative total accepted rides (never resets)
+  rejectedRides  Int         @default(0) // Cumulative total rejected rides (never resets)
+  acceptedStreak Int         @default(0) // Current consecutive accepted rides
   drUsername     String      @unique
   drPass         String      // Will store hashed password
   resetToken     String?     // Password reset token

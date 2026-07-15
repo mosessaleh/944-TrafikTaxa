@@ -44,9 +44,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const { searchParams } = new URL(request.url);
-    const period = searchParams.get('period') || 'month'; // day, week, month
+    const period = searchParams.get('period') || 'month';
 
-    // Calculate date range
     const now = new Date();
     let startDate: Date;
 
@@ -66,49 +65,53 @@ export async function GET(request: NextRequest) {
         break;
     }
 
-    // Get completed rides for the driver in the period
-    const rides = await prisma.ride.findMany({
-      where: {
-        driverId: driverId,
-        status: 'COMPLETED',
-        createdAt: {
-          gte: startDate,
-        },
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
-    });
+    const [allRides, completedRides, driver] = await Promise.all([
+      prisma.ride.findMany({
+        where: { driverId, createdAt: { gte: startDate } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.ride.findMany({
+        where: { driverId, status: 'COMPLETED', createdAt: { gte: startDate } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      (prisma as any).comDriver.findUnique({
+        where: { id: driverId },
+        select: { rating: true, acceptedRides: true, rejectedRides: true, acceptedStreak: true },
+      }),
+    ]);
 
-    // Calculate statistics
-    const totalRides = rides.length;
-    const totalEarnings = rides.reduce((sum, ride) => sum + (ride.price || 0), 0);
-    const averageRidePrice = totalRides > 0 ? totalEarnings / totalRides : 0;
-    const totalDistance = rides.reduce((sum, ride) => sum + (ride.distanceKm || 0), 0);
-    const averageDistance = totalRides > 0 ? totalDistance / totalRides : 0;
+    const totalRides = allRides.length;
+    const acceptedCount = driver?.acceptedRides || 0;
+    const rejectedCount = driver?.rejectedRides || 0;
+    const totalDecisions = acceptedCount + rejectedCount;
+    const acceptedStreak = driver?.acceptedStreak || 0;
 
-    // Group rides by day for chart data
-    const dailyStats = rides.reduce((acc: any, ride) => {
+    const totalEarnings = completedRides.reduce((sum, ride) => sum + (ride.price || 0), 0);
+    const averageRidePrice = completedRides.length > 0 ? totalEarnings / completedRides.length : 0;
+    const totalDistance = completedRides.reduce((sum, ride) => sum + (ride.distanceKm || 0), 0);
+    const averageDistance = completedRides.length > 0 ? totalDistance / completedRides.length : 0;
+
+    const acceptanceRate = totalDecisions > 0 ? Math.round((acceptedCount / totalDecisions) * 100) : 0;
+    const averageRating = driver?.rating ? parseFloat(driver.rating.toString()) : 0;
+    const completionRate = totalRides > 0 ? Math.round((completedRides.length / totalRides) * 100) : 0;
+
+    const dailyStats = completedRides.reduce((acc: any, ride) => {
       const date = ride.createdAt.toISOString().split('T')[0];
-      if (!acc[date]) {
-        acc[date] = { rides: 0, earnings: 0 };
-      }
+      if (!acc[date]) acc[date] = { rides: 0, earnings: 0 };
       acc[date].rides += 1;
       acc[date].earnings += ride.price || 0;
       return acc;
     }, {});
 
-    // Convert to array for charts
     const chartData = Object.entries(dailyStats).map(([date, stats]: [string, any]) => ({
       date,
       rides: stats.rides,
       earnings: stats.earnings,
     })).sort((a, b) => a.date.localeCompare(b.date));
 
-    // Top pickup areas
-    const pickupAreas = rides.reduce((acc: any, ride) => {
+    const pickupAreas = completedRides.reduce((acc: any, ride) => {
       if (ride.pickupAddress) {
-        const area = ride.pickupAddress.split(',')[0]; // Simple area extraction
+        const area = ride.pickupAddress.split(',')[0];
         acc[area] = (acc[area] || 0) + 1;
       }
       return acc;
@@ -119,8 +122,7 @@ export async function GET(request: NextRequest) {
       .slice(0, 5)
       .map(([area, count]) => ({ area, count }));
 
-    // Hourly distribution
-    const hourlyStats = rides.reduce((acc: any, ride) => {
+    const hourlyStats = completedRides.reduce((acc: any, ride) => {
       const hour = ride.createdAt.getHours();
       acc[hour] = (acc[hour] || 0) + 1;
       return acc;
@@ -131,64 +133,11 @@ export async function GET(request: NextRequest) {
       rides: hourlyStats[hour] || 0,
     }));
 
-    // Performance metrics
-    const acceptanceRate = 85; // This would need more complex calculation
-    const averageRating = 4.2; // This would come from ratings system
-    const completionRate = totalRides > 0 ? (rides.filter(r => r.status === 'COMPLETED').length / totalRides) * 100 : 0;
-
     const scheduleSnapshot = await getDriverScheduleSnapshot(prisma, driverId, now);
     const scheduleSuggestions = await getDriverScheduleSuggestions(prisma, driverId, {
       now,
       daysBack: 42
     });
-
-    // If no rides, return sample data for demo
-    if (totalRides === 0) {
-      const sampleAnalytics = {
-        period,
-        summary: {
-          totalRides: 15,
-          totalEarnings: 2250,
-          averageRidePrice: 150,
-          totalDistance: 450,
-          averageDistance: 30,
-          acceptanceRate: 85,
-          averageRating: 4.2,
-          completionRate: 95,
-        },
-        charts: {
-          daily: [
-            { date: '01', rides: 3, earnings: 450 },
-            { date: '02', rides: 5, earnings: 750 },
-            { date: '03', rides: 2, earnings: 300 },
-            { date: '04', rides: 4, earnings: 600 },
-            { date: '05', rides: 1, earnings: 150 },
-          ],
-          hourly: Array.from({ length: 24 }, (_, hour) => ({
-            hour: `${hour}:00`,
-            rides: Math.floor(Math.random() * 5),
-          })),
-        },
-        insights: {
-          topPickupAreas: [
-            { area: 'City Center', count: 8 },
-            { area: 'Airport', count: 4 },
-            { area: 'Train Station', count: 3 },
-          ],
-          peakHours: [
-            { hour: '08:00', rides: 4 },
-            { hour: '17:00', rides: 3 },
-            { hour: '12:00', rides: 2 },
-          ],
-          busiestDay: { date: '02', rides: 5, earnings: 750 },
-        },
-        schedule: {
-          current: scheduleSnapshot,
-          suggestions: scheduleSuggestions
-        }
-      };
-      return NextResponse.json(sampleAnalytics);
-    }
 
     const analytics = {
       period,
@@ -201,6 +150,7 @@ export async function GET(request: NextRequest) {
         acceptanceRate,
         averageRating,
         completionRate,
+        acceptedStreak,
       },
       charts: {
         daily: chartData,

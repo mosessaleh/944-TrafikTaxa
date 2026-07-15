@@ -78,6 +78,7 @@ export async function POST(
           id: true,
           rating: true,
           drFname: true,
+          fiveStarCount: true,
         },
       });
 
@@ -86,19 +87,45 @@ export async function POST(
       }
 
       const currentRating = Number(currentDriver.rating || 5);
-      const nextRating = Number((((currentRating * 4) + body.rating) / 5).toFixed(2));
 
-      const updatedDriver = await tx.comDriver.update({
-        where: { id: currentDriver.id },
-        data: { rating: nextRating },
-        select: {
-          id: true,
-          rating: true,
-          drFname: true,
-        },
-      });
+      if (body.rating === 5) {
+        const newCount = (currentDriver.fiveStarCount || 0) + 1;
+        const shouldIncrease = newCount >= 5;
+        const nextRating = shouldIncrease
+          ? Math.min(5.0, Number((currentRating + 0.01).toFixed(2)))
+          : currentRating;
+        const finalCount = shouldIncrease ? 0 : newCount;
 
-      return [nextRide, updatedDriver] as const;
+        const updatedDriver = await tx.comDriver.update({
+          where: { id: currentDriver.id },
+          data: { rating: nextRating, fiveStarCount: finalCount },
+          select: { id: true, rating: true, drFname: true },
+        });
+
+        return [nextRide, updatedDriver] as const;
+      }
+
+      if (body.rating === 1) {
+        const nextRating = Math.max(0, Number((currentRating - 0.02).toFixed(2)));
+        const updatedDriver = await tx.comDriver.update({
+          where: { id: currentDriver.id },
+          data: { rating: nextRating },
+          select: { id: true, rating: true, drFname: true },
+        });
+        return [nextRide, updatedDriver] as const;
+      }
+
+      if (body.rating === 2 || body.rating === 3) {
+        const nextRating = Math.max(0, Number((currentRating - 0.01).toFixed(2)));
+        const updatedDriver = await tx.comDriver.update({
+          where: { id: currentDriver.id },
+          data: { rating: nextRating },
+          select: { id: true, rating: true, drFname: true },
+        });
+        return [nextRide, updatedDriver] as const;
+      }
+
+      return [nextRide, null] as const;
     });
 
     if (driver) {

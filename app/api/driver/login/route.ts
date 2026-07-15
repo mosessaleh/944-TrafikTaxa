@@ -143,6 +143,7 @@ export async function POST(request: NextRequest) {
         drLname: true,
         car: true,
         rating: true,
+        fiveStarCount: true,
         isActive: true,
         bannedUntil: true,
         company: {
@@ -262,6 +263,7 @@ export async function POST(request: NextRequest) {
         name: `${driver.drFname} ${driver.drLname}`,
         car: driver.car,
         rating: driver.rating ? parseFloat(driver.rating.toString()) : 5.0,
+        fiveStarCount: driver.fiveStarCount || 0,
       },
       shiftId: shift.id,
       shiftStartTime: shift.startVagt ? shift.startVagt.toISOString() : null,
