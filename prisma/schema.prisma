@@ -563,12 +563,26 @@ model comDriver {
 
   company PartnerCompany @relation(fields: [comId], references: [id])
   shifts   driversvagt[]
+  ridePreferences driver_ride_preferences?
 
   @@index([comId])
   @@index([isOnline])
   @@index([currentRideId])
   @@index([apiKey])
   @@index([penaltyUntil])
+}
+
+model driver_ride_preferences {
+  id              Int      @id @default(autoincrement())
+  driverId        Int      @unique
+  minDistanceKm   Float    @default(0)
+  minTimeMinutes  Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  driver comDriver @relation(fields: [driverId], references: [id])
+
+  @@index([driverId])
 }
 
 model comVehicles {

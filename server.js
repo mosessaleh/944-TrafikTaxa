@@ -674,6 +674,65 @@ function estimateEtaMinutesFromDistance(distanceKm) {
   return Math.max(1, Math.ceil(distanceKm * 2));
 }
 
+async function getDriverRidePreferences(driverId) {
+  try {
+    return await prisma.driver_ride_preferences.findUnique({
+      where: { driverId },
+      select: { minDistanceKm: true, minTimeMinutes: true }
+    });
+  } catch (error) {
+    console.error(`Error fetching ride preferences for driver ${driverId}:`, error);
+    return null;
+  }
+}
+
+async function shouldSkipDriverByPreferences(driverId, ride, timeMinutes) {
+  try {
+    const prefs = await getDriverRidePreferences(driverId);
+    if (!prefs) {
+      console.log(`Skipping driver ${driverId} - no ride preferences set`);
+      return true;
+    }
+    const hasMinDistance = prefs.minDistanceKm > 0;
+    const hasMinTime = prefs.minTimeMinutes > 0;
+    if (!hasMinDistance && !hasMinTime) return false;
+    if (hasMinTime && timeMinutes < prefs.minTimeMinutes) {
+      console.log(`Skipping driver ${driverId} - ETA ${timeMinutes}min < pref minTime ${prefs.minTimeMinutes}min`);
+      return true;
+    }
+    if (hasMinDistance) {
+      const connectedDriver = connectedDrivers?.get(driverId);
+      let driverLat = null, driverLon = null;
+      if (connectedDriver?.location) {
+        driverLat = connectedDriver.location.lat;
+        driverLon = connectedDriver.location.lng;
+      } else {
+        const driverData = await prisma.comDriver.findUnique({ where: { id: driverId }, select: { lastLocation: true } });
+        if (driverData?.lastLocation && Array.isArray(driverData.lastLocation)) {
+          driverLat = driverData.lastLocation[0];
+          driverLon = driverData.lastLocation[1];
+        }
+      }
+      if (driverLat != null && driverLon != null && ride.startLatLon) {
+        const p = ride.startLatLon;
+        const pickupLat = typeof p === 'object' ? (p.lat ?? p[0]) : p[0];
+        const pickupLon = typeof p === 'object' ? (p.lon ?? p[1]) : p[1];
+        if (pickupLat != null && pickupLon != null) {
+          const distanceKm = calculateDistanceKm(driverLat, driverLon, pickupLat, pickupLon);
+          if (distanceKm < prefs.minDistanceKm) {
+            console.log(`Skipping driver ${driverId} - distance ${distanceKm.toFixed(1)}km < pref minDistance ${prefs.minDistanceKm}km`);
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  } catch (error) {
+    console.error(`Error checking ride preferences for driver ${driverId}:`, error);
+    return false;
+  }
+}
+
 function normalizePostalCode(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -3074,6 +3133,11 @@ async function autoAssignRide(ride, vehicleInfo) {
           );
           continue;
         }
+
+        const skipByPreferences = await shouldSkipDriverByPreferences(
+          driver.driverId, ride, driver.timeMinutes
+        );
+        if (skipByPreferences) continue;
 
         // Send ride offer to driver
         const driverSocket = connectedDrivers.get(driver.driverId);
