@@ -47,9 +47,9 @@ export const MSG = {
     en: (name: string) => `✅ Email verified! Welcome ${name}.\n\nYou can now book a taxi. Tell me where you want to go.`,
   },
   regSuccess: {
-    ar: (email: string) => `✅ تم التسجيل! تم إرسال رمز تحقق إلى ${email}.\n\nالرجاء إدخال الرمز المكون من 6 أرقام لتأكيد بريدك الإلكتروني.`,
-    dk: (email: string) => `✅ Registreret! Vi har sendt en bekræftelseskode til ${email}.\n\nIndtast den 6-cifrede kode for at bekræfte din email.`,
-    en: (email: string) => `✅ Registered! We sent a verification code to ${email}.\n\nEnter the 6-digit code to verify your email.`,
+    ar: (email: string) => `✅ تم التسجيل! تم إرسال بريد إلى ${email} يحتوي على:\n• رمز تحقق من 6 أرقام لتأكيد بريدك\n• رابط لتعيين كلمة المرور\n\nالرجاء إدخال رمز التحقق المكون من 6 أرقام.`,
+    dk: (email: string) => `✅ Registreret! Vi har sendt en mail til ${email} med:\n• En 6-cifret bekræftelseskode\n• Et link til at oprette adgangskode\n\nIndtast den 6-cifrede kode for at bekræfte din email.`,
+    en: (email: string) => `✅ Registered! We sent an email to ${email} with:\n• A 6-digit verification code\n• A link to set your password\n\nEnter the 6-digit code to verify your email.`,
   },
   bookingCreating: {
     ar: '⏳ جاري إنشاء الحجز...',
@@ -110,6 +110,21 @@ export const MSG = {
     ar: 'لا يوجد حجز نشط للإلغاء.',
     dk: 'Ingen aktiv booking at annullere.',
     en: 'No active booking to cancel.',
+  },
+  cancelBlockedDriver: {
+    ar: '❌ لا يمكن إلغاء الحجز. تم تعيين سائق للرحلة.',
+    dk: '❌ Kan ikke annullere. Der er allerede tildelt en chauffør.',
+    en: '❌ Cannot cancel. A driver has already been assigned.',
+  },
+  cancelBlockedScheduled: {
+    ar: '❌ لا يمكن إلغاء الرحلة المجدولة قبل موعدها بأقل من 20 دقيقة مع وجود سائق.',
+    dk: '❌ Kan ikke annullere den planlagte tur mindre end 20 minutter før med en tildelt chauffør.',
+    en: '❌ Cannot cancel the scheduled ride less than 20 minutes before with an assigned driver.',
+  },
+  cancelScheduledDriverOk: {
+    ar: '✅ تم إلغاء الرحلة. لم يتم تعيين سائق بعد.',
+    dk: '✅ Turen er annulleret. Ingen chauffør var tildelt endnu.',
+    en: '✅ Ride cancelled. No driver was assigned yet.',
   },
   minimumFareNote: {
     ar: (minPrice: number) => `⚠️ السعر المحسوب أقل من ${minPrice} كرون، وهو الحد الأدنى للأجرة. سيتم تطبيق الحد الأدنى ${minPrice} DKK.`,
@@ -184,7 +199,13 @@ export const HELP_MSG: Record<string, string> = {
 • cancel — إلغاء حجز خلال 3 دقائق
 • rebook 123 — إعادة حجز رحلة سابقة
 • edit 123 — تعديل عنوان رحلة مجدولة
+• /history — آخر 10 رحلات
 • endchat — إنهاء الدردشة مع السائق
+
+⭐ *العناوين المحفوظة:*
+• /favorites — عرض المحفوظة
+• احفظ [اسم] [عنوان] — حفظ عنوان
+• حذف [رقم] — حذف عنوان
 
 💬 *الدردشة مع السائق:*
 • بعد تعيين سائق، أي رسالة ترسلها تصل للسائق مباشرة
@@ -201,7 +222,13 @@ export const HELP_MSG: Record<string, string> = {
 • cancel — annuller booking (inden 3 min)
 • rebook 123 — genbestil en tidligere tur
 • edit 123 — rediger adresse på planlagt tur
+• /history — seneste 10 ture
 • endchat — afslut chat med chauffør
+
+⭐ *Gemte adresser:*
+• /favorites — vis gemte adresser
+• gem [navn] [adresse] — gem adresse
+• slet [nummer] — slet adresse
 
 💬 *Chat med chauffør:*
 • Når en chauffør er tildelt, sendes dine beskeder direkte
@@ -218,11 +245,94 @@ export const HELP_MSG: Record<string, string> = {
 • cancel — cancel booking within 3 min
 • rebook 123 — rebook a past ride
 • edit 123 — edit address of scheduled ride
+• /history — last 10 rides
 • endchat — end chat with driver
+
+⭐ *Saved Addresses:*
+• /favorites — view saved addresses
+• save [label] [address] — save an address
+• delete [number] — delete an address
 
 💬 *Chat with driver:*
 • After a driver is assigned, your messages go directly to them
 • Type "endchat" to stop chatting`,
+};
+
+export const FAV_MSG = {
+  listHeader: {
+    ar: '⭐ *عناوينك المحفوظة:*\n\n',
+    dk: '⭐ *Dine gemte adresser:*\n\n',
+    en: '⭐ *Your saved addresses:*\n\n',
+  },
+  emptyFavs: {
+    ar: 'ليس لديك عناوين محفوظة بعد.\n\nلإضافة عنوان: اكتب "احفظ" متبوعاً بالتسمية ثم العنوان.\nمثال: *احفظ البيت شارع الملك فهد، الرياض*',
+    dk: 'Du har ingen gemte adresser endnu.\n\nFor at tilføje en: skriv "gem" efterfulgt af navn og adresse.\nEksempel: *gem hjem Nørregade 12, 3600 Frederikssund*',
+    en: 'You have no saved addresses yet.\n\nTo add one: type "save" followed by a label and the address.\nExample: *save home 123 Main St, Copenhagen*',
+  },
+  favItem: {
+    ar: (index: number, label: string, address: string) => `*${index}.* ${label}: ${address}\n`,
+    dk: (index: number, label: string, address: string) => `*${index}.* ${label}: ${address}\n`,
+    en: (index: number, label: string, address: string) => `*${index}.* ${label}: ${address}\n`,
+  },
+  favSaved: {
+    ar: (label: string, address: string) => `✅ تم حفظ *${label}*: ${address}`,
+    dk: (label: string, address: string) => `✅ *${label}* gemt: ${address}`,
+    en: (label: string, address: string) => `✅ *${label}* saved: ${address}`,
+  },
+  favDeleted: {
+    ar: (label: string) => `🗑️ تم حذف *${label}* من المفضلة.`,
+    dk: (label: string) => `🗑️ *${label}* slettet fra favoritter.`,
+    en: (label: string) => `🗑️ *${label}* removed from favorites.`,
+  },
+  favNotFound: {
+    ar: '❌ الرقم غير صحيح. استخدم /favorites لعرض القائمة.',
+    dk: '❌ Ugyldigt nummer. Brug /favorites for at se listen.',
+    en: '❌ Invalid number. Use /favorites to see the list.',
+  },
+  favMaxReached: {
+    ar: '❌ وصلت للحد الأقصى (10 عناوين محفوظة). احذف عنواناً أولاً.',
+    dk: '❌ Du har nået grænsen (10 gemte adresser). Slet en først.',
+    en: '❌ You reached the limit (10 saved addresses). Delete one first.',
+  },
+  favSaveHint: {
+    ar: 'لحفظ عنوان: *احفظ [تسمية] [العنوان]*\nمثال: *احفظ البيت شارع الملك فهد، الرياض*\n\nلحذف: *حذف [الرقم]*\nمثال: *حذف 2*',
+    dk: 'Gem adresse: *gem [navn] [adresse]*\nEksempel: *gem hjem Nørregade 12, 3600*\n\nSlet: *slet [nummer]*\nEksempel: *slet 2*',
+    en: 'Save address: *save [label] [address]*\nExample: *save home 123 Main St, Copenhagen*\n\nDelete: *delete [number]*\nExample: *delete 2*',
+  },
+};
+
+export const HIST_MSG = {
+  header: {
+    ar: '📋 *آخر 10 رحلات:*\n\n',
+    dk: '📋 *Seneste 10 ture:*\n\n',
+    en: '📋 *Last 10 rides:*\n\n',
+  },
+  empty: {
+    ar: 'لا توجد رحلات سابقة.',
+    dk: 'Ingen tidligere ture.',
+    en: 'No previous rides.',
+  },
+  rideItem: {
+    ar: (rideId: number, date: string, from: string, to: string, price: number, status: string) =>
+      `*${rideId}.* ${date}\n📍 ${from} → ${to}\n💰 ${price} DKK | 📌 ${status}\n\n`,
+    dk: (rideId: number, date: string, from: string, to: string, price: number, status: string) =>
+      `*${rideId}.* ${date}\n📍 ${from} → ${to}\n💰 ${price} DKK | 📌 ${status}\n\n`,
+    en: (rideId: number, date: string, from: string, to: string, price: number, status: string) =>
+      `*${rideId}.* ${date}\n📍 ${from} → ${to}\n💰 ${price} DKK | 📌 ${status}\n\n`,
+  },
+  rebookHint: {
+    ar: '💡 لإعادة حجز رحلة: أرسل *rebook [رقم الرحلة]*',
+    dk: '💡 For at genbestille: send *rebook [tur nummer]*',
+    en: '💡 To rebook a ride: send *rebook [ride number]*',
+  },
+  statusLabels: {
+    COMPLETED: { ar: 'مكتملة', dk: 'Gennemført', en: 'Completed' },
+    CANCELLED: { ar: 'ملغاة', dk: 'Annulleret', en: 'Cancelled' },
+    PENDING: { ar: 'معلقة', dk: 'Afventer', en: 'Pending' },
+    CONFIRMED: { ar: 'مؤكدة', dk: 'Bekræftet', en: 'Confirmed' },
+    DISPATCHED: { ar: 'في الطريق', dk: 'På vej', en: 'Dispatched' },
+    ONGOING: { ar: 'جارية', dk: 'I gang', en: 'Ongoing' },
+  },
 };
 
 export const GREETING_WORDS: Record<string, string[]> = {

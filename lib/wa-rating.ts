@@ -6,6 +6,18 @@ import OpenAI from 'openai';
 
 type Lang = 'ar' | 'dk' | 'en';
 
+const MAX_COMPLAINT_LENGTH = 1500;
+
+function sanitizePromptValue(value: string, maxLen: number = 600): string {
+  return value
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\\n/g, ' ')
+    .replace(/"/g, "'")
+    .replace(/[\p{Cc}\p{Cs}\p{Cf}]/gu, '')
+    .substring(0, maxLen)
+    .trim();
+}
+
 function getOpenAI(): OpenAI {
   return new OpenAI({
     apiKey: process.env.OPENAI_API_KEY || '',
@@ -14,8 +26,8 @@ function getOpenAI(): OpenAI {
   });
 }
 
-function getLang(phone: string): Lang {
-  const s = getUserSession(phone);
+async function getLang(phone: string): Promise<Lang> {
+  const s = await getUserSession(phone);
   const lang = s?.collected?.['_language'];
   if (lang === 'ar' || lang === 'dk' || lang === 'en') return lang;
   return 'en';
@@ -110,7 +122,7 @@ function t(key: keyof typeof MSG, lang: Lang, replacements?: Record<string, stri
 }
 
 export async function sendRatingButtons(phone: string, rideId: number) {
-  const lang = getLang(phone);
+  const lang = await getLang(phone);
   const msgBody = t('ratePrompt', lang, { '#RIDE': String(rideId) });
   sendWAButtons(phone, msgBody, [
     { id: `rate_4_${rideId}`, title: '⭐⭐⭐⭐' },
@@ -129,7 +141,7 @@ export async function handleRatingClick(phone: string, rideId: number, rating: n
   const user = await prisma.user.findFirst({ where: { phone: phone.trim() } });
   if (!user) return;
 
-  const lang = getLang(phone);
+  const lang = await getLang(phone);
 
   const ride = await (prisma as any).ride.findUnique({
     where: { id: rideId },
@@ -215,7 +227,7 @@ export async function handleRatingClick(phone: string, rideId: number, rating: n
     return;
   }
 
-  let s = getUserSession(phone);
+  let s = await getUserSession(phone);
   if (!s) {
     s = createSession(phone, { stage: 'menu', userId: user.id, userExists: true, firstName: user.firstName || '' });
     s.collected['_language'] = lang;
@@ -230,7 +242,7 @@ export async function handleRatingClick(phone: string, rideId: number, rating: n
 }
 
 export async function handleRatingComplaintInput(phone: string, msg: string): Promise<boolean> {
-  const s = getUserSession(phone);
+  const s = await getUserSession(phone);
   if (!s?.collected?.['_ratingAwaitingComplaint']) return false;
 
   const lang = (s.collected['_language'] as Lang) || 'en';
@@ -274,7 +286,7 @@ export async function handleRatingComplaintInput(phone: string, msg: string): Pr
 }
 
 export async function handleComplaintConfirm(phone: string, rideId: number, isYes: boolean) {
-  const s = getUserSession(phone);
+  const s = await getUserSession(phone);
   if (!s?.collected?.['_ratingAwaitingComplaintConfirm']) return;
   if (parseInt(s.collected['_ratingRideId'] || '0') !== rideId) return;
 
@@ -308,11 +320,16 @@ export async function handleComplaintConfirm(phone: string, rideId: number, isYe
       return;
     }
 
+    const cleanComplaint = writtenComplaint
+      .replace(/<[^>]*>/g, '')
+      .substring(0, MAX_COMPLAINT_LENGTH)
+      .trim();
+
     await (prisma as any).complaint.create({
       data: {
         userId: user.id,
         rideId,
-        complaint: JSON.stringify([`Me: ${writtenComplaint}`]),
+        complaint: JSON.stringify([`Me: ${cleanComplaint}`]),
         status: 'OPEN',
       },
     });
@@ -329,7 +346,7 @@ export async function handleComplaintConfirm(phone: string, rideId: number, isYe
           <ul>
             <li><strong>Customer:</strong> ${user.firstName} ${user.lastName} (${user.email})</li>
             <li><strong>Ride ID:</strong> ${rideId}</li>
-            <li><strong>Complaint:</strong> ${writtenComplaint}</li>
+            <li><strong>Complaint:</strong> ${cleanComplaint}</li>
           </ul>
           <p>Please review in the admin panel.</p>`
         )
@@ -383,7 +400,7 @@ Respond with JSON: {"isSerious": boolean, "summary": "brief summary in English, 
         },
         {
           role: 'user',
-          content: `Ride #${rideId}, Rating: ${rating}/5. Customer says: "${userText}"`,
+          content: `Ride #${rideId}, Rating: ${rating}/5. Customer says: "${sanitizePromptValue(userText)}"`,
         },
       ],
     });
@@ -428,7 +445,7 @@ Output ONLY the complaint text, no JSON wrapper, no extra formatting.`,
         },
         {
           role: 'user',
-          content: `Ride #${rideId}. AI summary: "${aiSummary}". Customer original description: "${userText}"\n\nWrite the official complaint:`,
+          content: `Ride #${rideId}. AI summary: "${sanitizePromptValue(aiSummary)}". Customer original description: "${sanitizePromptValue(userText)}"\n\nWrite the official complaint:`,
         },
       ],
     });

@@ -9,6 +9,25 @@ function badText(a: string){
   return false;
 }
 
+async function googleDistance(lat1:number, lon1:number, lat2:number, lon2:number){
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${lat1},${lon1}&destinations=${lat2},${lon2}&mode=driving&region=dk&key=${apiKey}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const element = j?.rows?.[0]?.elements?.[0];
+    if (!element || element.status !== 'OK' || !element.distance || !element.duration) return null;
+    const distanceKm = element.distance.value / 1000;
+    const durationMin = Math.max(1, Math.round(element.duration.value / 60));
+    console.log('[ROUTE] Google Distance Matrix:', { distanceKm: distanceKm.toFixed(1), durationMin });
+    return { distanceKm, durationMin };
+  } catch {
+    return null;
+  }
+}
+
 async function osrmDistance(lat1:number, lon1:number, lat2:number, lon2:number){
   const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
   const r = await fetch(url, { headers:{'Accept':'application/json'}, next:{ revalidate:0 } });
@@ -18,6 +37,7 @@ async function osrmDistance(lat1:number, lon1:number, lat2:number, lon2:number){
   if(!route) throw new Error('No route');
   const distanceKm = route.distance / 1000;
   const durationMin = Math.max(1, Math.round(route.duration / 60));
+  console.log('[ROUTE] OSRM result:', { distanceKm: distanceKm.toFixed(1), durationMin });
   return { distanceKm, durationMin };
 }
 
@@ -67,44 +87,44 @@ async function geocode(addr:string): Promise<{ lat: number; lon: number }> {
 export type LocInput = { address?: string|null; lat?: number|null; lon?: number|null };
 
 export async function safeEstimateDistance(a: LocInput, b: LocInput){
-  console.log('[DEBUG] safeEstimateDistance called with:', { a, b });
-
-  // 1) Prefer coordinates when available
+  // 1) Prefer coordinates when available — try Google first, fall back to OSRM
   if (Number.isFinite(a.lat as any) && Number.isFinite(a.lon as any) && Number.isFinite(b.lat as any) && Number.isFinite(b.lon as any)){
-    console.log('[DEBUG] Using coordinates for OSRM');
+    const googleResult = await googleDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
+    if (googleResult) return googleResult;
+
     try {
-      const result = await osrmDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
-      console.log('[DEBUG] OSRM success:', result);
-      return result;
+      const osrmResult = await osrmDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
+      // Quick sanity check: OSRM distance shouldn't be >3x the straight-line distance
+      const { calculateDistance, estimateArrivalTime } = await import('@/lib/distance');
+      const straightKm = calculateDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
+      if (straightKm > 0.1 && osrmResult.distanceKm > straightKm * 3) {
+        console.warn(`[ROUTE] OSRM distance ${osrmResult.distanceKm.toFixed(1)} km > 3x straight-line ${straightKm.toFixed(1)} km — using fallback`);
+        return { distanceKm: straightKm, durationMin: estimateArrivalTime(straightKm) };
+      }
+      return osrmResult;
     } catch (error) {
-      console.warn('[DEBUG] OSRM routing failed, falling back to straight-line distance:', error);
-      // Fallback to straight-line distance calculation
+      console.warn('[ROUTE] OSRM routing failed, falling back to straight-line distance:', error);
       const { calculateDistance, estimateArrivalTime } = await import('@/lib/distance');
       const distanceKm = calculateDistance(a.lat as number, a.lon as number, b.lat as number, b.lon as number);
       const durationMin = estimateArrivalTime(distanceKm);
-      console.log('[DEBUG] Fallback result:', { distanceKm, durationMin });
       return { distanceKm, durationMin };
     }
   }
   // 2) Fallback to text addresses (sanitize)
-  console.log('[DEBUG] Using addresses for geocoding');
   const at = (a.address||'').trim();
   const bt = (b.address||'').trim();
   if (badText(at) || badText(bt)) throw new Error('Invalid address input');
   const A = await geocode(at);
   const B = await geocode(bt);
-  console.log('[DEBUG] Geocoded addresses:', { A, B });
+  const googleResult = await googleDistance(A.lat, A.lon, B.lat, B.lon);
+  if (googleResult) return googleResult;
   try {
-    const result = await osrmDistance(A.lat, A.lon, B.lat, B.lon);
-    console.log('[DEBUG] OSRM success for geocoded:', result);
-    return result;
+    return await osrmDistance(A.lat, A.lon, B.lat, B.lon);
   } catch (error) {
-    console.warn('[DEBUG] OSRM routing failed for geocoded addresses, falling back to straight-line distance:', error);
-    // Fallback to straight-line distance calculation
+    console.warn('[ROUTE] routing failed for geocoded addresses, falling back to straight-line distance:', error);
     const { calculateDistance, estimateArrivalTime } = await import('@/lib/distance');
     const distanceKm = calculateDistance(A.lat, A.lon, B.lat, B.lon);
     const durationMin = estimateArrivalTime(distanceKm);
-    console.log('[DEBUG] Fallback result for geocoded:', { distanceKm, durationMin });
     return { distanceKm, durationMin };
   }
 }

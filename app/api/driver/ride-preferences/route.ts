@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verify } from 'jsonwebtoken';
-import { getAuthSecret } from '@/lib/auth';
+import { checkTokenBlacklist, getAuthSecret } from '@/lib/auth';
 
 const prisma = new PrismaClient();
 const JWT_SECRET = getAuthSecret();
 
-function getDriverIdFromToken(request: NextRequest): number | null {
+async function getDriverIdFromToken(request: NextRequest): Promise<number | null> {
   const authHeader = request.headers.get('authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.substring(7);
@@ -14,6 +14,13 @@ function getDriverIdFromToken(request: NextRequest): number | null {
     const decoded = verify(token, JWT_SECRET) as any;
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') return null;
+
+    const jti = decoded?.jti;
+    if (jti) {
+      const isBlacklisted = await checkTokenBlacklist(jti);
+      if (isBlacklisted) return null;
+    }
+
     return driverId;
   } catch {
     return null;
@@ -21,7 +28,7 @@ function getDriverIdFromToken(request: NextRequest): number | null {
 }
 
 export async function GET(request: NextRequest) {
-  const driverId = getDriverIdFromToken(request);
+  const driverId = await getDriverIdFromToken(request);
   if (!driverId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {
@@ -38,7 +45,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const driverId = getDriverIdFromToken(request);
+  const driverId = await getDriverIdFromToken(request);
   if (!driverId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   try {

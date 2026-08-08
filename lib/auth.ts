@@ -2,7 +2,7 @@ import { cookies } from 'next/headers';
 import { prisma } from '@/lib/db';
 import { sign, verify } from 'jsonwebtoken';
 import { comparePassword as cmp, hashPassword as hsh } from '@/lib/crypto';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { hasPermission, isStaffRole, Permission } from '@/lib/permissions';
 
 function resolveAuthSecret() {
@@ -26,8 +26,28 @@ export function getAuthSecret(){
   return SECRET;
 }
 
-export function signToken(payload: Record<string, any>){
-  return sign(payload, SECRET, { expiresIn: '7d' });
+export function signToken(payload: Record<string, any>, options?: { expiresIn?: string }){
+  const tokenPayload = {
+    ...payload,
+    jti: payload.jti || randomUUID(),
+  };
+  const signOptions: any = {};
+  if (options?.expiresIn) {
+    signOptions.expiresIn = options.expiresIn as any;
+  } else {
+    signOptions.expiresIn = '24h' as any;
+  }
+  return sign(tokenPayload, SECRET, signOptions);
+}
+
+export async function checkTokenBlacklist(jti?: string): Promise<boolean> {
+  if (!jti) return false;
+  try {
+    const entry = await prisma.tokenBlacklist.findUnique({ where: { jti } });
+    return Boolean(entry);
+  } catch {
+    return false;
+  }
 }
 
 export async function hashPassword(password: string){ return hsh(password); }
@@ -53,7 +73,7 @@ export async function setSessionCookie(token: string){
     sameSite,
     secure,
     path: '/',
-    maxAge: 60*60*24*7,
+    maxAge: 60*60*24,
     // Additional security options
     partitioned: false // Can be enabled for CHIPS support in the future
   });
@@ -334,12 +354,23 @@ export async function requireDriverByJWT(req: Request){
       rawDriverId: decoded?.driverId,
       rawId: decoded?.id,
       type: decoded?.type,
-      exp: decoded?.exp
+      exp: decoded?.exp,
+      jti: decoded?.jti
     });
 
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
       console.log('requireDriverByJWT - Invalid token payload');
       throw Object.assign(new Error('Invalid token'), { status: 401 });
+    }
+
+    // Check token blacklist
+    const jti = decoded?.jti;
+    if (jti) {
+      const isBlacklisted = await checkTokenBlacklist(jti);
+      if (isBlacklisted) {
+        console.log('requireDriverByJWT - Token is blacklisted');
+        throw Object.assign(new Error('Token has been revoked'), { status: 401 });
+      }
     }
 
     const driver = await prisma.comDriver.findUnique({
@@ -362,7 +393,8 @@ export async function requireDriverByJWT(req: Request){
       ...driver,
       type: 'driver'
     };
-  } catch (error) {
+  } catch (error: any) {
+    if (error.status) throw error;
     throw Object.assign(new Error('Invalid or expired token'), { status: 401 });
   }
 }

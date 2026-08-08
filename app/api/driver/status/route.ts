@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verify, TokenExpiredError, JsonWebTokenError, NotBeforeError } from 'jsonwebtoken';
-import { getAuthSecret } from '@/lib/auth';
+import { checkTokenBlacklist, getAuthSecret } from '@/lib/auth';
+import { trackIpChange, getClientIp } from '@/lib/session-manager';
 
 const {
   getDriverScheduleSnapshot,
@@ -11,35 +12,49 @@ const {
 const prisma = new PrismaClient();
 const JWT_SECRET = getAuthSecret();
 
-function verifyDriverToken(authHeader: string | null): { driverId?: number; id?: number; type?: string } {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    throw Object.assign(new Error('Missing or invalid authorization header'), { status: 401 });
-  }
-
-  const token = authHeader.substring(7);
-
-  try {
-    return verify(token, JWT_SECRET) as { driverId?: number; id?: number; type?: string };
-  } catch (error) {
-    if (error instanceof TokenExpiredError) {
-      throw Object.assign(new Error('Token expired'), { status: 401 });
+function verifyDriverToken(authHeader: string | null): Promise<{ driverId?: number; id?: number; type?: string; jti?: string }> {
+  return (async () => {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw Object.assign(new Error('Missing or invalid authorization header'), { status: 401 });
     }
-    if (error instanceof JsonWebTokenError || error instanceof NotBeforeError) {
-      throw Object.assign(new Error('Invalid token'), { status: 401 });
+
+    const token = authHeader.substring(7);
+
+    try {
+      const decoded = verify(token, JWT_SECRET) as { driverId?: number; id?: number; type?: string; jti?: string };
+
+      // Check token blacklist
+      const jti = decoded?.jti;
+      if (jti) {
+        const isBlacklisted = await checkTokenBlacklist(jti);
+        if (isBlacklisted) {
+          throw Object.assign(new Error('Token has been revoked'), { status: 401 });
+        }
+      }
+
+      return decoded;
+    } catch (error: any) {
+      if (error.status) throw error;
+      if (error instanceof TokenExpiredError) {
+        throw Object.assign(new Error('Token expired'), { status: 401 });
+      }
+      if (error instanceof JsonWebTokenError || error instanceof NotBeforeError) {
+        throw Object.assign(new Error('Invalid token'), { status: 401 });
+      }
+      throw error;
     }
-    throw error;
-  }
+  })();
 }
 
 export async function GET(request: NextRequest) {
   try {
     await ensureDriverScheduleTables(prisma);
 
-    let decoded: { driverId?: number; id?: number; type?: string };
+    let decoded: { driverId?: number; id?: number; type?: string; jti?: string };
 
     try {
       const authHeader = request.headers.get('authorization');
-      decoded = verifyDriverToken(authHeader);
+      decoded = await verifyDriverToken(authHeader);
     } catch (error: any) {
       return NextResponse.json({ error: error.message || 'Unauthorized' }, { status: error.status || 401 });
     }
@@ -47,6 +62,12 @@ export async function GET(request: NextRequest) {
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Track IP change for anomaly detection
+    if (decoded.jti) {
+      const clientIp = getClientIp(request);
+      await trackIpChange(decoded.jti, clientIp);
     }
 
     const driver = await (prisma as any).comDriver.findUnique({
@@ -137,11 +158,11 @@ export async function POST(request: NextRequest) {
   try {
     await ensureDriverScheduleTables(prisma);
 
-    let decoded: { driverId?: number; id?: number; type?: string };
+    let decoded: { driverId?: number; id?: number; type?: string; jti?: string };
 
     try {
       const authHeader = request.headers.get('authorization');
-      decoded = verifyDriverToken(authHeader);
+      decoded = await verifyDriverToken(authHeader);
     } catch (error: any) {
       return NextResponse.json({ error: error.message || 'Unauthorized' }, { status: error.status || 401 });
     }
@@ -149,6 +170,12 @@ export async function POST(request: NextRequest) {
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Track IP change for anomaly detection
+    if (decoded.jti) {
+      const clientIp = getClientIp(request);
+      await trackIpChange(decoded.jti, clientIp);
     }
 
     const body = await request.json();

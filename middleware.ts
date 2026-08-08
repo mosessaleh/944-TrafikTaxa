@@ -128,7 +128,9 @@ export async function middleware(req: NextRequest) {
     '/api/auth/reset-password',
     '/api/auth/verify',
     '/api/auth/resend-code',
-    '/api/driver/login'
+    '/api/driver/login',
+    '/api/driver/refresh-token',
+    '/api/driver/request-reset',
   ];
 
   if (sensitiveEndpoints.some(endpoint => pathname.startsWith(endpoint))) {
@@ -139,6 +141,33 @@ export async function middleware(req: NextRequest) {
       if (error.status === 429) {
         const retryRes = NextResponse.json(
           { error: 'Too many requests. Please try again later.' },
+          { status: 429 }
+        );
+        retryRes.headers.set('Retry-After', error.retryAfter.toString());
+        return retryRes;
+      }
+    }
+  }
+
+  // Rate limiting for driver operational endpoints
+  const driverOperationalEndpoints = [
+    '/api/driver/status',
+    '/api/driver/end-shift',
+    '/api/driver/location-update',
+    '/api/driver/rides',
+    '/api/driver/bookings',
+    '/api/driver/schedule',
+    '/api/driver/ride-preferences',
+  ];
+
+  if (driverOperationalEndpoints.some(endpoint => pathname.startsWith(endpoint))) {
+    try {
+      const clientKey = clientIpKey(req);
+      await limitOrThrow(`driver-op:${clientKey}`, { points: 60, durationSec: 60 }); // 60 req/min
+    } catch (error: any) {
+      if (error.status === 429) {
+        const retryRes = NextResponse.json(
+          { error: 'Too many requests. Please slow down.' },
           { status: 429 }
         );
         retryRes.headers.set('Retry-After', error.retryAfter.toString());

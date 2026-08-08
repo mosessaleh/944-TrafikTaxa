@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import { signToken } from '@/lib/auth';
+import { createDriverSession, sendLoginNotificationEmail, getClientIp } from '@/lib/session-manager';
 
 const {
   getDriverScheduleSnapshot,
@@ -123,7 +123,8 @@ export async function POST(request: NextRequest) {
 
     await ensureDriverScheduleTables(prisma);
 
-    const { username, password, startKM } = await request.json();
+    const body = await request.json();
+    const { username, password, startKM, deviceId, deviceInfo } = body;
     const normalizedUsername = String(username || '').trim();
     const normalizedPassword = String(password || '');
     const parsedStartKM = Number(startKM);
@@ -141,6 +142,7 @@ export async function POST(request: NextRequest) {
         drUsername: true,
         drFname: true,
         drLname: true,
+        drEmail: true,
         car: true,
         rating: true,
         fiveStarCount: true,
@@ -251,13 +253,34 @@ export async function POST(request: NextRequest) {
 
     invalidateDriverScheduleCache(driver.id);
 
-    const token = signToken({ id: driver.id, driverId: driver.id, type: 'driver' });
+    const clientIp = getClientIp(request);
+    const userAgent = request.headers.get('user-agent') || undefined;
+    const deviceInfoStr = deviceInfo || `${userAgent || 'Unknown'} / ${deviceId || 'no-device-id'}`;
+
+    const session = await createDriverSession(
+      driver.id,
+      deviceId,
+      deviceInfoStr,
+      clientIp,
+      userAgent,
+      true
+    );
+
+    sendLoginNotificationEmail(
+      driver.id,
+      `${driver.drFname} ${driver.drLname}`,
+      (driver as any).drEmail || '',
+      deviceInfoStr,
+      clientIp,
+    );
 
     return jsonWithCors(request, {
       success: true,
       message: 'Login successful',
       requiresConfirmation: false,
-      token: token,
+      token: session.accessToken,
+      accessToken: session.accessToken,
+      refreshToken: session.refreshToken,
       driver: {
         id: driver.id,
         name: `${driver.drFname} ${driver.drLname}`,

@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     let userId: number;
 
     if (sessionToken) {
-      const session = getUserSessionByToken(sessionToken);
+      const session = await getUserSessionByToken(sessionToken);
       if (!session || !session.userId) {
         return NextResponse.json(
           { ok: false, error: 'Invalid or expired WhatsApp session' },

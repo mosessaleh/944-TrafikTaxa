@@ -3,6 +3,7 @@ import { clearSessionCookie } from '@/lib/auth';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import { getAuthSecret } from '@/lib/auth';
+import { blacklistToken, extractJtiFromToken, revokeDriverSessions } from '@/lib/session-manager';
 
 const prisma = new PrismaClient();
 const JWT_SECRET = getAuthSecret();
@@ -18,7 +19,6 @@ function extractDriverIdFromToken(token: string): number | null {
 export async function POST(request: NextRequest){
   const authHeader = request.headers.get('authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    // API call from driver app - set driver offline
     const token = authHeader.substring(7);
     try {
       const driverId = extractDriverIdFromToken(token);
@@ -27,6 +27,16 @@ export async function POST(request: NextRequest){
           where: { id: driverId },
           data: { isOnline: false, isBusy: false },
         });
+
+        await revokeDriverSessions(driverId);
+
+        const jti = extractJtiFromToken(token);
+        if (jti) {
+          const expiresAt = (jwt.decode(token) as any)?.exp
+            ? new Date((jwt.decode(token) as any).exp * 1000)
+            : undefined;
+          await blacklistToken(jti, expiresAt);
+        }
       }
     } catch (error) {
       console.error('Error updating driver status on logout:', error);
@@ -40,7 +50,6 @@ export async function POST(request: NextRequest){
 export async function GET(request: NextRequest){
   const authHeader = request.headers.get('authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    // API call from driver app - set driver offline
     const token = authHeader.substring(7);
     try {
       const driverId = extractDriverIdFromToken(token);
@@ -49,6 +58,16 @@ export async function GET(request: NextRequest){
           where: { id: driverId },
           data: { isOnline: false, isBusy: false },
         });
+
+        await revokeDriverSessions(driverId);
+
+        const jti = extractJtiFromToken(token);
+        if (jti) {
+          const expiresAt = (jwt.decode(token) as any)?.exp
+            ? new Date((jwt.decode(token) as any).exp * 1000)
+            : undefined;
+          await blacklistToken(jti, expiresAt);
+        }
       }
     } catch (error) {
       console.error('Error updating driver status on logout:', error);

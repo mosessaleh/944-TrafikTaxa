@@ -1,6 +1,20 @@
 import { logWAError, logWAWarning } from '@/lib/wa-logger';
 
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v22.0';
+const PHONE_REGEX = /^\+?[1-9]\d{6,14}$/;
+
+function isValidPhone(to: string): boolean {
+  return PHONE_REGEX.test(to.trim());
+}
+
+function validatePhone(to: string): string {
+  const sanitized = to.trim().replace(/[\s\-()]/g, '');
+  if (!isValidPhone(sanitized)) {
+    logWAWarning('invalid_phone', { phone: to });
+    return '';
+  }
+  return sanitized;
+}
 
 let cachedPhoneId = '';
 let cachedToken = '';
@@ -88,14 +102,16 @@ async function waFetch(endpoint: string, body: Record<string, unknown>): Promise
 }
 
 export async function sendWAText(to: string, text: string): Promise<boolean> {
+  const phone = validatePhone(to);
+  if (!phone) return false;
   const ok = await waFetch('messages', {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: phone,
     type: 'text',
     text: { preview_url: false, body: text },
   });
-  logMessage({ phone: to, direction: 'outbound', type: 'text', content: text, status: ok ? 'sent' : 'failed', errorMessage: ok ? undefined : 'send failed' });
+  logMessage({ phone: phone, direction: 'outbound', type: 'text', content: text, status: ok ? 'sent' : 'failed', errorMessage: ok ? undefined : 'send failed' });
   return ok;
 }
 
@@ -105,11 +121,13 @@ export async function sendWAButtons(
   buttons: { id: string; title: string }[],
   footerText?: string,
 ): Promise<boolean> {
+  const phone = validatePhone(to);
+  if (!phone) return false;
   const { phoneId } = getWACreds();
 
   if (!phoneId) {
     const btnList = buttons.map((b, i) => `${i + 1}. ${b.title}`).join('\n');
-    return sendWAText(to, `${bodyText}\n\n${btnList}${footerText ? '\n' + footerText : ''}`);
+    return sendWAText(phone, `${bodyText}\n\n${btnList}${footerText ? '\n' + footerText : ''}`);
   }
 
   const interactive: Record<string, unknown> = {
@@ -122,7 +140,7 @@ export async function sendWAButtons(
   return waFetch('messages', {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: phone,
     type: 'interactive',
     interactive,
   });
@@ -134,17 +152,19 @@ export async function sendWAList(
   sections: { title?: string; rows: { id: string; title: string; description?: string }[] }[],
   buttonText?: string,
 ): Promise<boolean> {
+  const phone = validatePhone(to);
+  if (!phone) return false;
   const { phoneId } = getWACreds();
 
   if (!phoneId) {
     const rows = sections.flatMap(s => s.rows.map(r => `- ${r.title}`));
-    return sendWAText(to, `${bodyText}\n\n${rows.join('\n')}`);
+    return sendWAText(phone, `${bodyText}\n\n${rows.join('\n')}`);
   }
 
   return waFetch('messages', {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: phone,
     type: 'interactive',
     interactive: {
       type: 'list',
@@ -166,10 +186,12 @@ export async function sendWATemplate(
   languageCode: string,
   parameters: string[],
 ): Promise<boolean> {
+  const phone = validatePhone(to);
+  if (!phone) return false;
   const ok = await waFetch('messages', {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to,
+    to: phone,
     type: 'template',
     template: {
       name: templateName,
@@ -182,6 +204,29 @@ export async function sendWATemplate(
       ],
     },
   });
-  logMessage({ phone: to, direction: 'outbound', type: 'template', content: `[${templateName}] ${parameters.join(' | ')}`, status: ok ? 'sent' : 'failed' });
+  logMessage({ phone: phone, direction: 'outbound', type: 'template', content: `[${templateName}] ${parameters.join(' | ')}`, status: ok ? 'sent' : 'failed' });
   return ok;
 }
+
+const MESSAGE_RETENTION_DAYS = parseInt(process.env.WA_MESSAGE_RETENTION_DAYS || '90', 10);
+const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+export function startMessageCleanup(): void {
+  if (MESSAGE_RETENTION_DAYS <= 0) return;
+
+  setInterval(async () => {
+    try {
+      const cutoff = new Date(Date.now() - MESSAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+      const prismaModule = await import('@/lib/db');
+      const result = await (prismaModule.prisma as any).whatsAppMessage.deleteMany({
+        where: { createdAt: { lt: cutoff } },
+      });
+      if (result.count > 0) {
+        console.log(`[WA cleanup] Deleted ${result.count} old WhatsAppMessage records (older than ${MESSAGE_RETENTION_DAYS}d)`);
+      }
+    } catch (e) {
+    }
+  }, CLEANUP_INTERVAL_MS);
+}
+
+startMessageCleanup();

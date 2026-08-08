@@ -69,7 +69,7 @@ model User {
   pendingEmail        String?
   pendingEmailCode    String?
   pendingEmailExpires DateTime?
-  resetToken          String?
+  resetToken          String?   @db.Text
   resetExpires        DateTime?
   createdAt           DateTime  @default(now())
   canPayByInvoice     Boolean   @default(false)
@@ -552,7 +552,7 @@ model comDriver {
   acceptedStreak Int         @default(0) // Current consecutive accepted rides
   drUsername     String      @unique
   drPass         String      // Will store hashed password
-  resetToken     String?     // Password reset token
+  resetToken     String?     @db.Text // Password reset token
   resetExpires   DateTime?   // Password reset token expiry
   apiKey         String?     @unique // API key for server-to-server calls
   expoPushToken  String?     @unique // Expo push token for notifications
@@ -614,6 +614,38 @@ model comVehicles {
   @@index([comId])
   @@index([uId])
   @@index([status])
+}
+
+model DriverSession {
+  id           Int      @id @default(autoincrement())
+  driverId     Int
+  jti          String   @unique
+  refreshToken String   @unique
+  deviceId     String?
+  deviceInfo   String?
+  ipAddress    String?
+  lastIpAddress String?
+  userAgent    String?
+  isRevoked    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  lastUsedAt   DateTime @default(now())
+  revokedAt    DateTime?
+
+  @@index([driverId])
+  @@index([jti])
+  @@index([refreshToken])
+  @@index([driverId, isRevoked])
+}
+
+model TokenBlacklist {
+  id        Int      @id @default(autoincrement())
+  jti       String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([jti])
+  @@index([expiresAt])
 }
 
 model driversvagt {

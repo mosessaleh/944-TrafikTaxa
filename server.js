@@ -10,6 +10,7 @@ const realtimeService = require('./lib/realtime-service');
 const DriverStatusMonitor = require('./lib/driver-status-monitor');
 const { sendPushToDriver } = require('./lib/notification-service');
 const { sendEmail } = require('./lib/email');
+const { sendWAText } = require('./lib/wa-client');
 const { chargeCancellationFee } = require('./lib/payment-processor');
 const {
   ensureDriverScheduleTables,
@@ -194,6 +195,7 @@ function buildRidePayload(ride) {
     dropoffAddress: ride.dropoffAddress,
     price: ride.price,
     distanceKm: ride.distanceKm,
+    durationMin: ride.durationMin || null,
     riderName: ride.riderName,
     startLatLon: ride.startLatLon,
     stopLatLon: ride.stopLatLon || null,
@@ -690,17 +692,16 @@ async function shouldSkipDriverByPreferences(driverId, ride, timeMinutes) {
   try {
     const prefs = await getDriverRidePreferences(driverId);
     if (!prefs) {
-      console.log(`Skipping driver ${driverId} - no ride preferences set`);
+      return false;
+    }
+    const hasMaxDistance = prefs.minDistanceKm > 0;
+    const hasMaxTime = prefs.minTimeMinutes > 0;
+    if (!hasMaxDistance && !hasMaxTime) return false;
+    if (hasMaxTime && timeMinutes > prefs.minTimeMinutes) {
+      console.log(`Skipping driver ${driverId} - ETA ${timeMinutes}min > pref maxTime ${prefs.minTimeMinutes}min`);
       return true;
     }
-    const hasMinDistance = prefs.minDistanceKm > 0;
-    const hasMinTime = prefs.minTimeMinutes > 0;
-    if (!hasMinDistance && !hasMinTime) return false;
-    if (hasMinTime && timeMinutes < prefs.minTimeMinutes) {
-      console.log(`Skipping driver ${driverId} - ETA ${timeMinutes}min < pref minTime ${prefs.minTimeMinutes}min`);
-      return true;
-    }
-    if (hasMinDistance) {
+    if (hasMaxDistance) {
       const connectedDriver = connectedDrivers?.get(driverId);
       let driverLat = null, driverLon = null;
       if (connectedDriver?.location) {
@@ -719,8 +720,8 @@ async function shouldSkipDriverByPreferences(driverId, ride, timeMinutes) {
         const pickupLon = typeof p === 'object' ? (p.lon ?? p[1]) : p[1];
         if (pickupLat != null && pickupLon != null) {
           const distanceKm = calculateDistanceKm(driverLat, driverLon, pickupLat, pickupLon);
-          if (distanceKm < prefs.minDistanceKm) {
-            console.log(`Skipping driver ${driverId} - distance ${distanceKm.toFixed(1)}km < pref minDistance ${prefs.minDistanceKm}km`);
+          if (distanceKm > prefs.minDistanceKm) {
+            console.log(`Skipping driver ${driverId} - distance ${distanceKm.toFixed(1)}km > pref maxDistance ${prefs.minDistanceKm}km`);
             return true;
           }
         }
@@ -1037,8 +1038,10 @@ async function buildScheduledCandidates(ride) {
 
   const uniqueStrategyDriverIds = Array.from(new Set(strategyDriverIds));
   if (!uniqueStrategyDriverIds.length) {
+    console.log(`[SCHED-CAND ${ride.id}] vehicle-selection returned zero strategy drivers (excluded: ${excludedDriverIds.size})`);
     return [];
   }
+  console.log(`[SCHED-CAND ${ride.id}] vehicle-selection returned ${uniqueStrategyDriverIds.length} drivers: [${uniqueStrategyDriverIds.join(',')}]`);
 
   const rawDriversMap = new Map();
 
@@ -1086,7 +1089,11 @@ async function buildScheduledCandidates(ride) {
   }
 
   const rawDrivers = Array.from(rawDriversMap.values());
-  if (rawDrivers.length === 0) return [];
+  if (rawDrivers.length === 0) {
+    console.log(`[SCHED-CAND ${ride.id}] all ${uniqueStrategyDriverIds.length} strategy drivers missing location (not connected + no lastLocation)`);
+    return [];
+  }
+  console.log(`[SCHED-CAND ${ride.id}] ${rawDrivers.length}/${uniqueStrategyDriverIds.length} strategy drivers have location data`);
 
   const driverIds = rawDrivers.map((d) => d.driverId);
   const now = new Date();
@@ -1108,7 +1115,11 @@ async function buildScheduledCandidates(ride) {
     }
   });
 
-  if (!driverRecords.length) return [];
+  if (!driverRecords.length) {
+    console.log(`[SCHED-CAND ${ride.id}] all ${driverIds.length} drivers filtered: not active / no car / offline / banned`);
+    return [];
+  }
+  console.log(`[SCHED-CAND ${ride.id}] ${driverRecords.length}/${driverIds.length} drivers passed active/car/online/ban check`);
 
   const driverRecordMap = new Map(driverRecords.map((d) => [d.id, d]));
   const carPlates = driverRecords.map((d) => d.car).filter(Boolean);
@@ -1220,14 +1231,25 @@ async function buildScheduledCandidates(ride) {
     });
   }
 
-  if (!candidates.length) return [];
+  if (!candidates.length) {
+    console.log(`[SCHED-CAND ${ride.id}] all drivers filtered out by vehicle type (ride type: ${ride.vehicleTypeId}, allowed: [${allowedTypes.join(',')}])`);
+    return [];
+  }
+  console.log(`[SCHED-CAND ${ride.id}] ${candidates.length} candidates passed vehicle-type + distance checks`);
 
   const eligibleBySchedule = [];
   for (const candidate of candidates) {
     try {
+      const rideStart = ride.pickupTime ? new Date(ride.pickupTime) : null;
+      const rideEnd = rideStart && ride.durationMin
+        ? new Date(rideStart.getTime() + ride.durationMin * 60000)
+        : null;
       const schedule = await canDriverReceiveRide(prisma, candidate.driverId, {
         strict: true,
-        now: new Date()
+        now: new Date(),
+        rideStart,
+        rideEnd,
+        rideDurationMin: ride.durationMin || 0
       });
       if (!schedule?.eligible) {
         continue;
@@ -1238,9 +1260,19 @@ async function buildScheduledCandidates(ride) {
     }
   }
 
-  if (!eligibleBySchedule.length) return [];
+  if (!eligibleBySchedule.length) {
+    console.log(`[SCHED-CAND ${ride.id}] all ${candidates.length} candidates filtered out by shift schedule`);
+    return [];
+  }
+  console.log(`[SCHED-CAND ${ride.id}] ${eligibleBySchedule.length}/${candidates.length} candidates passed shift schedule check`);
 
   const conflictedFiltered = await filterConflictingDrivers(eligibleBySchedule, ride);
+  if (!conflictedFiltered.length) {
+    console.log(`[SCHED-CAND ${ride.id}] all ${eligibleBySchedule.length} candidates filtered out by conflict detection`);
+    return [];
+  }
+  console.log(`[SCHED-CAND ${ride.id}] ${conflictedFiltered.length}/${eligibleBySchedule.length} candidates passed conflict check`);
+
   const strategyOrder = new Map(uniqueStrategyDriverIds.map((id, index) => [id, index]));
   conflictedFiltered.sort((a, b) => {
     const aPriority = Boolean(a.chainPriority);
@@ -3214,6 +3246,7 @@ async function reassignRide(rideId) {
         dropoffAddress: true,
         price: true,
         distanceKm: true,
+        durationMin: true,
         riderName: true,
         startLatLon: true,
         endLatLon: true,
@@ -4499,20 +4532,8 @@ app.prepare().then(() => {
               const etaText = etaMinutes > 0 ? `\n⏱ ETA: ~${etaMinutes} min` : '';
               const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}${etaText}\n📋 Ride #${rideForNotif.id}\n📍 ${rideForNotif.pickupAddress} → ${rideForNotif.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat. To end the chat, send "endchat".`;
 
-              const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-              const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
-              console.log(`[WA Notify] Creds: phoneId=${!!phoneId}, token=${!!token}`);
-              if (phoneId && token) {
-                const res = await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: msg } }),
-                });
-                if (!res.ok) console.error('[WA Notify] Failed:', res.status, await res.text().catch(() => ''));
-                else console.log(`[WA Notify] Sent to ${user.phone} for ride #${data.rideId}`);
-              } else {
-                console.log('[WA Notify] No creds available — skipping');
-              }
+              const sent = await sendWAText(user.phone, msg);
+              console.log(`[WA Notify] ${sent ? 'Sent' : 'Failed to send'} to ${user.phone} for ride #${data.rideId}`);
             } else {
               console.log('[WA Notify] No user phone found — skipping');
             }
@@ -4871,15 +4892,7 @@ app.prepare().then(() => {
             });
             if (user?.phone) {
               const waMsg = `💬 *Message from driver:*\n\n"${message}"\n\n📋 Ride #${bookingId}\n\nReply to this chat to message the driver. Send "endchat" to stop.`;
-              const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-              const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
-              if (phoneId && token) {
-                await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: waMsg } }),
-                }).catch(() => {});
-              }
+              sendWAText(user.phone, waMsg).catch(() => {});
             }
           }
         }
@@ -5010,15 +5023,7 @@ app.prepare().then(() => {
             const timeStr = pickupTime.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' });
             const msg = `⏰ Reminder: Your ride is in 15 minutes! 🚕\n\nBooking: #${ride.id}\nTime: ${timeStr}`;
 
-            const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
-            const token = process.env.WHATSAPP_ACCESS_TOKEN || '';
-            if (phoneId && token) {
-              await fetch(`https://graph.facebook.com/v22.0/${phoneId}/messages`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: user.phone, type: 'text', text: { preview_url: false, body: msg } }),
-              }).catch(() => {});
-            }
+            sendWAText(user.phone, msg).catch(() => {});
 
             await prisma.ride.update({
               where: { id: ride.id },

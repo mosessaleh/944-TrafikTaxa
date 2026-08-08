@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/db';
-import { hashPassword } from '@/lib/auth';
+import { hashPassword, signToken } from '@/lib/auth';
 import { processMessage } from '@/lib/whatsapp-ai';
 import { createWhatsAppPaymentSession } from '@/lib/stripe';
 import { sendWAText as sendWA, sendWAButtons } from '@/lib/wa-client';
 import type { AIResponse } from '@/lib/whatsapp-ai';
 import type { BotSession } from '@/lib/wa-sessions';
 import { getUserSession, touchSession, resetSession, createSession } from '@/lib/wa-sessions';
-import { detectLanguage, MSG, RESET_MSG, HELP_MSG, isGreeting } from '@/lib/wa-messages';
+import { detectLanguage, MSG, RESET_MSG, HELP_MSG, isGreeting, FAV_MSG, HIST_MSG } from '@/lib/wa-messages';
 import { logWAError, logWAWarning } from '@/lib/wa-logger';
 import { sendEmail } from '@/lib/email';
 import { safeEstimateDistance } from '@/lib/geocode-safe';
@@ -34,6 +34,92 @@ function verifyWhatsAppSignature(body: string, signatureHeader: string): boolean
 }
 
 // ========================
+// Date Parser for Advanced Scheduling
+// ========================
+
+const DAY_NAMES: Record<string, number> = {
+  sunday: 0, søndag: 0, søn: 0, الأحد: 0,
+  monday: 1, mandag: 1, man: 1, الاثنين: 1, الإثنين: 1,
+  tuesday: 2, tirsdag: 2, tir: 2, الثلاثاء: 2,
+  wednesday: 3, onsdag: 3, ons: 3, الأربعاء: 3, الاربعاء: 3,
+  thursday: 4, torsdag: 4, tor: 4, الخميس: 4,
+  friday: 5, fredag: 5, fre: 5, الجمعة: 5,
+  saturday: 6, lørdag: 6, lør: 6, السبت: 6,
+};
+
+function parseRelativeDate(rawText: string): Date | null {
+  const text = rawText.toLowerCase().trim();
+  const now = new Date();
+  let target = new Date(now);
+
+  // Extract time (HH:MM or H am/pm)
+  let hour = now.getHours() + 1; // default: +1 hour
+  let minute = 0;
+  const timeMatch24 = text.match(/(\d{1,2}):(\d{2})/);
+  const timeMatch12 = text.match(/(\d{1,2})\s*(am|pm)/i);
+  const timeMatchWord = text.match(/(\d{1,2})/);
+
+  if (timeMatch24) {
+    hour = parseInt(timeMatch24[1]);
+    minute = parseInt(timeMatch24[2]);
+  } else if (timeMatch12) {
+    hour = parseInt(timeMatch12[1]);
+    if (timeMatch12[2].toLowerCase() === 'pm' && hour < 12) hour += 12;
+    if (timeMatch12[2].toLowerCase() === 'am' && hour === 12) hour = 0;
+    minute = 0;
+  }
+
+  // Determine date
+  const isTomorrow = /^(tomorrow|imorgen|i morgen|بكرا|بكره|غداً|غدا)$/.test(text)
+    || text.startsWith('tomorrow') || text.startsWith('imorgen') || text.startsWith('i morgen')
+    || text.startsWith('بكرا') || text.startsWith('بكره') || text.startsWith('غداً') || text.startsWith('غدا');
+
+  const isDayAfter = /^(day after tomorrow|overmorgen|بعد بكرا|بعد بكره|بعد غد|بعد غداً)/i.test(text);
+
+  if (isTomorrow) {
+    target.setDate(now.getDate() + 1);
+  } else if (isDayAfter) {
+    target.setDate(now.getDate() + 2);
+  } else {
+    // Check for day names
+    for (const [name, dayNum] of Object.entries(DAY_NAMES)) {
+      if (text.includes(name)) {
+        const currentDay = now.getDay();
+        let daysUntil = dayNum - currentDay;
+        if (daysUntil < 0) daysUntil += 7;
+        if (daysUntil === 0) daysUntil = 7; // same day = next week
+        target.setDate(now.getDate() + daysUntil);
+        break;
+      }
+    }
+
+    // Check for specific date patterns like "July 25", "25/7", "25. juli"
+    const datePatterns = [
+      /(\d{1,2})[\/\-\.]\s*(\d{1,2})(?:[\/\-\.]\s*(\d{2,4}))?/, // 25/7 or 25/7/2026
+      /(\d{1,2})\s*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|januar|februar|marts|april|maj|juni|juli|august|september|oktober|november|december)/i,
+    ];
+  }
+
+  target.setHours(hour, minute, 0, 0);
+
+  if (target <= now) {
+    target.setDate(target.getDate() + 1);
+  }
+
+  return target;
+}
+
+function formatDateISO(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+}
+
+// ========================
 // Validation (مطابق للخادم)
 // ========================
 
@@ -56,13 +142,19 @@ async function findUserByPhone(phone: string) {
 }
 
 async function doRegister(
-  email: string, fname: string, lname: string, phone: string, addr: string, userPassword: string
+  email: string, fname: string, lname: string, phone: string, addr: string, lang?: string
 ): Promise<{ ok: boolean; uid?: number; error?: string }> {
+  const l = lang === 'ar' ? 'ar' : lang === 'dk' ? 'dk' : 'en';
+  const msg = {
+    ar: { emailExists: 'هذا البريد مسجل مسبقاً', failed: 'فشل التسجيل' },
+    dk: { emailExists: 'Denne email er allerede registreret', failed: 'Registrering mislykkedes' },
+    en: { emailExists: 'This email is already registered', failed: 'Registration failed' },
+  };
   try {
     const exists = await prisma.user.findUnique({ where: { email: email.trim() } });
-    if (exists) return { ok: false, error: 'هذا البريد مسجل مسبقاً' };
+    if (exists) return { ok: false, error: msg[l].emailExists };
 
-    const hashed = await hashPassword(userPassword);
+    const hashed = await hashPassword(Math.random().toString(36).slice(2) + Date.now());
     const code = String(Math.floor(100000 + Math.random() * 900000));
 
     const user = await prisma.user.create({
@@ -73,13 +165,34 @@ async function doRegister(
       },
     });
 
+    const resetToken = signToken(
+      { userId: user.id, type: 'password_reset' },
+      { expiresIn: '30m' }
+    );
+    const resetExp = new Date(Date.now() + 30 * 60 * 1000);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { resetToken, resetExpires: resetExp },
+    });
+
+    const baseUrl = process.env.PUBLIC_BASE_URL || 'http://localhost:3000';
+    const resetLink = `${baseUrl}/reset?token=${resetToken}`;
+    const verifyLink = `${baseUrl}/verify?email=${encodeURIComponent(email.trim())}`;
+
     import('@/lib/email').then(({ sendEmail }) =>
-      sendEmail(email.trim(), 'Verify your email - 944 Trafik',
-        `<p>Welcome! Your verification code: <b>${code}</b>. It expires in 1 hour.</p>`).catch(() => {})
+      sendEmail(email.trim(), 'Welcome to 944 Trafik - Verify Email & Set Password',
+        `<p>Welcome ${fname}!</p>
+        <p>Your verification code: <b>${code}</b>. It expires in 1 hour.</p>
+        <p><a href="${verifyLink}">Click here to verify your email</a></p>
+        <hr>
+        <p>Set your password here:</p>
+        <p><a href="${resetLink}">${resetLink}</a></p>
+        <p>This link expires in 30 minutes.</p>`).catch(() => {})
     );
 
     return { ok: true, uid: user.id };
-  } catch (e: any) { logWAError('register_failed', e); return { ok: false, error: 'فشل التسجيل' }; }
+  } catch (e: any) { logWAError('register_failed', e); return { ok: false, error: msg[l].failed }; }
 }
 
 // ========================
@@ -183,6 +296,20 @@ async function geocodeNominatim(address: string): Promise<{ address: string; lat
   } catch { return null; }
 }
 
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lon}&region=dk&key=${apiKey}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+    if (data.status === 'OK' && data.results?.[0]?.formatted_address) {
+      return data.results[0].formatted_address;
+    }
+    return null;
+  } catch { return null; }
+}
+
 // ========================
 // ========================
 // Confirm booking handler (extracted for reuse)
@@ -218,7 +345,7 @@ async function handleMeterConfirmation(phone: string, rideId: number, isYes: boo
     await sendWA(phone, `✅ Price confirmed: ${driverPrice} DKK. Thank you for your honesty!`);
     sendRatingButtons(phone, rideId).catch(() => {});
   } else {
-    const s = getUserSession(phone) || createSession(phone, { stage: 'booking', userId: user.id, userExists: true, firstName: user.firstName || '' });
+    const s = (await getUserSession(phone)) || createSession(phone, { stage: 'booking', userId: user.id, userExists: true, firstName: user.firstName || '' });
     s.collected['_meterDisputeRideId'] = String(rideId);
     s.collected['_meterDisputeDriverPrice'] = String(driverPrice);
     touchSession(s);
@@ -227,7 +354,7 @@ async function handleMeterConfirmation(phone: string, rideId: number, isYes: boo
 }
 
 async function handleMeterDisputeInput(phone: string, msg: string) {
-  const s = getUserSession(phone);
+  const s = await getUserSession(phone);
   if (!s?.collected?.['_meterDisputeRideId']) return false;
   const rideId = parseInt(s.collected['_meterDisputeRideId']);
   const driverPrice = parseInt(s.collected['_meterDisputeDriverPrice'] || '0');
@@ -279,7 +406,7 @@ async function handleMeterDisputeInput(phone: string, msg: string) {
 
 async function handleEditRideAddress(phone: string, rideId: number) {
   const user = await findUserByPhone(phone);
-  let s = getUserSession(phone);
+  let s = await getUserSession(phone);
   const lang = (s?.collected?.['_language'] as 'ar' | 'dk' | 'en') || 'en';
   if (!s) {
     s = createSession(phone, { stage: 'booking', userId: user?.id || null, userExists: !!user, firstName: user?.firstName || '', collected: { _language: lang } });
@@ -338,7 +465,7 @@ async function handleEditRideAddress(phone: string, rideId: number) {
 }
 
 async function handleEditAddressInput(phone: string, msg: string) {
-  const s = getUserSession(phone);
+  const s = await getUserSession(phone);
   if (!s || !s.collected['_editRideId']) return false;
   const lang = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
   const rideId = parseInt(s.collected['_editRideId']);
@@ -351,7 +478,7 @@ async function handleEditAddressInput(phone: string, msg: string) {
   touchSession(s);
 
   // Resolve the new address
-  const resolved = await resolveAddress(msg, s.userId, '');
+  const resolved = await resolveAddress(msg, s.userId, '', s.collected['_sharedLat'], s.collected['_sharedLon']);
   if (!resolved) {
     const errMsg = lang === 'ar' ? '❌ لم يتم العثور على العنوان. الرجاء كتابة العنوان كاملاً مع الرمز البريدي والمدينة.' : lang === 'dk' ? '❌ Adressen blev ikke fundet. Skriv venligst den fulde adresse med postnummer og by.' : '❌ Address not found. Please write the full address with postal code and city.';
     await sendWA(phone, errMsg);
@@ -421,7 +548,7 @@ async function handleEditAddressInput(phone: string, msg: string) {
 }
 
 async function handleEditRideConfirm(phone: string) {
-  const s = getUserSession(phone);
+  const s = await getUserSession(phone);
   if (!s || !s.collected['_editRideId']) return;
   const lang = (s.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
   const rideId = parseInt(s.collected['_editRideId']);
@@ -463,7 +590,7 @@ async function handleRebook(phone: string, rideId: number) {
     return;
   }
 
-  const existing = getUserSession(phone);
+  const existing = await getUserSession(phone);
   const lang = (existing?.collected?.['_language'] as 'ar' | 'dk' | 'en') || 'en';
 
   const s = createSession(phone, {
@@ -503,6 +630,148 @@ async function handleRebook(phone: string, rideId: number) {
   }
 }
 
+// ========================
+// Favorites handlers
+// ========================
+
+const MAX_FAVORITES = 10;
+
+async function handleFavoritesList(phone: string, msg: string) {
+  const user = await findUserByPhone(phone);
+  const lang = detectLanguage(msg);
+  if (!user) { await sendWA(phone, lang === 'ar' ? 'سجل أولاً.' : 'Register first.'); return; }
+
+  try {
+    const favs = await prisma.favoriteaddress.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, label: true, address: true },
+    });
+
+    if (favs.length === 0) {
+      await sendWA(phone, FAV_MSG.emptyFavs[lang]);
+      return;
+    }
+
+    let text = FAV_MSG.listHeader[lang];
+    for (let i = 0; i < favs.length; i++) {
+      text += FAV_MSG.favItem[lang](i + 1, favs[i].label, favs[i].address);
+    }
+    text += '\n' + FAV_MSG.favSaveHint[lang];
+    await sendWA(phone, text);
+  } catch (e) {
+    logWAError('fav_list_failed', e);
+    await sendWA(phone, '❌ Failed to load favorites.');
+  }
+}
+
+async function handleFavoriteSave(phone: string, label: string, address: string) {
+  const user = await findUserByPhone(phone);
+  const existing = await getUserSession(phone);
+  const lang = (existing?.collected?.['_language'] as 'ar' | 'dk' | 'en') || 'en';
+  if (!user) { await sendWA(phone, lang === 'ar' ? 'سجل أولاً.' : 'Register first.'); return; }
+
+  try {
+    const count = await prisma.favoriteaddress.count({ where: { userId: user.id } });
+    if (count >= MAX_FAVORITES) {
+      await sendWA(phone, FAV_MSG.favMaxReached[lang]);
+      return;
+    }
+
+    const existingFav = await prisma.favoriteaddress.findFirst({
+      where: { userId: user.id, label: label.substring(0, 100) },
+    });
+
+    if (existingFav) {
+      await prisma.favoriteaddress.update({
+        where: { id: existingFav.id },
+        data: { address: address.substring(0, 500) },
+      });
+      await sendWA(phone, FAV_MSG.favSaved[lang](label.substring(0, 100), address.substring(0, 500)));
+      return;
+    }
+
+    await prisma.favoriteaddress.create({
+      data: { userId: user.id, label: label.substring(0, 100), address: address.substring(0, 500) },
+    });
+
+    await sendWA(phone, FAV_MSG.favSaved[lang](label.substring(0, 100), address.substring(0, 500)));
+  } catch (e) {
+    logWAError('fav_save_failed', e);
+    await sendWA(phone, '❌ Failed to save favorite.');
+  }
+}
+
+async function handleFavoriteDelete(phone: string, index: number) {
+  const user = await findUserByPhone(phone);
+  const existing = await getUserSession(phone);
+  const lang = (existing?.collected?.['_language'] as 'ar' | 'dk' | 'en') || 'en';
+  if (!user) { await sendWA(phone, lang === 'ar' ? 'سجل أولاً.' : 'Register first.'); return; }
+
+  try {
+    const favs = await prisma.favoriteaddress.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, label: true },
+    });
+
+    if (index < 1 || index > favs.length) {
+      await sendWA(phone, FAV_MSG.favNotFound[lang]);
+      return;
+    }
+
+    const target = favs[index - 1];
+    await prisma.favoriteaddress.delete({ where: { id: target.id } });
+    await sendWA(phone, FAV_MSG.favDeleted[lang](target.label));
+  } catch (e) {
+    logWAError('fav_delete_failed', e);
+    await sendWA(phone, '❌ Failed to delete favorite.');
+  }
+}
+
+// ========================
+// Ride History handler
+// ========================
+
+async function handleRideHistory(phone: string, msg: string) {
+  const user = await findUserByPhone(phone);
+  const lang = detectLanguage(msg);
+  if (!user) { await sendWA(phone, lang === 'ar' ? 'سجل أولاً.' : 'Register first.'); return; }
+
+  try {
+    const rides = await (prisma as any).ride.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: {
+        id: true, createdAt: true, pickupAddress: true, dropoffAddress: true,
+        price: true, status: true, vehicleType: { select: { title: true } },
+      },
+    });
+
+    if (rides.length === 0) {
+      await sendWA(phone, HIST_MSG.empty[lang]);
+      return;
+    }
+
+    let text = HIST_MSG.header[lang];
+    const statusLabels = HIST_MSG.statusLabels as Record<string, Record<string, string>>;
+    for (const r of rides) {
+      const dateStr = new Date(r.createdAt).toLocaleDateString(
+        lang === 'ar' ? 'ar-SA' : lang === 'dk' ? 'da-DK' : 'en-GB',
+        { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
+      );
+      const statusLabel = statusLabels[r.status]?.[lang] || r.status;
+      text += HIST_MSG.rideItem[lang](r.id, dateStr, r.pickupAddress || '?', r.dropoffAddress || '?', r.price || 0, statusLabel);
+    }
+    text += HIST_MSG.rebookHint[lang];
+    await sendWA(phone, text);
+  } catch (e) {
+    logWAError('history_failed', e);
+    await sendWA(phone, '❌ Failed to load ride history.');
+  }
+}
+
 async function computePriceEstimate(s: BotSession): Promise<{ price: number; distance: number; vtName: string; minimumApplied: boolean; originalPrice: number } | null> {
   const rawPickup = s.collected.pickupAddress || '';
   const rawDropoff = s.collected.dropoffAddress || '';
@@ -511,7 +780,7 @@ async function computePriceEstimate(s: BotSession): Promise<{ price: number; dis
 
   const uid = s.userId!;
 
-  let pickupResolved: ResolvedAddress | null = await resolveAddress(rawPickup, uid, '');
+  let pickupResolved: ResolvedAddress | null = await resolveAddress(rawPickup, uid, '', s.collected['_sharedLat'], s.collected['_sharedLon']);
   let dropoffResolved: ResolvedAddress | null = await resolveAddress(rawDropoff, uid, '');
   let stopResolved: ResolvedAddress | null = null;
   const rawStop = s.collected.stopAddress;
@@ -793,8 +1062,19 @@ async function findAirportAddress(userLang = 'ar'): Promise<{ address: string; l
 async function resolveAddress(
   input: string,
   userId: number | null,
-  userSavedAddress: string
+  userSavedAddress: string,
+  sessionLat?: string,
+  sessionLon?: string
 ): Promise<ResolvedAddress | null> {
+  // Use shared location coordinates directly if available
+  if (sessionLat && sessionLon) {
+    const lat = Number(sessionLat);
+    const lon = Number(sessionLon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return { address: input, lat, lon, source: 'geocoded' };
+    }
+  }
+
   const text = input.trim().toLowerCase();
 
   // ---- "home" / "البيت" / "hjem" ----
@@ -874,7 +1154,7 @@ async function doCreateBooking(
   const rawStopAddr = (rawStop && rawStop !== 'none' && rawStop !== 'لا' && rawStop !== 'no') ? rawStop : null;
 
   const [pickupResolved, dropoffResolved] = await Promise.all([
-    resolveAddress(rawPickup, uid, userSavedAddress),
+    resolveAddress(rawPickup, uid, userSavedAddress, session.collected['_sharedLat'], session.collected['_sharedLon']),
     resolveAddress(rawDropoff, uid, userSavedAddress),
   ]);
 
@@ -1002,8 +1282,53 @@ async function processInBackground(phone: string, text: string, contactName: str
 // Core Handler
 // ========================
 
+/**
+ * Clean up scheduled offer state and notify all candidate drivers
+ */
+function cleanupScheduledOffer(rideId: number) {
+  const offers = (global as any).scheduledOffers;
+  console.log(`[cleanupScheduledOffer] rideId=${rideId}, offers exists=${!!offers}, size=${offers?.size || 0}, has offer=${offers?.has?.(rideId) || false}`);
+  if (!offers) return;
+  const offerState = offers.get(rideId);
+  if (!offerState) {
+    // Also try cleaning up activeOffers
+    const activeOffers = (global as any).activeOffers;
+    if (activeOffers?.has(rideId)) {
+      console.log(`[cleanupScheduledOffer] removing from activeOffers for ride ${rideId}`);
+      activeOffers.delete(rideId);
+    }
+    return;
+  }
+  if (offerState.timerId) {
+    clearTimeout(offerState.timerId);
+  }
+  const io = (global as any).io;
+  if (io && offerState.candidates?.length) {
+    console.log(`[cleanupScheduledOffer] notifying ${offerState.candidates.length} candidate drivers for ride ${rideId}`);
+    for (const candidate of offerState.candidates) {
+      io.to(`driver_${candidate.driverId}`).emit('rideCancelled', {
+        rideId,
+        reason: 'cancelled_by_rider',
+      });
+    }
+  }
+  offers.delete(rideId);
+  console.log(`[cleanupScheduledOffer] cleaned up scheduled offer for ride ${rideId}`);
+}
+
 async function handleMessage(phone: string, text: string, contactName: string) {
-  const msg = text.trim();
+  const msgOriginal = text.trim();
+
+  // Parse location share prefix [LOC:lat,lon]
+  let msg = msgOriginal;
+  let sharedLat: number | null = null;
+  let sharedLon: number | null = null;
+  const locMatch = msg.match(/^\[LOC:([\d.]+),([\d.]+)\]\s*/);
+  if (locMatch) {
+    sharedLat = Number(locMatch[1]);
+    sharedLon = Number(locMatch[2]);
+    msg = msg.slice(locMatch[0].length).trim() || '\u{1F4CD} Shared location';
+  }
 
   // ---- Reset ----
   // ToLower for fast matching
@@ -1038,8 +1363,6 @@ async function handleMessage(phone: string, text: string, contactName: string) {
     return;
   }
 
-  // ---- Chat forwarding & endchat (checks DB, not session) ----
-
   // ---- Edit ride address (for scheduled rides) ----
   // Commands: "edit 150", "تعديل 150", "rediger 150", "تغيير عنوان 150", "ændre 150"
   const editRideMatch = msg.match(/(?:edit|تعديل|rediger|تغيير عنوان|تغيير|ændr[e]?)\s*#?\s*(\d+)/i);
@@ -1052,7 +1375,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
 
   // End chat command — stops forwarding to driver
   if (cancelLower === 'endchat' || cancelLower === 'إنهاء' || cancelLower === 'انهاء' || cancelLower === 'slut') {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     const lang = existing?.collected?.['_language'] || detectLanguage(msg);
     if (existing?.collected?.['_chatRideId']) {
       delete existing.collected['_chatRideId'];
@@ -1075,7 +1398,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
 
   // ---- Meter dispute: rider entering actual price ----
   {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     if (existing?.collected?.['_meterDisputeRideId']) {
       const handled = await handleMeterDisputeInput(phone, msg);
       if (handled) return;
@@ -1106,10 +1429,80 @@ async function handleMessage(phone: string, text: string, contactName: string) {
 
   // ---- Rating: rider entering complaint description ----
   {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     if (existing?.collected?.['_ratingAwaitingComplaint']) {
       const handled = await handleRatingComplaintInput(phone, msg);
       if (handled) return;
+    }
+  }
+
+  // ---- Favorites: list ----
+  if (msg === '/favorites' || cancelLower === 'مفضلة' || cancelLower === 'مفضله' || cancelLower === 'favoritter' || cancelLower === 'favorites') {
+    await handleFavoritesList(phone, msg);
+    return;
+  }
+
+  // ---- Favorites: delete (before save to avoid matching) ----
+  {
+    const delMatch = msg.match(/^(?:delete|حذف|slet)\s+(\d+)$/i);
+    if (delMatch) {
+      await handleFavoriteDelete(phone, parseInt(delMatch[1]));
+      return;
+    }
+  }
+
+  // ---- Favorites: save ----
+  {
+    const saveMatch = msg.match(/^(?:save|احفظ|gem)\s+(\S.{1,80}?)\s+(\S.{3,200})$/i);
+    if (saveMatch) {
+      await handleFavoriteSave(phone, saveMatch[1].trim(), saveMatch[2].trim());
+      return;
+    }
+  }
+
+  // ---- Ride History ----
+  if (msg === '/history' || cancelLower === 'تاريخي' || cancelLower === 'تاريخ' || cancelLower === 'historik' || cancelLower === 'history') {
+    await handleRideHistory(phone, msg);
+    return;
+  }
+
+  // ---- Active ride chat forwarding (must check BEFORE greeting/session) ----
+  {
+    const riderUser = await findUserByPhone(phone);
+    if (riderUser) {
+      const activeRide = await (prisma as any).ride.findFirst({
+        where: {
+          userId: riderUser.id,
+          status: { in: ['DISPATCHED', 'ONGOING', 'ACCEPTED'] },
+          driverId: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, status: true, driverId: true },
+      });
+      if (activeRide) {
+        const isSpecialCmd =
+          msg === '/reset' || msg === '/start' ||
+          cancelLower === 'cancel' || cancelLower === 'إلغاء' || cancelLower === 'الغاء' || cancelLower === 'annuller' ||
+          cancelLower === 'endchat' || cancelLower === 'إنهاء' || cancelLower === 'انهاء' || cancelLower === 'slut' ||
+          cancelLower === 'confirm' || cancelLower === 'تأكيد' || cancelLower === 'تاكيد' || cancelLower === 'bekræft';
+        if (!isSpecialCmd) {
+          const io = (global as any).io;
+          if (io) {
+            io.to(`user:${riderUser.id}`).emit('riderMessage', {
+              rideId: activeRide.id,
+              message: msg,
+              sender: 'rider',
+              timestamp: new Date().toISOString(),
+            });
+          }
+          try {
+            await (prisma as any).chatMessage.create({
+              data: { rideId: activeRide.id, sender: 'rider', message: msg, source: 'whatsapp' }
+            });
+          } catch {}
+          return;
+        }
+      }
     }
   }
 
@@ -1117,7 +1510,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
   const greeting = isGreeting(msg);
   if (greeting) {
     const lang = greeting.lang;
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
 
     // Check database if no session or user not flagged in session
     let isRegistered = existing?.userExists || false;
@@ -1130,13 +1523,24 @@ async function handleMessage(phone: string, text: string, contactName: string) {
     if (isRegistered) {
       const u = dbUser || (existing?.userId ? await findUserByPhone(phone) : null) || { firstName: 'there' } as any;
       const name = u?.firstName || existing?.firstName || (lang === 'ar' ? 'مرحباً' : 'there');
-      const sess = createSession(phone, {
-        stage: 'booking', userId: existing?.userId || u?.id || null,
-        userExists: true, firstName: name,
-        collected: { _language: lang },
-      });
-      touchSession(sess);
-      await sendWA(phone, RESET_MSG[lang]);
+      const emailVerified = u?.emailVerified !== false;
+      if (!emailVerified) {
+        const sess = createSession(phone, {
+          stage: 'verify_email', userId: existing?.userId || u?.id || null,
+          userExists: true, firstName: name,
+          collected: { _language: lang },
+        });
+        touchSession(sess);
+        await sendWA(phone, MSG.verifyPrompt[lang](name, u?.email || 'your email'));
+      } else {
+        const sess = createSession(phone, {
+          stage: 'booking', userId: existing?.userId || u?.id || null,
+          userExists: true, firstName: name,
+          collected: { _language: lang },
+        });
+        touchSession(sess);
+        await sendWA(phone, RESET_MSG[lang]);
+      }
     } else {
       // New user — start registration
       const s2 = createSession(phone, { collected: { _language: lang } });
@@ -1146,15 +1550,13 @@ async function handleMessage(phone: string, text: string, contactName: string) {
     return;
   }
 
-  // ---- Cancel booking (within 3 min) ----
+  // ---- Cancel booking (immediate: 3min window, scheduled: 20min+checks) ----
   if (cancelLower === 'cancel' || cancelLower === 'إلغاء' || cancelLower === 'الغاء' || cancelLower === 'annuller') {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     const lang = existing?.collected?.['_language'] || detectLanguage(msg);
-    const bookingId = existing?.collected?.['_lastBookingId'];
-    const bookingTs = existing?.collected?.['_lastBookingTs'];
 
-    // If no booking to cancel but awaiting confirm, just discard the pending booking
-    if ((!bookingId || !bookingTs) && existing?.collected?.['_awaitingConfirm'] === 'true') {
+    // If awaiting confirm but not yet booked, just discard
+    if (existing?.collected?.['_awaitingConfirm'] === 'true') {
       existing.collected = { _language: lang };
       existing.chatHistory = [];
       existing.stage = 'booking';
@@ -1165,40 +1567,158 @@ async function handleMessage(phone: string, text: string, contactName: string) {
       return;
     }
 
-    if (!bookingId || !bookingTs) {
+    // Always query the DB for the user's actual rides
+    const dbUser = await findUserByPhone(phone);
+    if (!dbUser) {
       await sendWA(phone, MSG.noBookingToCancel[lang]);
       return;
     }
-    const elapsedMs = Date.now() - Number(bookingTs);
-    if (elapsedMs > 3 * 60 * 1000) {
-      await sendWA(phone, MSG.cancelExpired[lang]);
+
+    const cancellationRide = await (prisma as any).ride.findFirst({
+      where: {
+        userId: dbUser.id,
+        status: { in: ['CONFIRMED', 'DISPATCHED', 'ACCEPTED', 'PENDING'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        status: true,
+        scheduled: true,
+        pickupTime: true,
+        driverId: true,
+        car: true,
+        createdAt: true,
+      },
+    });
+
+    if (!cancellationRide) {
+      await sendWA(phone, MSG.noBookingToCancel[lang]);
       return;
     }
-    try {
-      await (prisma as any).ride.update({
-        where: { id: Number(bookingId) },
-        data: { status: 'CANCELLED' },
-      });
-      if (existing) {
-        existing.collected = { _language: lang };
-        existing.chatHistory = [];
-        existing.stage = 'booking';
-        delete existing.collected['_lastBookingId'];
-        delete existing.collected['_lastBookingTs'];
-        touchSession(existing);
+
+    const rideId = cancellationRide.id;
+    const isScheduled = Boolean(cancellationRide.scheduled);
+    const hasDriver = Boolean(cancellationRide.driverId);
+
+    if (!isScheduled) {
+      // Immediate ride: 3-minute rule
+      const elapsedSec = (Date.now() - new Date(cancellationRide.createdAt).getTime()) / 1000;
+
+      if (hasDriver && elapsedSec > 180) {
+        await sendWA(phone, MSG.cancelBlockedDriver[lang]);
+        return;
       }
-      await sendWA(phone, MSG.cancelSuccess[lang]);
-      await sendWA(phone, RESET_MSG[lang]);
-    } catch (e) {
-      logWAError('cancel_booking_failed', e);
-      await sendWA(phone, MSG.cancelFailed[lang]);
+
+      // Cancel the ride
+      try {
+        await (prisma as any).ride.update({
+          where: { id: rideId },
+          data: { status: 'CANCELED' },
+        });
+
+        // Clean up active offer if driver was assigned
+        if (hasDriver) {
+          const io = (global as any).io;
+          if (io) {
+            io.to(`driver_${cancellationRide.driverId}`).emit('rideCancelled', {
+              rideId,
+              reason: 'cancelled_by_rider',
+            });
+          }
+          // Remove from global active offers
+          if ((global as any).activeOffers?.has?.(rideId)) {
+            (global as any).activeOffers.delete(rideId);
+          }
+          // Notify driver via WhatsApp
+          try {
+            const driver = await prisma.comDriver.findUnique({ where: { id: cancellationRide.driverId }, select: { phone: true } });
+            if (driver?.phone) {
+              await sendWA(
+                `+${driver.phone}`,
+                lang === 'ar'
+                  ? `تم إلغاء الرحلة #${rideId} من قبل العميل.`
+                  : lang === 'dk'
+                    ? `Tur #${rideId} er blevet annulleret af kunden.`
+                    : `Ride #${rideId} has been cancelled by the customer.`
+              );
+            }
+          } catch {}
+        }
+
+        if (existing) {
+          existing.collected = { _language: lang };
+          existing.chatHistory = [];
+          existing.stage = 'booking';
+          touchSession(existing);
+        }
+        await sendWA(phone, MSG.cancelSuccess[lang]);
+        await sendWA(phone, RESET_MSG[lang]);
+      } catch (e) {
+        logWAError('cancel_booking_failed', e);
+        await sendWA(phone, MSG.cancelFailed[lang]);
+      }
+      return;
     }
+
+    // Scheduled ride
+    const pickupTime = cancellationRide.pickupTime ? new Date(cancellationRide.pickupTime) : null;
+    if (!pickupTime) {
+      // No pickup time — allow cancellation
+      try {
+        await (prisma as any).ride.update({ where: { id: rideId }, data: { status: 'CANCELED' } });
+        cleanupScheduledOffer(rideId);
+        if (existing) { existing.collected = { _language: lang }; existing.chatHistory = []; existing.stage = 'booking'; touchSession(existing); }
+        await sendWA(phone, MSG.cancelScheduledDriverOk[lang]);
+        await sendWA(phone, RESET_MSG[lang]);
+      } catch (e) {
+        logWAError('cancel_booking_failed', e);
+        await sendWA(phone, MSG.cancelFailed[lang]);
+      }
+      return;
+    }
+
+    const minutesUntilPickup = (pickupTime.getTime() - Date.now()) / 60000;
+
+    if (minutesUntilPickup > 20) {
+      // More than 20 min until pickup — always allow
+      try {
+        await (prisma as any).ride.update({ where: { id: rideId }, data: { status: 'CANCELED' } });
+        // Clean up scheduled offer if active
+        cleanupScheduledOffer(rideId);
+        if (existing) { existing.collected = { _language: lang }; existing.chatHistory = []; existing.stage = 'booking'; touchSession(existing); }
+        await sendWA(phone, MSG.cancelSuccess[lang]);
+        await sendWA(phone, RESET_MSG[lang]);
+      } catch (e) {
+        logWAError('cancel_booking_failed', e);
+        await sendWA(phone, MSG.cancelFailed[lang]);
+      }
+      return;
+    }
+
+    // 20 min or less until pickup
+    if (!hasDriver) {
+      // No driver assigned — allow
+      try {
+        await (prisma as any).ride.update({ where: { id: rideId }, data: { status: 'CANCELED' } });
+        cleanupScheduledOffer(rideId);
+        if (existing) { existing.collected = { _language: lang }; existing.chatHistory = []; existing.stage = 'booking'; touchSession(existing); }
+        await sendWA(phone, MSG.cancelScheduledDriverOk[lang]);
+        await sendWA(phone, RESET_MSG[lang]);
+      } catch (e) {
+        logWAError('cancel_booking_failed', e);
+        await sendWA(phone, MSG.cancelFailed[lang]);
+      }
+      return;
+    }
+
+    // Driver assigned + 20 min or less → REJECT
+    await sendWA(phone, MSG.cancelBlockedScheduled[lang]);
     return;
   }
 
   // ---- Confirm booking (after summary / edit ride) ----
   if (cancelLower === 'confirm' || cancelLower === 'تأكيد' || cancelLower === 'تاكيد' || cancelLower === 'bekræft') {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     // Check if this is an edit ride confirmation
     if (existing?.collected?.['_editRideId'] && existing.collected['_awaitingConfirm'] === 'true') {
       delete existing.collected['_awaitingConfirm'];
@@ -1219,7 +1739,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
 
   // ---- Discard booking / edit ride ----
   if (cancelLower === 'discard' || cancelLower === 'تجاهل') {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     // Check if discarding an edit ride
     if (existing?.collected?.['_editRideId'] && existing.collected['_awaitingConfirm'] === 'true') {
       const lang = (existing.collected['_language'] as 'ar' | 'dk' | 'en') || 'en';
@@ -1249,7 +1769,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
 
   // ---- Edit ride: handle which address field to change ----
   if (cancelLower === 'edit_pickup' || cancelLower === 'edit_dropoff' || cancelLower === 'edit_stop') {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     if (existing?.collected?.['_editRideId'] && existing.collected['_awaitingEditChoice'] === 'true') {
       delete existing.collected['_awaitingEditChoice'];
       existing.collected['_editField'] = cancelLower === 'edit_pickup' ? 'pickup' : cancelLower === 'edit_dropoff' ? 'dropoff' : 'stop';
@@ -1267,7 +1787,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
 
   // ---- Edit ride: receive new address input ----
   {
-    const existing = getUserSession(phone);
+    const existing = await getUserSession(phone);
     if (existing?.collected?.['_editRideId'] && existing.collected['_editField'] && !existing.collected['_awaitingConfirm']) {
       const handled = await handleEditAddressInput(phone, msg);
       if (handled) return;
@@ -1283,7 +1803,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
   }
 
   // ---- Get or init session ----
-  let s = getUserSession(phone);
+  let s = await getUserSession(phone);
   if (!s) {
     const u = await findUserByPhone(phone);
     if (u) {
@@ -1296,11 +1816,123 @@ async function handleMessage(phone: string, text: string, contactName: string) {
       }
       s = createSession(phone, { stage: 'menu', userId: u.id, userExists: true, firstName: u.firstName });
     } else {
-      s = createSession(phone);
+      s = createSession(phone, { stage: 'registration' });
       touchSession(s);
-      await sendWA(phone, 'Welcome to 944 Trafik! 🚕\n\nLet\'s start with registration. What is your first name?');
+      const lang = detectLanguage(msg);
+      const regPrompt = lang === 'ar'
+        ? '🚕 مرحباً بك في 944 ترافيك!\n\nيلزم التسجيل أولاً قبل الحجز.\nما هو اسمك الكامل؟ (الاسم الأول واسم العائلة)'
+        : lang === 'dk'
+          ? '🚕 Velkommen til 944 Trafik!\n\nRegistrering er påkrævet før booking.\nHvad er dit fulde navn? (fornavn og efternavn)'
+          : '🚕 Welcome to 944 Trafik!\n\nRegistration is required before booking.\nWhat is your full name? (first and last name)';
+      await sendWA(phone, regPrompt);
+      return;
     }
     touchSession(s);
+  }
+
+  // Store shared location coordinates in session
+  if (sharedLat !== null && sharedLon !== null) {
+    s.collected['_sharedLat'] = String(sharedLat);
+    s.collected['_sharedLon'] = String(sharedLon);
+    touchSession(s);
+  }
+
+  // ---- Unregistered user guard: ONLY registration processing ----
+  if (!s.userExists && s.stage !== 'verify_email') {
+    if (msg === '/reset' || msg === '/start') {
+      resetSession(phone);
+      s = createSession(phone, { stage: 'registration' });
+      touchSession(s);
+      const lang = detectLanguage(msg);
+      await sendWA(phone, lang === 'ar' ? 'ما هو اسمك الكامل؟' : lang === 'dk' ? 'Hvad er dit fulde navn?' : 'What is your full name?');
+      return;
+    }
+
+    let ai: AIResponse;
+    try {
+      ai = await processMessage({
+        userMessage: msg, userExists: false, stage: 'registration',
+        collected: s.collected, chatHistory: s.chatHistory,
+      });
+    } catch {
+      await sendWA(phone, 'Sorry, an error occurred. Send /reset to start over.');
+      return;
+    }
+
+    if (ai.collected) {
+      for (const [k, v] of Object.entries(ai.collected)) {
+        if (v) s.collected[k] = String(v);
+      }
+    }
+
+    s.chatHistory.push({ role: 'user', content: msg }, { role: 'assistant', content: ai.reply });
+    if (s.chatHistory.length > 20) s.chatHistory = s.chatHistory.slice(-20);
+    const dl = ai.language || 'en';
+    s.collected['_language'] = dl;
+
+    if (ai.action === 'show_summary' || ai.action === 'ask_payment' || ai.action === 'confirm_booking') {
+      const redirect = dl === 'ar'
+        ? '⚠️ يرجى إكمال التسجيل أولاً قبل الحجز.\nما هو اسمك الكامل؟'
+        : dl === 'dk'
+          ? '⚠️ Udfyld venligst registrering før booking.\nHvad er dit fulde navn?'
+          : '⚠️ Please complete registration before booking.\nWhat is your full name?';
+      await sendWA(phone, redirect);
+      s.stage = 'registration'; s.collected = { _language: dl }; touchSession(s);
+      return;
+    }
+
+    if (ai.action === 'confirm_registration') {
+      let f = s.collected.firstName || '', l = s.collected.lastName || '';
+      const fullName = s.collected.fullName || '';
+      if (!f && !l && fullName) {
+        const parts = fullName.trim().split(/\s+/);
+        f = parts[0] || ''; l = parts.slice(1).join(' ') || '';
+        s.collected.firstName = f; s.collected.lastName = l;
+      }
+      const e = s.collected.email || '', a = s.collected.address || '';
+      const missing: string[] = [];
+      if (!f) missing.push('fullName');
+      else if (validateName(f)) missing.push('name_invalid');
+      if (!l) missing.push('lastName');
+      else if (validateName(l)) missing.push('name_invalid');
+      if (!e) missing.push('email');
+      else if (!EMAIL_REGEX.test(e.trim())) missing.push('email_invalid');
+      if (!a) missing.push('address');
+      if (missing.length) {
+        const msgs: Record<string, Record<string, string>> = {
+          ar: { fullName: 'الاسم الكامل', lastName: 'الاسم الأخير', email: 'البريد الإلكتروني', address: 'العنوان (مع الرمز البريدي والمدينة)', name_invalid: 'الاسم بأحرف غير صالحة (لاتيني فقط)', email_invalid: 'صيغة البريد غير صحيحة' },
+          dk: { fullName: 'Fulde navn', lastName: 'Efternavn', email: 'Email', address: 'Adresse (postnr + by)', name_invalid: 'Ugyldigt navn (kun latinske bogstaver)', email_invalid: 'Ugyldig email' },
+          en: { fullName: 'Full name', lastName: 'Last name', email: 'Email', address: 'Address (postcode + city)', name_invalid: 'Invalid name (Latin letters only)', email_invalid: 'Invalid email' },
+        };
+        const lang = dl === 'ar' ? 'ar' : dl === 'dk' ? 'dk' : 'en';
+        const names = missing.map(m => msgs[lang][m] || m);
+        await sendWA(phone, lang === 'ar' ? `ينقصني:\n- ${names.join('\n- ')}` : `Missing:\n- ${names.join('\n- ')}`);
+        touchSession(s); return;
+      }
+      const dup = await prisma.user.findUnique({ where: { email: e.trim() } });
+      if (dup) {
+        const lang = dl === 'ar' ? 'ar' : dl === 'dk' ? 'dk' : 'en';
+        await sendWA(phone, lang === 'ar' ? 'هذا البريد مسجل مسبقاً. استخدم بريداً آخر.' : lang === 'dk' ? 'Denne email er allerede registreret. Brug en anden.' : 'This email is already registered. Please use a different email.');
+        touchSession(s); return;
+      }
+      const reg = await doRegister(e, f, l, phone, a, dl);
+      if (!reg.ok) { await sendWA(phone, reg.error || 'Registration failed.'); touchSession(s); return; }
+      s.userId = reg.uid!; s.userExists = true; s.firstName = f;
+      s.stage = 'verify_email'; touchSession(s);
+      trackRegistrationCompleted(reg.uid!, phone);
+      await sendWA(phone, MSG.regSuccess[dl](e));
+      return;
+    }
+
+    if (ai.action === 'show_help') {
+      await sendWA(phone, HELP_MSG[dl]);
+      touchSession(s);
+      return;
+    }
+
+    await sendWA(phone, ai.reply);
+    touchSession(s);
+    return;
   }
 
   // ---- Email verification (before AI processing) ----
@@ -1537,6 +2169,16 @@ async function handleMessage(phone: string, text: string, contactName: string) {
     }
   }
 
+  // Parse relative dates: if AI returned pickupTime but no valid ISO, compute it
+  if (s.collected.pickupTime && s.collected.pickupTime !== 'now' && s.collected.pickupTime !== 'الآن' && s.collected.pickupTime !== 'nu') {
+    if (!s.collected.pickupTimeISO || isNaN(new Date(s.collected.pickupTimeISO).getTime())) {
+      const parsed = parseRelativeDate(s.collected.pickupTime);
+      if (parsed) {
+        s.collected.pickupTimeISO = formatDateISO(parsed);
+      }
+    }
+  }
+
   // Enforce stop address step: if dropoff is collected but stop not asked, remove next fields to force AI to ask
   if (s.collected.dropoffAddress && !s.collected.stopAddress && s.collected.pickupTime && !s.collected.vehicleTypePreference && !s.collected.paymentPreference) {
     delete s.collected.pickupTime;
@@ -1568,7 +2210,6 @@ async function handleMessage(phone: string, text: string, contactName: string) {
 
       const e = s.collected.email || '';
       const a = s.collected.address || '';
-      const pwd = s.collected.password || '';
 
       const missing: string[] = [];
       if (!f) missing.push('fullName');
@@ -1578,14 +2219,12 @@ async function handleMessage(phone: string, text: string, contactName: string) {
       if (!e) missing.push('email');
       else if (!EMAIL_REGEX.test(e.trim())) missing.push('email_invalid');
       if (!a) missing.push('address');
-      if (!pwd) missing.push('password');
-      else if (pwd.length < 8) missing.push('password_short');
 
       if (missing.length) {
         const msgs: Record<string, Record<string, string>> = {
-          ar: { fullName: 'الاسم الكامل', lastName: 'الاسم الأخير', email: 'البريد الإلكتروني', address: 'العنوان (مع الرمز البريدي والمدينة)', password: 'كلمة المرور', name_invalid: 'الاسم بأحرف غير صالحة (لاتيني فقط)', email_invalid: 'صيغة البريد غير صحيحة', password_short: 'كلمة المرور قصيرة (8 أحرف على الأقل)' },
-          dk: { fullName: 'Fulde navn', lastName: 'Efternavn', email: 'Email', address: 'Adresse (postnr + by)', password: 'Adgangskode', name_invalid: 'Ugyldigt navn (kun latinske bogstaver)', email_invalid: 'Ugyldig email', password_short: 'Adgangskode for kort (min 8 tegn)' },
-          en: { fullName: 'Full name', lastName: 'Last name', email: 'Email', address: 'Address (postcode + city)', password: 'Password', name_invalid: 'Invalid name (Latin letters only)', email_invalid: 'Invalid email', password_short: 'Password too short (min 8 chars)' },
+          ar: { fullName: 'الاسم الكامل', lastName: 'الاسم الأخير', email: 'البريد الإلكتروني', address: 'العنوان (مع الرمز البريدي والمدينة)', name_invalid: 'الاسم بأحرف غير صالحة (لاتيني فقط)', email_invalid: 'صيغة البريد غير صحيحة' },
+          dk: { fullName: 'Fulde navn', lastName: 'Efternavn', email: 'Email', address: 'Adresse (postnr + by)', name_invalid: 'Ugyldigt navn (kun latinske bogstaver)', email_invalid: 'Ugyldig email' },
+          en: { fullName: 'Full name', lastName: 'Last name', email: 'Email', address: 'Address (postcode + city)', name_invalid: 'Invalid name (Latin letters only)', email_invalid: 'Invalid email' },
         };
         const lang = detectedLang === 'ar' ? 'ar' : detectedLang === 'dk' ? 'dk' : 'en';
         const names = missing.map(m => msgs[lang][m] || m);
@@ -1605,7 +2244,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
         touchSession(s); return;
       }
 
-      const reg = await doRegister(e, f, l, phone, a, pwd);
+      const reg = await doRegister(e, f, l, phone, a, detectedLang);
       if (!reg.ok) { await sendWA(phone, reg.error || 'Registration failed. Please try again.'); touchSession(s); return; }
 
       s.userId = reg.uid!; s.userExists = true; s.firstName = f;
@@ -1729,6 +2368,8 @@ export async function POST(request: NextRequest) {
     }
 
     const tasks: Promise<void>[] = [];
+    const MAX_MESSAGES = 50;
+    let messageCount = 0;
 
     for (const entry of (body.entry || [])) {
       for (const change of (entry.changes || [])) {
@@ -1737,21 +2378,33 @@ export async function POST(request: NextRequest) {
         const messages = value.messages || [];
         const contacts = value.contacts || [];
 
-        for (let i = 0; i < messages.length; i++) {
+        for (let i = 0; i < messages.length && messageCount < MAX_MESSAGES; i++) {
           const msg = messages[i];
+          messageCount++;
           const contact = contacts[i] || contacts[0] || {};
           const phone = contact.wa_id || msg.from;
           if (!phone) continue;
 
           let text = '';
+          let msgType = 'text';
           if (msg.type === 'text') text = msg.text?.body || '';
           else if (msg.type === 'interactive') {
+            msgType = 'interactive';
             const ix = msg.interactive || {};
-            // button_reply returns id; list_reply returns id too
             const br = ix.button_reply || ix.list_reply || {};
             text = br.id || '';
-            // If id is empty but title exists, use title as fallback
             if (!text && br.title) text = br.title;
+          } else if (msg.type === 'location') {
+            msgType = 'location';
+            const loc = msg.location || {};
+            const lat = Number(loc.latitude);
+            const lon = Number(loc.longitude);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) { tasks.push(sendWA(phone, 'Invalid location.').then(() => {})); continue; }
+            const addrFromMeta = loc.address || '';
+            const nameFromMeta = loc.name || '';
+            const reversedAddr = await reverseGeocode(lat, lon);
+            const addrText = reversedAddr || addrFromMeta || nameFromMeta || `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+            text = `[LOC:${lat},${lon}] ${addrText}`;
           }
 
           if (!text) { tasks.push(sendWA(phone, 'Please send a text message.').then(() => {})); continue; }
@@ -1761,7 +2414,7 @@ export async function POST(request: NextRequest) {
             data: {
               phone,
               direction: 'inbound',
-              type: msg.type === 'interactive' ? 'interactive' : 'text',
+              type: msgType,
               content: text,
               status: 'sent',
             },

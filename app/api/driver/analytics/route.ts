@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verify, TokenExpiredError, JsonWebTokenError, NotBeforeError } from 'jsonwebtoken';
-import { getAuthSecret } from '@/lib/auth';
+import { checkTokenBlacklist, getAuthSecret } from '@/lib/auth';
 
 const {
   ensureDriverScheduleTables,
@@ -22,13 +22,13 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.substring(7);
-    let decoded: { driverId?: number; id?: number; type?: string };
+    let decoded: { driverId?: number; id?: number; type?: string; jti?: string };
 
     try {
       decoded = verify(
         token,
         JWT_SECRET
-      ) as { driverId?: number; id?: number; type?: string };
+      ) as { driverId?: number; id?: number; type?: string; jti?: string };
     } catch (error) {
       if (error instanceof TokenExpiredError) {
         return NextResponse.json({ error: 'Token expired' }, { status: 401 });
@@ -43,6 +43,15 @@ export async function GET(request: NextRequest) {
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    const jti = decoded?.jti;
+    if (jti) {
+      const isBlacklisted = await checkTokenBlacklist(jti);
+      if (isBlacklisted) {
+        return NextResponse.json({ error: 'Token has been revoked' }, { status: 401 });
+      }
+    }
+
     const { searchParams } = new URL(request.url);
     const period = searchParams.get('period') || 'month';
 

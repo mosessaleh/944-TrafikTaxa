@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { verify, TokenExpiredError, JsonWebTokenError, NotBeforeError } from 'jsonwebtoken';
 import { Expo } from 'expo-server-sdk';
-import { getAuthSecret } from '@/lib/auth';
+import { checkTokenBlacklist, getAuthSecret } from '@/lib/auth';
 
 const prisma = new PrismaClient();
 const JWT_SECRET = getAuthSecret();
@@ -35,6 +35,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
+    const jti = decoded?.jti;
+    if (jti) {
+      const isBlacklisted = await checkTokenBlacklist(jti);
+      if (isBlacklisted) {
+        return NextResponse.json({ error: 'Token has been revoked' }, { status: 401 });
+      }
+    }
+
     const { pushToken } = await request.json();
 
     if (!pushToken || typeof pushToken !== 'string') {
@@ -46,8 +54,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid Expo push token' }, { status: 400 });
     }
 
-    // Update driver's push token
+    // Update driver's push token — first remove from any other driver
     console.log('Updating push token for driverId:', driverId);
+    try {
+      await prisma.comDriver.updateMany({
+        where: {
+          expoPushToken: normalizedPushToken,
+          id: { not: driverId }
+        },
+        data: { expoPushToken: null },
+      });
+    } catch {}
     await prisma.comDriver.update({
       where: { id: driverId },
       data: { expoPushToken: normalizedPushToken },
