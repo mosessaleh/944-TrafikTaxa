@@ -1,18 +1,22 @@
+import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
+import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 
 const Schema = z.object({ email: z.string().email() });
 
 export async function POST(req: Request){
   try{
+    await limitOrThrow('resend-code:' + clientIpKey(req), { points: 3, durationSec: 60 });
+
     const { email } = Schema.parse(await req.json());
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) return NextResponse.json({ ok:true }); // لا نفصح
     if (user.emailVerified) return NextResponse.json({ ok:true, already:true });
 
-    const code = Math.floor(100000 + Math.random()*900000).toString();
+    const code = crypto.randomInt(100000, 999999).toString();
     const expires = new Date(Date.now()+1000*60*60); // 1 hour expiry
 
     await prisma.user.update({ where:{ id:user.id }, data:{ emailVerifyCode: code, emailVerifyExpires: expires } });

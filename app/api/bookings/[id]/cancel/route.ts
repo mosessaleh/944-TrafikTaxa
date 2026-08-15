@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
+import { validateCSRFMiddleware } from '@/lib/csrf';
+import { clientIpKey, limitCSRFValidationFailures } from '@/lib/rate-limit';
 import { sendEmail } from '@/lib/email';
 import { getSocketServer } from '@/lib/socket-server';
 import { chargeCancellationFee } from '@/lib/payment-processor';
@@ -27,6 +29,21 @@ export async function POST(
         { ok: false, error: 'Email verification required' },
         { status: 403 }
       );
+    }
+
+    // CSRF protection
+    const isValidCSRF = await validateCSRFMiddleware(request, user.id);
+    if (!isValidCSRF) {
+      const clientKey = clientIpKey(request);
+      try {
+        await limitCSRFValidationFailures(clientKey);
+      } catch (rateLimitError: any) {
+        return NextResponse.json(
+          { ok: false, error: 'Too many failed requests. Please try again later.' },
+          { status: 429, headers: { 'Retry-After': rateLimitError.retryAfter?.toString() || '900' } }
+        );
+      }
+      return NextResponse.json({ ok: false, error: 'Invalid CSRF token' }, { status: 403 });
     }
 
     const bookingId = parseInt(params.id);
@@ -163,9 +180,7 @@ export async function POST(
           savedPaymentMethod: await prisma.userPaymentMethod.findUnique({
             where: { id: booking.savedPaymentMethodId }
           })
-        },
-        cancellationFee,
-        booking.price
+        }
       );
 
       if (paymentResult.success) {

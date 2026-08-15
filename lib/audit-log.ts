@@ -1,5 +1,15 @@
 import { prisma } from '@/lib/db';
 
+function stripPII(metadata?: Record<string, any>): Record<string, any> | undefined {
+  if (!metadata) return undefined;
+  const safe = { ...metadata };
+  delete safe.cpr;
+  delete safe.password;
+  delete safe.cardNumber;
+  delete safe.phone;
+  return safe;
+}
+
 export enum AuditEvent {
   // Authentication events
   LOGIN_SUCCESS = 'login_success',
@@ -69,7 +79,7 @@ export class AuditLogger {
         console.warn(`[AUDIT ${severity.toUpperCase()}] ${data.event}:`, {
           userId: data.userId,
           ipAddress: data.ipAddress,
-          metadata: data.metadata,
+          metadata: stripPII(data.metadata),
         });
       }
     } catch (error) {

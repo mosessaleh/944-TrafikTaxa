@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 const JWT_SECRET = getAuthSecret();
 
 function extractDriverIdFromToken(token: string): number | null {
-  const decoded = jwt.verify(token, JWT_SECRET) as { driverId?: number; id?: number; type?: string };
+  const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { driverId?: number; id?: number; type?: string };
   if (decoded?.type !== 'driver') return null;
   const driverId = Number(decoded?.driverId ?? decoded?.id);
   if (!Number.isFinite(driverId) || driverId <= 0) return null;

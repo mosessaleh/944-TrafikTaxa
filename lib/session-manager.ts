@@ -230,7 +230,7 @@ export async function sendLoginNotificationEmail(
 
 export function extractJtiFromToken(token: string): string | null {
   try {
-    const decoded = verify(token, getAuthSecret()) as { jti?: string };
+    const decoded = verify(token, getAuthSecret(), { algorithms: ['HS256'] }) as { jti?: string };
     return decoded.jti || null;
   } catch {
     return null;

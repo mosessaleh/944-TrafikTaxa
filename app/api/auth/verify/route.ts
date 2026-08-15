@@ -2,14 +2,17 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { sendEmail } from '@/lib/email';
+import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 
 const Schema = z.object({ email: z.string().email(), code: z.string().regex(/^\d{6}$/) });
 
 export async function POST(req: Request){
   try{
+    await limitOrThrow('verify:' + clientIpKey(req), { points: 5, durationSec: 60 });
+
     const { email, code } = Schema.parse(await req.json());
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return NextResponse.json({ ok:false, error:'Account not found' }, { status:404 });
+    if (!user) return NextResponse.json({ ok:false, error:'Invalid verification code' }, { status:400 });
 
     if (user.emailVerified) {
       return NextResponse.json({ ok:true, already:true });
@@ -76,6 +79,7 @@ export async function POST(req: Request){
 
     return NextResponse.json({ ok:true });
   }catch(e:any){
-    return NextResponse.json({ ok:false, error:e?.message||'Invalid request' }, { status:400 });
+    const errorMessage = process.env.NODE_ENV === 'production' ? 'Verification failed' : (e?.message || 'Invalid request');
+    return NextResponse.json({ ok:false, error: errorMessage }, { status:400 });
   }
 }

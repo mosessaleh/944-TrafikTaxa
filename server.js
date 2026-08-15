@@ -24,6 +24,17 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 const prisma = new PrismaClient();
 
+function getInternalApiKey() {
+  const key = process.env.INTERNAL_API_KEY;
+  if (!key) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('INTERNAL_API_KEY is required in production');
+    }
+    return 'dev-internal-key';
+  }
+  return key;
+}
+
 function resolveSocketJwtSecret() {
   const configuredSecret = process.env.AUTH_SECRET || process.env.JWT_SECRET;
   if (configuredSecret && configuredSecret.length >= 32) {
@@ -40,6 +51,9 @@ function resolveSocketJwtSecret() {
 }
 
 const SOCKET_JWT_SECRET = resolveSocketJwtSecret();
+
+// TODO: For production multi-instance deployments, replace `global` state with Redis
+// activeOffers, scheduledOffers, pickupProximitySent should be stored in Redis
 
 // In-memory storage for rejected rides
 const rejectedRides = new Map(); // rideId -> Set of driverIds who rejected
@@ -73,7 +87,8 @@ function clearPickupProximity(rideId, driverId, reason) {
   if (pickupProximitySent.has(proximityKey)) {
     pickupProximitySent.delete(proximityKey);
     if (reason) {
-      console.log(`Cleared pickup proximity for ride ${rideId}, driver ${driverId} (${reason})`);
+      // (removed verbose log)
+      // original: console.log(`Cleared pickup proximity for ride ${rideId}, driver ${driverId} (${reason})`);
     }
   }
 }
@@ -314,7 +329,8 @@ function scheduleAutoUnban(driverId, delayMs) {
           where: { id: driverId },
           data: { bannedUntil: null }
         });
-        console.log(`Unbanned driver ${driverId} after timeout`);
+        // (removed verbose log)
+        // original: console.log(`Unbanned driver ${driverId} after timeout`);
       }
     } catch (error) {
       console.error(`Error unbanning driver ${driverId}:`, error);
@@ -533,7 +549,8 @@ async function getAvailableVehiclesForRide(ride) {
     });
 
     if (!rideDetails || !rideDetails.startLatLon) {
-      console.log(`Ride ${ride.id} missing location data`);
+      // (removed verbose log)
+      // original: console.log(`Ride ${ride.id} missing location data`);
       return [];
     }
 
@@ -545,7 +562,7 @@ async function getAvailableVehiclesForRide(ride) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
+        'x-internal-api-key': getInternalApiKey()
       },
       body: JSON.stringify({
         pickupLat: rideDetails.startLatLon.lat,
@@ -557,14 +574,16 @@ async function getAvailableVehiclesForRide(ride) {
     });
 
     if (!response.ok) {
-      console.log(`Failed to get available vehicles for ride ${ride.id}`);
+      // (removed verbose log)
+      // original: console.log(`Failed to get available vehicles for ride ${ride.id}`);
       return [];
     }
 
     const data = await response.json();
 
     if (!data.vehicles || data.vehicles.length === 0) {
-      console.log(`No vehicles available for ride ${ride.id}`);
+      // (removed verbose log)
+      // original: console.log(`No vehicles available for ride ${ride.id}`);
       return [];
     }
 
@@ -698,7 +717,8 @@ async function shouldSkipDriverByPreferences(driverId, ride, timeMinutes) {
     const hasMaxTime = prefs.minTimeMinutes > 0;
     if (!hasMaxDistance && !hasMaxTime) return false;
     if (hasMaxTime && timeMinutes > prefs.minTimeMinutes) {
-      console.log(`Skipping driver ${driverId} - ETA ${timeMinutes}min > pref maxTime ${prefs.minTimeMinutes}min`);
+      // (removed verbose log)
+      // original: console.log(`Skipping driver ${driverId} - ETA ${timeMinutes}min > pref maxTime ${prefs.minTimeMinutes}min`);
       return true;
     }
     if (hasMaxDistance) {
@@ -721,7 +741,8 @@ async function shouldSkipDriverByPreferences(driverId, ride, timeMinutes) {
         if (pickupLat != null && pickupLon != null) {
           const distanceKm = calculateDistanceKm(driverLat, driverLon, pickupLat, pickupLon);
           if (distanceKm > prefs.minDistanceKm) {
-            console.log(`Skipping driver ${driverId} - distance ${distanceKm.toFixed(1)}km > pref maxDistance ${prefs.minDistanceKm}km`);
+            // (removed verbose log)
+            // original: console.log(`Skipping driver ${driverId} - distance ${distanceKm.toFixed(1)}km > pref maxDistance ${prefs.minDistanceKm}km`);
             return true;
           }
         }
@@ -1010,7 +1031,7 @@ async function buildScheduledCandidates(ride) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
+        'x-internal-api-key': getInternalApiKey()
       },
       body: JSON.stringify({
         pickupLat: ride.startLatLon.lat,
@@ -1033,15 +1054,18 @@ async function buildScheduledCandidates(ride) {
       console.warn(`vehicle-selection returned non-OK while building scheduled candidates for ride ${ride.id}:`, vsResp.status);
     }
   } catch (error) {
-    console.error(`Error calling vehicle-selection for scheduled ride ${ride.id}:`, error);
+    // (removed verbose log)
+    // original: console.error(`Error calling vehicle-selection for scheduled ride ${ride.id}:`, error);
   }
 
   const uniqueStrategyDriverIds = Array.from(new Set(strategyDriverIds));
   if (!uniqueStrategyDriverIds.length) {
-    console.log(`[SCHED-CAND ${ride.id}] vehicle-selection returned zero strategy drivers (excluded: ${excludedDriverIds.size})`);
+    // (removed verbose log)
+    // original: console.log(`[SCHED-CAND ${ride.id}] vehicle-selection returned zero strategy drivers (excluded: ${excludedDriverIds.size})`);
     return [];
   }
-  console.log(`[SCHED-CAND ${ride.id}] vehicle-selection returned ${uniqueStrategyDriverIds.length} drivers: [${uniqueStrategyDriverIds.join(',')}]`);
+  // (removed verbose log)
+  // original: console.log(`[SCHED-CAND ${ride.id}] vehicle-selection returned ${uniqueStrategyDriverIds.length} drivers: [${uniqueStrategyDriverIds.join(',')}]`);
 
   const rawDriversMap = new Map();
 
@@ -1090,10 +1114,12 @@ async function buildScheduledCandidates(ride) {
 
   const rawDrivers = Array.from(rawDriversMap.values());
   if (rawDrivers.length === 0) {
-    console.log(`[SCHED-CAND ${ride.id}] all ${uniqueStrategyDriverIds.length} strategy drivers missing location (not connected + no lastLocation)`);
+    // (removed verbose log)
+    // original: console.log(`[SCHED-CAND ${ride.id}] all ${uniqueStrategyDriverIds.length} strategy drivers missing location (not connected + no lastLocation)`);
     return [];
   }
-  console.log(`[SCHED-CAND ${ride.id}] ${rawDrivers.length}/${uniqueStrategyDriverIds.length} strategy drivers have location data`);
+  // (removed verbose log)
+  // original: console.log(`[SCHED-CAND ${ride.id}] ${rawDrivers.length}/${uniqueStrategyDriverIds.length} strategy drivers have location data`);
 
   const driverIds = rawDrivers.map((d) => d.driverId);
   const now = new Date();
@@ -1116,10 +1142,12 @@ async function buildScheduledCandidates(ride) {
   });
 
   if (!driverRecords.length) {
-    console.log(`[SCHED-CAND ${ride.id}] all ${driverIds.length} drivers filtered: not active / no car / offline / banned`);
+    // (removed verbose log)
+    // original: console.log(`[SCHED-CAND ${ride.id}] all ${driverIds.length} drivers filtered: not active / no car / offline / banned`);
     return [];
   }
-  console.log(`[SCHED-CAND ${ride.id}] ${driverRecords.length}/${driverIds.length} drivers passed active/car/online/ban check`);
+  // (removed verbose log)
+  // original: console.log(`[SCHED-CAND ${ride.id}] ${driverRecords.length}/${driverIds.length} drivers passed active/car/online/ban check`);
 
   const driverRecordMap = new Map(driverRecords.map((d) => [d.id, d]));
   const carPlates = driverRecords.map((d) => d.car).filter(Boolean);
@@ -1232,10 +1260,12 @@ async function buildScheduledCandidates(ride) {
   }
 
   if (!candidates.length) {
-    console.log(`[SCHED-CAND ${ride.id}] all drivers filtered out by vehicle type (ride type: ${ride.vehicleTypeId}, allowed: [${allowedTypes.join(',')}])`);
+    // (removed verbose log)
+    // original: console.log(`[SCHED-CAND ${ride.id}] all drivers filtered out by vehicle type (ride type: ${ride.vehicleTypeId}, allowed: [${allowedTypes.join(',')}])`);
     return [];
   }
-  console.log(`[SCHED-CAND ${ride.id}] ${candidates.length} candidates passed vehicle-type + distance checks`);
+  // (removed verbose log)
+  // original: console.log(`[SCHED-CAND ${ride.id}] ${candidates.length} candidates passed vehicle-type + distance checks`);
 
   const eligibleBySchedule = [];
   for (const candidate of candidates) {
@@ -1261,17 +1291,21 @@ async function buildScheduledCandidates(ride) {
   }
 
   if (!eligibleBySchedule.length) {
-    console.log(`[SCHED-CAND ${ride.id}] all ${candidates.length} candidates filtered out by shift schedule`);
+    // (removed verbose log)
+    // original: console.log(`[SCHED-CAND ${ride.id}] all ${candidates.length} candidates filtered out by shift schedule`);
     return [];
   }
-  console.log(`[SCHED-CAND ${ride.id}] ${eligibleBySchedule.length}/${candidates.length} candidates passed shift schedule check`);
+  // (removed verbose log)
+  // original: console.log(`[SCHED-CAND ${ride.id}] ${eligibleBySchedule.length}/${candidates.length} candidates passed shift schedule check`);
 
   const conflictedFiltered = await filterConflictingDrivers(eligibleBySchedule, ride);
   if (!conflictedFiltered.length) {
-    console.log(`[SCHED-CAND ${ride.id}] all ${eligibleBySchedule.length} candidates filtered out by conflict detection`);
+    // (removed verbose log)
+    // original: console.log(`[SCHED-CAND ${ride.id}] all ${eligibleBySchedule.length} candidates filtered out by conflict detection`);
     return [];
   }
-  console.log(`[SCHED-CAND ${ride.id}] ${conflictedFiltered.length}/${eligibleBySchedule.length} candidates passed conflict check`);
+  // (removed verbose log)
+  // original: console.log(`[SCHED-CAND ${ride.id}] ${conflictedFiltered.length}/${eligibleBySchedule.length} candidates passed conflict check`);
 
   const strategyOrder = new Map(uniqueStrategyDriverIds.map((id, index) => [id, index]));
   conflictedFiltered.sort((a, b) => {
@@ -1339,7 +1373,7 @@ async function buildScheduledStage2Candidates(ride) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
+        'x-internal-api-key': getInternalApiKey()
       },
       body: JSON.stringify({
         pickupLat: ride.startLatLon.lat,
@@ -1526,7 +1560,7 @@ async function buildScheduledStage3Candidates(ride) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-internal-api-key': process.env.INTERNAL_API_KEY || ''
+        'x-internal-api-key': getInternalApiKey()
       },
       body: JSON.stringify({
         pickupLat: ride.startLatLon.lat,
@@ -1725,7 +1759,8 @@ async function advanceScheduledStage3Offer(rideId, reason = 'advance') {
 
       if (!selectedDriver || !selectedDriver.isActive || !selectedDriver.isOnline || (selectedDriver.bannedUntil && selectedDriver.bannedUntil > now)) {
         if (selectedDriver?.bannedUntil && selectedDriver.bannedUntil > now && isDriverOfferRestrictedByBan(selectedDriver.bannedUntil, now)) {
-          console.log(`Stage3 skip driver ${candidate.driverId} due to short active ban restriction until ${selectedDriver.bannedUntil}`);
+          // (removed verbose log)
+          // original: console.log(`Stage3 skip driver ${candidate.driverId} due to short active ban restriction until ${selectedDriver.bannedUntil}`);
         }
         offerState.accepted.delete(candidate.driverId);
         offerState.rejected.add(candidate.driverId);
@@ -1848,7 +1883,8 @@ async function advanceScheduledStage3Offer(rideId, reason = 'advance') {
   scheduledOfferCooldowns.set(rideId, Date.now() + 60 * 1000);
   scheduledOffers.delete(rideId);
   emitScheduledUpcomingOffersUpdate(offerState.candidates.map((c) => c.driverId));
-  console.log(`No drivers accepted scheduled stage3 ride ${rideId} (reason: ${reason})`);
+  // (removed verbose log)
+  // original: console.log(`No drivers accepted scheduled stage3 ride ${rideId} (reason: ${reason})`);
 }
 
 async function broadcastScheduledRideOfferStage3(ride) {
@@ -1862,7 +1898,8 @@ async function broadcastScheduledRideOfferStage3(ride) {
 
   const candidates = await buildScheduledStage3Candidates(ride);
   if (!candidates.length) {
-    console.log(`No eligible stage3 drivers for scheduled ride ${ride.id}`);
+    // (removed verbose log)
+    // original: console.log(`No eligible stage3 drivers for scheduled ride ${ride.id}`);
     return;
   }
 
@@ -1921,7 +1958,8 @@ async function finalizeScheduledStage2Offer(rideId) {
   if (!accepted.length) {
     scheduledOfferCooldowns.set(rideId, Date.now() + 60 * 1000);
     emitScheduledUpcomingOffersUpdate(offerState.candidates.map((candidate) => candidate.driverId));
-    console.log(`No drivers accepted scheduled stage2 ride ${rideId}`);
+    // (removed verbose log)
+    // original: console.log(`No drivers accepted scheduled stage2 ride ${rideId}`);
     return;
   }
 
@@ -1946,7 +1984,8 @@ async function finalizeScheduledStage2Offer(rideId) {
   });
 
   if (!ride || ride.status !== 'CONFIRMED' || ride.driverId) {
-    console.log(`Scheduled stage2 ride ${rideId} no longer available for assignment`);
+    // (removed verbose log)
+    // original: console.log(`Scheduled stage2 ride ${rideId} no longer available for assignment`);
     return;
   }
 
@@ -1974,7 +2013,8 @@ async function finalizeScheduledStage2Offer(rideId) {
       if (!driver.isOnline) continue;
       if (driver.bannedUntil && driver.bannedUntil > now) {
         if (isDriverOfferRestrictedByBan(driver.bannedUntil, now)) {
-          console.log(`Scheduled stage2 skip driver ${candidate.driverId} due to short active ban restriction until ${driver.bannedUntil}`);
+          // (removed verbose log)
+          // original: console.log(`Scheduled stage2 skip driver ${candidate.driverId} due to short active ban restriction until ${driver.bannedUntil}`);
         }
         continue;
       }
@@ -2009,13 +2049,15 @@ async function finalizeScheduledStage2Offer(rideId) {
   }
 
   if (!eligibleAccepted.length) {
-    console.log(`No eligible accepted drivers for scheduled stage2 ride ${rideId}`);
+    // (removed verbose log)
+    // original: console.log(`No eligible accepted drivers for scheduled stage2 ride ${rideId}`);
     return;
   }
 
   const selected = selectBestScheduledCandidate(eligibleAccepted, ride.vehicleTypeId);
   if (!selected) {
-    console.log(`No suitable accepted driver found for scheduled stage2 ride ${rideId}`);
+    // (removed verbose log)
+    // original: console.log(`No suitable accepted driver found for scheduled stage2 ride ${rideId}`);
     return;
   }
   const selectedDriver = driverInfoMap.get(selected.driverId);
@@ -2077,7 +2119,8 @@ async function broadcastScheduledRideOfferStage2(ride) {
 
   const candidates = await buildScheduledStage2Candidates(ride);
   if (!candidates.length) {
-    console.log(`No eligible stage2 drivers for scheduled ride ${ride.id}`);
+    // (removed verbose log)
+    // original: console.log(`No eligible stage2 drivers for scheduled ride ${ride.id}`);
     return;
   }
 
@@ -2206,7 +2249,8 @@ async function assignScheduledRideFromQueue(ride) {
 
 async function broadcastScheduledRideOffer(ride) {
   if (!ride || !ride.startLatLon || !ride.pickupTime) {
-    console.log(`Scheduled ride ${ride?.id} missing location or pickup time`);
+    // (removed verbose log)
+    // original: console.log(`Scheduled ride ${ride?.id} missing location or pickup time`);
     return;
   }
 
@@ -2223,7 +2267,8 @@ async function broadcastScheduledRideOffer(ride) {
 
   const candidates = await buildScheduledCandidates(ride);
   if (!candidates.length) {
-    console.log(`No eligible drivers for scheduled ride ${ride.id}`);
+    // (removed verbose log)
+    // original: console.log(`No eligible drivers for scheduled ride ${ride.id}`);
     return;
   }
 
@@ -2348,7 +2393,8 @@ async function finalizeScheduledOffer(rideId) {
   if (!accepted.length) {
     scheduledOfferCooldowns.set(rideId, Date.now() + 60 * 1000);
     emitScheduledUpcomingOffersUpdate(offerState.candidates.map((candidate) => candidate.driverId));
-    console.log(`No drivers accepted scheduled ride ${rideId}`);
+    // (removed verbose log)
+    // original: console.log(`No drivers accepted scheduled ride ${rideId}`);
     return;
   }
 
@@ -2372,7 +2418,8 @@ async function finalizeScheduledOffer(rideId) {
   });
 
   if (!ride || ride.status !== 'CONFIRMED' || ride.driverId) {
-    console.log(`Scheduled ride ${rideId} no longer available for assignment`);
+    // (removed verbose log)
+    // original: console.log(`Scheduled ride ${rideId} no longer available for assignment`);
     return;
   }
 
@@ -2402,7 +2449,8 @@ async function finalizeScheduledOffer(rideId) {
       if (!driver.isOnline) continue;
       if (driver.bannedUntil && driver.bannedUntil > now) {
         if (isDriverOfferRestrictedByBan(driver.bannedUntil, now)) {
-          console.log(`Scheduled finalization skip driver ${candidate.driverId} due to short active ban restriction until ${driver.bannedUntil}`);
+          // (removed verbose log)
+          // original: console.log(`Scheduled finalization skip driver ${candidate.driverId} due to short active ban restriction until ${driver.bannedUntil}`);
         }
         continue;
       }
@@ -2416,13 +2464,15 @@ async function finalizeScheduledOffer(rideId) {
   }
 
   if (!eligibleCandidates.length) {
-    console.log(`No eligible drivers available for scheduled ride ${rideId}`);
+    // (removed verbose log)
+    // original: console.log(`No eligible drivers available for scheduled ride ${rideId}`);
     return;
   }
 
   const selected = selectBestScheduledCandidate(eligibleCandidates, ride.vehicleTypeId);
   if (!selected) {
-    console.log(`No suitable driver found after sorting for scheduled ride ${rideId}`);
+    // (removed verbose log)
+    // original: console.log(`No suitable driver found after sorting for scheduled ride ${rideId}`);
     return;
   }
 
@@ -2503,7 +2553,8 @@ async function dispatchScheduledRide(ride, minutesToPickup) {
   }
 
   if (!selectedDriver || !selectedDriverInfo) {
-    console.log(`No available driver to dispatch scheduled ride ${ride.id}`);
+    // (removed verbose log)
+    // original: console.log(`No available driver to dispatch scheduled ride ${ride.id}`);
     return false;
   }
 
@@ -2670,7 +2721,8 @@ async function reassignScheduledRideDueToLate(ride, originalDriverId, candidates
       attemptedAt: Date.now(),
       driverId: originalDriverId
     });
-    console.log(`Scheduled late reassignment skipped for ride ${currentRide.id} (no candidates)`);
+    // (removed verbose log)
+    // original: console.log(`Scheduled late reassignment skipped for ride ${currentRide.id} (no candidates)`);
     return false;
   }
 
@@ -2696,7 +2748,8 @@ async function reassignScheduledRideDueToLate(ride, originalDriverId, candidates
       attemptedAt: Date.now(),
       driverId: originalDriverId
     });
-    console.log(`Scheduled late reassignment skipped for ride ${currentRide.id} (no queued candidates)`);
+    // (removed verbose log)
+    // original: console.log(`Scheduled late reassignment skipped for ride ${currentRide.id} (no queued candidates)`);
     return false;
   }
 
@@ -2938,9 +2991,7 @@ async function cancelRideWithRefund(ride, options = {}) {
         {
           ...ride,
           savedPaymentMethod: ride.savedPaymentMethod
-        },
-        0,
-        originalPriceDkk
+        }
       );
     } catch (error) {
       console.error(`Error handling refund/authorization cancel for ride ${ride.id}:`, error);
@@ -3080,7 +3131,8 @@ async function cancelRideWithRefund(ride, options = {}) {
 // Function to auto-assign ride to the closest available driver
 async function autoAssignRide(ride, vehicleInfo) {
   try {
-    console.log(`Starting auto-assign for ride ${ride.id} with ${vehicleInfo.length} potential vehicles`);
+    // (removed verbose log)
+    // original: console.log(`Starting auto-assign for ride ${ride.id} with ${vehicleInfo.length} potential vehicles`);
     // Parse vehicle info to get driver IDs and times
     const availableDrivers = [];
     for (const info of vehicleInfo) {
@@ -3108,7 +3160,8 @@ async function autoAssignRide(ride, vehicleInfo) {
       try {
         // Check if driver has rejected this ride
         if (rejectedDrivers.has(driver.driverId)) {
-          console.log(`Skipping driver ${driver.driverId} - previously rejected ride ${ride.id}`);
+          // (removed verbose log)
+          // original: console.log(`Skipping driver ${driver.driverId} - previously rejected ride ${ride.id}`);
           continue;
         }
 
@@ -3126,7 +3179,8 @@ async function autoAssignRide(ride, vehicleInfo) {
         if (!driverData) continue;
 
         if (isDriverInActiveOffer(driver.driverId)) {
-          console.log(`Skipping driver ${driver.driverId} - already has active offer`);
+          // (removed verbose log)
+          // original: console.log(`Skipping driver ${driver.driverId} - already has active offer`);
           continue;
         }
 
@@ -3134,9 +3188,11 @@ async function autoAssignRide(ride, vehicleInfo) {
         const now = new Date();
         if (driverData.bannedUntil && driverData.bannedUntil > now) {
           if (isDriverOfferRestrictedByBan(driverData.bannedUntil, now)) {
-            console.log(`Driver ${driver.driverId} has short ban (${driverData.bannedUntil}) - login allowed but offers restricted`);
+            // (removed verbose log)
+            // original: console.log(`Driver ${driver.driverId} has short ban (${driverData.bannedUntil}) - login allowed but offers restricted`);
           } else {
-            console.log(`Driver ${driver.driverId} is banned until ${driverData.bannedUntil}`);
+            // (removed verbose log)
+            // original: console.log(`Driver ${driver.driverId} is banned until ${driverData.bannedUntil}`);
           }
           continue; // Driver cannot receive immediate offers while ban is active
         }
@@ -3160,9 +3216,10 @@ async function autoAssignRide(ride, vehicleInfo) {
           now
         );
         if (!scheduledCheck.ok) {
-          console.log(
-            `Skipping driver ${driver.driverId} - cannot reach scheduled ride ${scheduledCheck.upcomingRideId} before pickup buffer`
-          );
+          // (removed verbose log)
+          // original: console.log(
+          //   `Skipping driver ${driver.driverId} - cannot reach scheduled ride ${scheduledCheck.upcomingRideId} before pickup buffer`
+          // );
           continue;
         }
 
@@ -3173,7 +3230,8 @@ async function autoAssignRide(ride, vehicleInfo) {
 
         // Send ride offer to driver
         const driverSocket = connectedDrivers.get(driver.driverId);
-        console.log(`Checking driver ${driver.driverId} socket:`, !!driverSocket, driverSocket?.socketId);
+        // (removed verbose log)
+        // original: console.log(`Checking driver ${driver.driverId} socket:`, !!driverSocket, driverSocket?.socketId);
         if (driverSocket && driverSocket.socketId) {
           const io = global.io;
           if (io) {
@@ -3200,9 +3258,12 @@ async function autoAssignRide(ride, vehicleInfo) {
             global.activeOffers.set(ride.id, driver.driverId);
 
             io.to(`driver_${driver.driverId}`).emit('rideOffer', rideOfferData);
-            console.log(`Ride ${ride.id} assigned to driver ${driver.driverId} (${driver.timeMinutes} minutes away)`);
-            console.log('Sent rideOffer data:', rideOfferData);
-            console.log(`Driver ${driver.driverId} is connected and should receive the offer`);
+            // (removed verbose log)
+            // original: console.log(`Ride ${ride.id} assigned to driver ${driver.driverId} (${driver.timeMinutes} minutes away)`);
+            // (removed verbose log)
+            // original: console.log('Sent rideOffer data:', rideOfferData);
+            // (removed verbose log)
+            // original: console.log(`Driver ${driver.driverId} is connected and should receive the offer`);
 
             // Send push notification to driver
             try {
@@ -3215,10 +3276,12 @@ async function autoAssignRide(ride, vehicleInfo) {
             }
             return; // Successfully assigned
           } else {
-            console.log(`Global io not available for driver ${driver.driverId}`);
+            // (removed verbose log)
+            // original: console.log(`Global io not available for driver ${driver.driverId}`);
           }
         } else {
-          console.log(`Driver ${driver.driverId} not connected in socket - cannot send ride offer`);
+          // (removed verbose log)
+          // original: console.log(`Driver ${driver.driverId} not connected in socket - cannot send ride offer`);
         }
       } catch (error) {
         console.error(`Error checking driver ${driver.driverId}:`, error);
@@ -3226,7 +3289,8 @@ async function autoAssignRide(ride, vehicleInfo) {
       }
     }
 
-    console.log(`No available drivers found for ride ${ride.id} - checked ${availableDrivers.length} drivers`);
+    // (removed verbose log)
+    // original: console.log(`No available drivers found for ride ${ride.id} - checked ${availableDrivers.length} drivers`);
   } catch (error) {
     console.error('Error in auto-assign ride:', error);
   }
@@ -3255,20 +3319,23 @@ async function reassignRide(rideId) {
     });
 
     if (!ride || ride.status !== 'CONFIRMED' || ride.driverId) {
-      console.log(`Ride ${rideId} is no longer available for reassignment`);
+      // (removed verbose log)
+      // original: console.log(`Ride ${rideId} is no longer available for reassignment`);
       return;
     }
 
-    console.log(`Reassigning ride ${rideId} to another driver`);
+    // (removed verbose log)
+    // original: console.log(`Reassigning ride ${rideId} to another driver`);
     let vehicleInfo = await getAvailableVehiclesForRide(ride);
 
     // If all currently excluded drivers were already tried, refresh candidates from strategy
     // to get the latest locations instead of waiting for rejection TTL expiry.
     const rejectedDrivers = global.rejectedRides?.get(rideId);
     if (vehicleInfo.length === 0 && rejectedDrivers && rejectedDrivers.size > 0) {
-      console.log(
-        `Ride ${rideId} exhausted current candidate list (${rejectedDrivers.size} rejected/timed out) - refreshing strategy candidates`
-      );
+      // (removed verbose log)
+      // original: console.log(
+      //   `Ride ${rideId} exhausted current candidate list (${rejectedDrivers.size} rejected/timed out) - refreshing strategy candidates`
+      // );
       global.rejectedRides.delete(rideId);
       vehicleInfo = await getAvailableVehiclesForRide(ride);
     }
@@ -3276,7 +3343,8 @@ async function reassignRide(rideId) {
     if (vehicleInfo.length > 0) {
       await autoAssignRide(ride, vehicleInfo);
     } else {
-      console.log(`No alternative drivers available for ride ${rideId} after strategy refresh`);
+      // (removed verbose log)
+      // original: console.log(`No alternative drivers available for ride ${rideId} after strategy refresh`);
     }
   } catch (error) {
     console.error(`Error reassigning ride ${rideId}:`, error);
@@ -3359,7 +3427,8 @@ async function maybeSendPickupProximity(rideId, driverId, driverLocation, startL
   if (!eta) return;
 
   const distanceMeters = Math.round((eta.distanceKmRaw ?? eta.distanceKm) * 1000);
-  console.log(`Driver ${driverId} has a distance of ${distanceMeters} meters to the pickup location of ride ${rideId}`);
+  // (removed verbose log)
+  // original: console.log(`Driver ${driverId} has a distance of ${distanceMeters} meters to the pickup location of ride ${rideId}`);
 
   if (distanceMeters < PICKUP_PROXIMITY_THRESHOLD_METERS) {
     const proximityKey = `${rideId}_${driverId}`;
@@ -3375,7 +3444,8 @@ async function maybeSendPickupProximity(rideId, driverId, driverLocation, startL
           countdownStart,
           countdownDuration: PICKUP_COUNTDOWN_DURATION_SEC
         });
-        console.log(`Sent pickupProximity to driver ${driverId} for ride ${rideId}: ${distanceMeters} meters, countdown start: ${new Date(countdownStart).toISOString()}`);
+        // (removed verbose log)
+        // original: console.log(`Sent pickupProximity to driver ${driverId} for ride ${rideId}: ${distanceMeters} meters, countdown start: ${new Date(countdownStart).toISOString()}`);
       }
 
       const countdownTimeout = setTimeout(() => {
@@ -3385,7 +3455,8 @@ async function maybeSendPickupProximity(rideId, driverId, driverLocation, startL
         if (!existing || existing.expiredAt) return;
         if (driverSocket && driverSocket.socketId && activeIo) {
           activeIo.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
-          console.log(`Sent pickupCountdownExpired to driver ${driverId} for ride ${rideId}`);
+          // (removed verbose log)
+          // original: console.log(`Sent pickupCountdownExpired to driver ${driverId} for ride ${rideId}`);
         }
         pickupProximitySent.set(proximityKey, {
           ...existing,
@@ -3415,7 +3486,8 @@ async function maybeSendPickupProximity(rideId, driverId, driverLocation, startL
         if (elapsed >= duration && !proximityData.expiredAt) {
           if (io) {
             io.to(`driver_${driverId}`).emit('pickupCountdownExpired', { rideId });
-            console.log(`Sent pickupCountdownExpired (on proximity re-check) to driver ${driverId} for ride ${rideId}`);
+            // (removed verbose log)
+            // original: console.log(`Sent pickupCountdownExpired (on proximity re-check) to driver ${driverId} for ride ${rideId}`);
           }
           pickupProximitySent.set(proximityKey, {
             ...proximityData,
@@ -3457,7 +3529,8 @@ async function cleanupStaleRideAssignments() {
         if (!ride ||
             ['COMPLETED', 'CANCELED', 'REFUNDED'].includes(ride.status) ||
             (ride.driverId && ride.driverId !== driver.id)) {
-          console.log(`Cleaning up stale currentRideId for driver ${driver.id} (ride ${driver.currentRideId})`);
+          // (removed verbose log)
+          // original: console.log(`Cleaning up stale currentRideId for driver ${driver.id} (ride ${driver.currentRideId})`);
           await prisma.comDriver.update({
             where: { id: driver.id },
             data: {
@@ -3471,7 +3544,8 @@ async function cleanupStaleRideAssignments() {
           const proximityKey = `${driver.currentRideId}_${driver.id}`;
         if (global.pickupProximitySent.has(proximityKey)) {
           global.pickupProximitySent.delete(proximityKey);
-          console.log(`Cleaned up pickup proximity for ride ${driver.currentRideId}, driver ${driver.id}`);
+          // (removed verbose log)
+          // original: console.log(`Cleaned up pickup proximity for ride ${driver.currentRideId}, driver ${driver.id}`);
         }
         if (global.scheduledLateWarnings?.has?.(proximityKey)) {
           global.scheduledLateWarnings.delete(proximityKey);
@@ -3484,8 +3558,12 @@ async function cleanupStaleRideAssignments() {
   }
 }
 
+let checkForNewRidesRunning = false;
+
 // Function to check for new rides and log them
 async function checkForNewRides() {
+  if (checkForNewRidesRunning) return;
+  checkForNewRidesRunning = true;
   try {
     // First, cleanup any stale assignments
     await cleanupStaleRideAssignments();
@@ -3568,11 +3646,13 @@ async function checkForNewRides() {
     });
 
     for (const ride of newRides) {
-      console.log(`A new ride detected, ride id: ${ride.id}, status: ${ride.status}`);
+      // (removed verbose log)
+      // original: console.log(`A new ride detected, ride id: ${ride.id}, status: ${ride.status}`);
 
       // Check if ride is still valid (not cancelled)
       if (ride.status !== 'CONFIRMED') {
-        console.log(`Ride ${ride.id} is no longer confirmed (status: ${ride.status}) - removing from active offers if present`);
+        // (removed verbose log)
+        // original: console.log(`Ride ${ride.id} is no longer confirmed (status: ${ride.status}) - removing from active offers if present`);
         if (global.activeOffers.has(ride.id)) {
           const driverId = global.activeOffers.get(ride.id);
           // Notify the driver to clear the offer
@@ -3590,7 +3670,8 @@ async function checkForNewRides() {
 
       if (ride.scheduled) {
         if (minutesToPickup !== null && minutesToPickup <= 0) {
-          console.log(`Scheduled ride ${ride.id} expired (${minutesToPickup} min) - canceling`);
+          // (removed verbose log)
+          // original: console.log(`Scheduled ride ${ride.id} expired (${minutesToPickup} min) - canceling`);
           await cancelRideWithRefund(ride, { reason: 'Scheduled pickup time has passed' });
           continue;
         }
@@ -3703,9 +3784,10 @@ async function checkForNewRides() {
             minutesToPickup === null || minutesToPickup <= SCHEDULED_OFFER_WINDOW_MINUTES;
 
           if (!shouldReleaseAssignedDriver) {
-            console.log(
-              `Keeping scheduled ride ${ride.id} assigned to driver ${ride.driverId} (outside danger window: ${minutesToPickup} min to pickup)`
-            );
+            // (removed verbose log)
+            // original: console.log(
+            //   `Keeping scheduled ride ${ride.id} assigned to driver ${ride.driverId} (outside danger window: ${minutesToPickup} min to pickup)`
+            // );
             continue;
           }
 
@@ -3742,7 +3824,8 @@ async function checkForNewRides() {
 
       // Check if this ride has an active offer or has been offered to any driver
       if (global.activeOffers.has(ride.id)) {
-        console.log(`Ride ${ride.id} has active offer to driver: ${global.activeOffers.get(ride.id)} - skipping`);
+        // (removed verbose log)
+        // original: console.log(`Ride ${ride.id} has active offer to driver: ${global.activeOffers.get(ride.id)} - skipping`);
         continue;
       }
 
@@ -3756,15 +3839,18 @@ async function checkForNewRides() {
       });
 
       if (driverWithRide) {
-        console.log(`Ride ${ride.id} has been offered to driver: ${driverWithRide.id}`);
+        // (removed verbose log)
+        // original: console.log(`Ride ${ride.id} has been offered to driver: ${driverWithRide.id}`);
       } else {
-        console.log(`Ride ${ride.id} has not been offered to any driver yet`);
+        // (removed verbose log)
+        // original: console.log(`Ride ${ride.id} has not been offered to any driver yet`);
         // Check if this ride was rejected by any driver
         const rejectedDrivers = global.rejectedRides?.get(ride.id);
         if (rejectedDrivers && rejectedDrivers.size > 0) {
-          console.log(
-            `Ride ${ride.id} has temporary rejected/timed-out drivers: ${Array.from(rejectedDrivers).join(', ')}`
-          );
+          // (removed verbose log)
+          // original: console.log(
+          //   `Ride ${ride.id} has temporary rejected/timed-out drivers: ${Array.from(rejectedDrivers).join(', ')}`
+          // );
         }
 
         // Additional check: verify no driver is currently busy with this ride
@@ -3787,9 +3873,10 @@ async function checkForNewRides() {
           // Immediate rides: once the current strategy candidate list is exhausted,
           // refresh from strategy to use latest driver coordinates.
           if (!ride.scheduled && vehicleInfo.length === 0 && rejectedDrivers && rejectedDrivers.size > 0) {
-            console.log(
-              `Ride ${ride.id} exhausted current strategy candidates (${rejectedDrivers.size}) - requesting fresh candidates`
-            );
+            // (removed verbose log)
+            // original: console.log(
+            //   `Ride ${ride.id} exhausted current strategy candidates (${rejectedDrivers.size}) - requesting fresh candidates`
+            // );
             global.rejectedRides.delete(ride.id);
             vehicleInfo = await getAvailableVehiclesForRide(ride);
           }
@@ -3802,7 +3889,8 @@ async function checkForNewRides() {
                 if (match) {
                   const etaMin = parseInt(match[3]);
                   if (!isNaN(etaMin) && etaMin > IMMEDIATE_MAX_PICKUP_ETA_MINUTES) {
-                    console.log(`  Skipping vehicle ${match[1]} — ETA ${etaMin}min exceeds limit ${IMMEDIATE_MAX_PICKUP_ETA_MINUTES}min`);
+                    // (removed verbose log)
+                    // original: console.log(`  Skipping vehicle ${match[1]} — ETA ${etaMin}min exceeds limit ${IMMEDIATE_MAX_PICKUP_ETA_MINUTES}min`);
                     return false;
                   }
                 }
@@ -3811,26 +3899,32 @@ async function checkForNewRides() {
             }
 
             if (vehicleInfo.length > 0) {
-              console.log(`Ride ${ride.id} will get one of these: ${vehicleInfo.join(', ')}`);
+              // (removed verbose log)
+              // original: console.log(`Ride ${ride.id} will get one of these: ${vehicleInfo.join(', ')}`);
               await autoAssignRide(ride, vehicleInfo);
               continue;
             }
           }
 
           if (ride.scheduled && minutesToPickup !== null && minutesToPickup <= scheduledDispatchLeadMinutes) {
-            console.log(`No vehicles available for scheduled ride ${ride.id} (${minutesToPickup} min) - canceling`);
+            // (removed verbose log)
+            // original: console.log(`No vehicles available for scheduled ride ${ride.id} (${minutesToPickup} min) - canceling`);
             await cancelRideWithRefund(ride, { reason: 'No vehicles available for scheduled ride' });
           } else {
-            console.log(`Ride ${ride.id} has not been offered to any driver yet (no vehicles available)`);
+              // (removed verbose log)
+              // original: console.log(`Ride ${ride.id} has not been offered to any driver yet (no vehicles available)`);
           }
         } catch (error) {
           console.error(`Error getting available vehicles for ride ${ride.id}:`, error);
-          console.log(`Ride ${ride.id} has not been offered to any driver yet`);
+          // (removed verbose log)
+          // original: console.log(`Ride ${ride.id} has not been offered to any driver yet`);
         }
       }
     }
   } catch (error) {
     console.error('Error checking for new rides:', error);
+  } finally {
+    checkForNewRidesRunning = false;
   }
 }
 
@@ -4031,7 +4125,7 @@ app.prepare().then(() => {
 
     try {
       const jwt = require('jsonwebtoken');
-      const decoded = jwt.verify(authToken, SOCKET_JWT_SECRET);
+      const decoded = jwt.verify(authToken, SOCKET_JWT_SECRET, { algorithms: ['HS256'] });
       socket.data = socket.data || {};
       const resolvedDriverId = decoded?.driverId || (decoded?.type === 'driver' ? decoded?.id : null);
       socket.data.userId = decoded?.id || decoded?.userId || decoded?.sub || null;
@@ -4042,7 +4136,8 @@ app.prepare().then(() => {
       return;
     }
 
-    console.log('Client connected:', socket.id);
+    // (removed verbose log)
+    // original: console.log('Client connected:', socket.id);
 
     socket.on('join', async (data) => {
       const authDriverId = socket.data?.driverId;
@@ -4062,7 +4157,8 @@ app.prepare().then(() => {
       if (data?.vehicleTypeId) {
         const driverId = Number(authDriverId);
         socket.join(`driver_${driverId}`);
-        console.log(`Driver ${driverId} joined room with vehicle type ${data.vehicleTypeId}`);
+        // (removed verbose log)
+        // original: console.log(`Driver ${driverId} joined room with vehicle type ${data.vehicleTypeId}`);
 
         try {
           const driverBanStatus = await prisma.comDriver.findUnique({
@@ -4095,7 +4191,8 @@ app.prepare().then(() => {
           vehicleTypeId: data.vehicleTypeId
         });
 
-        console.log(`Connected drivers now: ${Array.from(connectedDrivers.keys()).join(', ')}`);
+        // (removed verbose log)
+        // original: console.log(`Connected drivers now: ${Array.from(connectedDrivers.keys()).join(', ')}`);
 
         // Update driver status in database once
         try {
@@ -4104,7 +4201,8 @@ app.prepare().then(() => {
             data: { isOnline: true, isBusy: false }
           });
           invalidateDriverScheduleCache(driverId);
-          console.log(`Driver ${driverId} status updated to online`);
+          // (removed verbose log)
+          // original: console.log(`Driver ${driverId} status updated to online`);
           emitScheduledUpcomingOffersUpdate([driverId]);
         } catch (error) {
           console.error('Error updating driver status:', error);
@@ -4133,7 +4231,8 @@ app.prepare().then(() => {
                   if (elapsed >= duration) {
                     // Countdown already expired, send expired event
                     socket.emit('pickupCountdownExpired', { rideId: ride.id });
-                    console.log(`Sent pickupCountdownExpired on reconnect to driver ${driverId} for ride ${ride.id}`);
+                    // (removed verbose log)
+                    // original: console.log(`Sent pickupCountdownExpired on reconnect to driver ${driverId} for ride ${ride.id}`);
                   } else {
                     socket.emit('pickupProximity', {
                       rideId: ride.id,
@@ -4141,7 +4240,8 @@ app.prepare().then(() => {
                       countdownStart: proximityData.countdownStart,
                       countdownDuration: duration
                     });
-                    console.log(`Re-sent pickupProximity on reconnect to driver ${driverId} for ride ${ride.id}`);
+                    // (removed verbose log)
+                    // original: console.log(`Re-sent pickupProximity on reconnect to driver ${driverId} for ride ${ride.id}`);
                   }
                 }
               }
@@ -4157,13 +4257,15 @@ app.prepare().then(() => {
       const authDriverId = socket.data?.driverId;
       if (!authDriverId) return;
       if (data.driverId && data.driverId !== authDriverId) {
-        console.log(`Ignoring updateLocation for mismatched driverId. token driver: ${authDriverId}, payload driver: ${data.driverId}`);
+        // (removed verbose log)
+        // original: console.log(`Ignoring updateLocation for mismatched driverId. token driver: ${authDriverId}, payload driver: ${data.driverId}`);
         return;
       }
       if (!connectedDrivers.has(authDriverId)) return;
       connectedDrivers.get(authDriverId).location = data.location;
       connectedDrivers.get(authDriverId).lastUpdate = Date.now();
-      console.log(`Driver ${authDriverId} location updated:`, data.location);
+      // (removed verbose log)
+      // original: console.log(`Driver ${authDriverId} location updated:`, data.location);
 
       try {
           const driver = await prisma.comDriver.findUnique({
@@ -4463,7 +4565,8 @@ app.prepare().then(() => {
         const proximityKey = `${data.rideId}_${driverId}`;
         if (global.pickupProximitySent.has(proximityKey)) {
           global.pickupProximitySent.delete(proximityKey);
-          console.log(`Cleared pickup proximity for accepted ride ${data.rideId}, driver ${driverId}`);
+          // (removed verbose log)
+          // original: console.log(`Cleared pickup proximity for accepted ride ${data.rideId}, driver ${driverId}`);
         }
         if (global.scheduledLateWarnings?.has?.(proximityKey)) {
           global.scheduledLateWarnings.delete(proximityKey);
@@ -4496,19 +4599,22 @@ app.prepare().then(() => {
         });
 
         // WhatsApp notification: driver accepted with ETA
-        console.log(`[WA Notify] Attempting notification for ride #${data.rideId}, driver ${driverId}`);
+        // (removed verbose log)
+        // original: console.log(`[WA Notify] Attempting notification for ride #${data.rideId}, driver ${driverId}`);
         try {
           const rideForNotif = await prisma.ride.findUnique({
             where: { id: data.rideId },
             select: { id: true, pickupAddress: true, dropoffAddress: true, userId: true, startLatLon: true },
           });
-          console.log(`[WA Notify] rideForNotif found:`, !!rideForNotif, 'userId:', rideForNotif?.userId);
+          // (removed verbose log)
+          // original: console.log(`[WA Notify] rideForNotif found:`, !!rideForNotif, 'userId:', rideForNotif?.userId);
           if (rideForNotif) {
             const user = await prisma.user.findUnique({
               where: { id: rideForNotif.userId },
               select: { phone: true, firstName: true },
             });
-            console.log(`[WA Notify] user found:`, !!user, 'phone:', user?.phone);
+            // (removed verbose log)
+            // original: console.log(`[WA Notify] user found:`, !!user, 'phone:', user?.phone);
             if (user?.phone) {
               const driverName = `${driver.drFname || ''} ${driver.drLname || ''}`.trim() || 'Driver';
               const carInfo = driver.car || 'N/A';
@@ -4530,15 +4636,18 @@ app.prepare().then(() => {
               }
 
               const etaText = etaMinutes > 0 ? `\n⏱ ETA: ~${etaMinutes} min` : '';
-              const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}${etaText}\n📋 Ride #${rideForNotif.id}\n📍 ${rideForNotif.pickupAddress} → ${rideForNotif.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat. To end the chat, send "endchat".`;
+              const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}${etaText}\n📋 Ride #${rideForNotif.id}\n📍 ${rideForNotif.pickupAddress} → ${rideForNotif.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver / الدردشة مع السائق:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat.\nيمكنك الآن إرسال رسائل هنا وسيتم توجيهها إلى السائق. ما عليك سوى الرد على هذه المحادثة.`;
 
               const sent = await sendWAText(user.phone, msg);
-              console.log(`[WA Notify] ${sent ? 'Sent' : 'Failed to send'} to ${user.phone} for ride #${data.rideId}`);
+              // (removed verbose log)
+              // original: console.log(`[WA Notify] ${sent ? 'Sent' : 'Failed to send'} to ${user.phone} for ride #${data.rideId}`);
             } else {
-              console.log('[WA Notify] No user phone found — skipping');
+              // (removed verbose log)
+            // original: console.log('[WA Notify] No user phone found — skipping');
             }
           } else {
-            console.log('[WA Notify] rideForNotif not found — skipping');
+            // (removed verbose log)
+            // original: console.log('[WA Notify] rideForNotif not found — skipping');
           }
         } catch (waErr) { console.error('[WA Notify] Accept error:', waErr); }
 
@@ -4596,7 +4705,8 @@ app.prepare().then(() => {
 
       const driverId = authDriverId;
 
-      console.log(`Driver ${driverId} rejected ride ${data.rideId}`);
+      // (removed verbose log)
+      // original: console.log(`Driver ${driverId} rejected ride ${data.rideId}`);
       try {
         const scheduledOffer = scheduledOffers.get(data.rideId);
         if (scheduledOffer) {
@@ -4643,7 +4753,8 @@ app.prepare().then(() => {
           }
         });
         invalidateDriverScheduleCache(driverId);
-        console.log(`Banned driver ${driverId} until ${bannedUntil} after ride rejection`);
+        // (removed verbose log)
+        // original: console.log(`Banned driver ${driverId} until ${bannedUntil} after ride rejection`);
 
         // Send status update to driver app
         socket.emit('driverStatusUpdate', {
@@ -4682,7 +4793,8 @@ app.prepare().then(() => {
       const proximityKey = `${data.rideId}_${driverId}`;
       if (global.pickupProximitySent.has(proximityKey)) {
         global.pickupProximitySent.delete(proximityKey);
-        console.log(`Cleared pickup proximity for rejected ride ${data.rideId}, driver ${driverId}`);
+        // (removed verbose log)
+        // original: console.log(`Cleared pickup proximity for rejected ride ${data.rideId}, driver ${driverId}`);
       }
       if (global.scheduledLateWarnings?.has?.(proximityKey)) {
         global.scheduledLateWarnings.delete(proximityKey);
@@ -4717,7 +4829,8 @@ app.prepare().then(() => {
 
       const driverId = authDriverId;
 
-      console.log(`Driver ${driverId} timed out on ride ${data.rideId}`);
+      // (removed verbose log)
+      // original: console.log(`Driver ${driverId} timed out on ride ${data.rideId}`);
       try {
         const scheduledOffer = scheduledOffers.get(data.rideId);
         if (scheduledOffer) {
@@ -4793,7 +4906,8 @@ app.prepare().then(() => {
         const proximityKey = `${data.rideId}_${driverId}`;
         if (global.pickupProximitySent.has(proximityKey)) {
           global.pickupProximitySent.delete(proximityKey);
-          console.log(`Cleared pickup proximity for timed out ride ${data.rideId}, driver ${driverId}`);
+          // (removed verbose log)
+          // original: console.log(`Cleared pickup proximity for timed out ride ${data.rideId}, driver ${driverId}`);
         }
         if (global.scheduledLateWarnings?.has?.(proximityKey)) {
           global.scheduledLateWarnings.delete(proximityKey);
@@ -4807,7 +4921,8 @@ app.prepare().then(() => {
           rideId: data.rideId
         });
 
-        console.log(`Driver ${driverId} banned until ${bannedUntil} after ride timeout`);
+        // (removed verbose log)
+        // original: console.log(`Driver ${driverId} banned until ${bannedUntil} after ride timeout`);
 
         // Auto-unban after 2 minutes (if no longer banned)
         scheduleAutoUnban(driverId, 120000);
@@ -4829,7 +4944,8 @@ app.prepare().then(() => {
         return;
       }
       socket.join(`chat_${data.bookingId}`);
-      console.log(`User joined chat for booking ${data.bookingId}`);
+      // (removed verbose log)
+      // original: console.log(`User joined chat for booking ${data.bookingId}`);
     });
 
     // Booking updates functionality
@@ -4837,12 +4953,14 @@ app.prepare().then(() => {
       if (!data?.bookingId) return;
       const authorized = await canAccessBooking(data.bookingId, socket);
       if (!authorized) {
-        console.log(`Unauthorized booking join attempt for booking ${data.bookingId}`);
+        // (removed verbose log)
+        // original: console.log(`Unauthorized booking join attempt for booking ${data.bookingId}`);
         socket.emit('error', { type: 'unauthorized_booking', message: 'Not allowed to join this booking' });
         return;
       }
       socket.join(`booking_${data.bookingId}`);
-      console.log(`User joined booking updates for booking ${data.bookingId}`);
+      // (removed verbose log)
+      // original: console.log(`User joined booking updates for booking ${data.bookingId}`);
     });
 
     socket.on('sendMessage', async (data) => {
@@ -4855,7 +4973,8 @@ app.prepare().then(() => {
       }
       const authorized = await canAccessBooking(bookingId, socket);
       if (!authorized) {
-        console.log(`Unauthorized sendMessage attempt for booking ${bookingId}`);
+        // (removed verbose log)
+      // original: console.log(`Unauthorized sendMessage attempt for booking ${bookingId}`);
         socket.emit('error', { type: 'unauthorized_chat', message: 'Not allowed to send messages to this chat' });
         return;
       }
@@ -4866,7 +4985,8 @@ app.prepare().then(() => {
         timestamp: new Date().toISOString()
       };
       io.to(`chat_${bookingId}`).emit('newMessage', messageData);
-      console.log(`Message sent in chat ${bookingId}`);
+      // (removed verbose log)
+      // original: console.log(`Message sent in chat ${bookingId}`);
 
       // Persist message to DB
       try {
@@ -4891,7 +5011,7 @@ app.prepare().then(() => {
               select: { phone: true },
             });
             if (user?.phone) {
-              const waMsg = `💬 *Message from driver:*\n\n"${message}"\n\n📋 Ride #${bookingId}\n\nReply to this chat to message the driver. Send "endchat" to stop.`;
+              const waMsg = `💬 *Message from driver / رسالة من السائق / Besked fra chauffør:*\n\n"${message}"\n\n📋 Ride #${bookingId}\n\nReply / رد / Svar for at skrive til chaufføren.`;
               sendWAText(user.phone, waMsg).catch(() => {});
             }
           }
@@ -4906,8 +5026,10 @@ app.prepare().then(() => {
       for (const [driverId, driverData] of connectedDrivers.entries()) {
         if (driverData.socketId === socket.id) {
           connectedDrivers.delete(driverId);
-          console.log(`Driver ${driverId} disconnected`);
-          console.log(`Connected drivers now: ${Array.from(connectedDrivers.keys()).join(', ')}`);
+          // (removed verbose log)
+          // original: console.log(`Driver ${driverId} disconnected`);
+          // (removed verbose log)
+          // original: console.log(`Connected drivers now: ${Array.from(connectedDrivers.keys()).join(', ')}`);
 
           const clearedRideIds = [];
           if (global.activeOffers?.size) {
@@ -4920,7 +5042,8 @@ app.prepare().then(() => {
           }
 
           if (clearedRideIds.length) {
-            console.log(`Cleared active offers for disconnected driver ${driverId}: ${clearedRideIds.join(', ')}`);
+            // (removed verbose log)
+          // original: console.log(`Cleared active offers for disconnected driver ${driverId}: ${clearedRideIds.join(', ')}`);
             clearedRideIds.forEach((rideId) => {
               setTimeout(() => reassignRide(rideId), 1000);
             });
@@ -5030,13 +5153,15 @@ app.prepare().then(() => {
               data: { explanation: `[REMINDED] ${ride.explanation || ''}` },
             });
 
-            console.log(`[Reminder] Sent to booking #${ride.id}`);
+            // (removed verbose log)
+            // original: console.log(`[Reminder] Sent to booking #${ride.id}`);
           } catch (e) {
             console.error(`[Reminder] Error for ride #${ride.id}:`, e);
           }
         }
       } catch (e) {
-        console.error('[Reminder] Check failed:', e);
+        // (removed verbose log)
+        // original: console.error('[Reminder] Check failed:', e);
       }
     }
 

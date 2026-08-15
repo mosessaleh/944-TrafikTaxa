@@ -50,6 +50,8 @@ export async function computeBase(distanceKm:number, durationMin:number, at: Dat
   const perKm  = nightOrHoliday ? ngKm   : dayKm;
   const perMin = nightOrHoliday ? ngMin  : dayMin;
 
+  if (!Number.isFinite(distanceKm) || distanceKm < 0) distanceKm = 0;
+  if (!Number.isFinite(durationMin) || durationMin < 0) durationMin = 0;
   const price = Math.max(0, start + perKm * distanceKm + perMin * durationMin);
   return Math.round(price);
 }

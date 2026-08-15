@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { getUserFromRequest } from '@/lib/auth';
-import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
+import { validateCSRFMiddleware } from '@/lib/csrf';
+import { clientIpKey, limitOrThrow, limitCSRFValidationFailures } from '@/lib/rate-limit';
 import { notifyAdmin } from '@/lib/notify';
 
 /**
@@ -194,6 +195,21 @@ export async function POST(request: NextRequest) {
         { ok: false, error: 'Email verification required' },
         { status: 403 }
       );
+    }
+
+    // CSRF protection
+    const isValidCSRF = await validateCSRFMiddleware(request, user.id);
+    if (!isValidCSRF) {
+      const clientKey = clientIpKey(request);
+      try {
+        await limitCSRFValidationFailures(clientKey);
+      } catch (rateLimitError: any) {
+        return NextResponse.json(
+          { ok: false, error: 'Too many failed requests. Please try again later.' },
+          { status: 429, headers: { 'Retry-After': rateLimitError.retryAfter?.toString() || '900' } }
+        );
+      }
+      return NextResponse.json({ ok: false, error: 'Invalid CSRF token' }, { status: 403 });
     }
 
     // Parse and validate request body

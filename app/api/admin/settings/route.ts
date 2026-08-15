@@ -132,6 +132,7 @@ async function ensureSettingsColumns() {
   }
 
   ensureSettingsSchemaPromise = (async () => {
+    // SAFE: static INFORMATION_SCHEMA query, no user input
     const rows = await prisma.$queryRawUnsafe<Array<{ COLUMN_NAME?: string; column_name?: string }>>(
       `
         SELECT COLUMN_NAME
@@ -179,6 +180,7 @@ async function ensureSettingsColumns() {
 
     for (const column of missingColumns) {
       try {
+        // SAFE: static DDL statement, no user input
         await prisma.$executeRawUnsafe(column.sql);
       } catch (error: any) {
         const mysqlCode = Number(error?.meta?.code || error?.errno || 0);
@@ -236,6 +238,7 @@ export async function GET(){
         console.warn('[admin/settings] payment methods unavailable:', error?.message || error);
         return [];
       }),
+      // SAFE: static query, no user input
       prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
         'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
       ).catch(() => [])
@@ -303,6 +306,7 @@ export async function POST(req: Request){
         create: coreSettingsData
       });
 
+      // SAFE: uses ? parameterized values, no user-input concatenation
       await prisma.$executeRawUnsafe(
         'UPDATE `Settings` SET `allowImmediateBooking` = ?, `allowScheduledBooking` = ? WHERE `id` = 1',
         allowImmediateBooking ? 1 : 0,

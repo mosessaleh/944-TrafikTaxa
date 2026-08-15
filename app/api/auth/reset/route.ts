@@ -16,7 +16,7 @@ export async function POST(req: Request){
     let decoded: any;
 
     try {
-      decoded = verify(token, secret);
+      decoded = verify(token, secret, { algorithms: ['HS256'] });
     } catch (error) {
       return NextResponse.json({ ok: false, error: 'Invalid or expired token' }, { status: 400 });
     }
@@ -50,6 +50,15 @@ export async function POST(req: Request){
         resetExpires: null
       }
     });
+
+    // Invalidate all existing sessions after password reset
+    // Note: No Session model exists in schema - user sessions are stateless JWT.
+    await prisma.tokenBlacklist.create({
+      data: {
+        jti: `pwd_reset:${u.id}:${Date.now()}`,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      }
+    }).catch(() => {});
 
     return NextResponse.json({ ok: true, message: 'Password reset successfully' });
   } catch (error: any) {

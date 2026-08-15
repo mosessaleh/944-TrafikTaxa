@@ -1,6 +1,7 @@
 import { prisma } from './db';
 import { stripe } from './stripe';
 import { decryptPaymentToken } from './crypto';
+import { computePrice } from '@/lib/price';
 
 /**
  * Payment Processor Service
@@ -147,9 +148,18 @@ export async function authorizeCardPayment(booking: any, paymentMethod: any): Pr
       }
     }
 
+    // Recalculate price to prevent tampering
+    const recalculatedBookingPrice = await computePrice(
+      booking.distanceKm || 0,
+      booking.durationMin || 0,
+      new Date(),
+      booking.vehicleTypeId,
+    );
+    const bookingAmountOre = Math.round(recalculatedBookingPrice * 100);
+
     // Create payment intent with manual capture (authorize only)
     const paymentIntent = await stripeClient.paymentIntents.create({
-      amount: Math.round(booking.price * 100), // Convert to øre
+      amount: bookingAmountOre,
       currency: 'dkk',
       customer: user.stripeCustomerId, // Required for payment methods from setup intents
       payment_method_types: ['card'],
@@ -276,11 +286,26 @@ export async function chargeSavedPaymentMethod(trip: any): Promise<PaymentResult
 /**
  * Charge cancellation fee with proper authorization cancel/refund handling
  */
-export async function chargeCancellationFee(
-  trip: any,
-  cancellationAmountDkk: number,
-  originalAmountDkk: number
-): Promise<PaymentResult> {
+export async function chargeCancellationFee(trip: any): Promise<PaymentResult> {
+  // Recalculate price to prevent tampering
+  const recalculatedOriginalPrice = await computePrice(
+    trip.distanceKm || 0,
+    trip.durationMin || 0,
+    new Date(),
+    trip.vehicleTypeId,
+  );
+  const originalAmountDkk = recalculatedOriginalPrice;
+
+  const now = new Date();
+  const pickupTime = new Date(trip.pickupTime);
+  const hoursUntilPickup = (pickupTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+  let cancellationRate = 0;
+  if (hoursUntilPickup <= 1) cancellationRate = 0.50;
+  else if (hoursUntilPickup <= 4) cancellationRate = 0.25;
+
+  const cancellationAmountDkk = Math.round(originalAmountDkk * cancellationRate);
+
   const stripeClient = stripe();
   const paymentRef = trip.paymentRef;
   const safeCancellationAmountDkk = Math.max(0, Math.round(cancellationAmountDkk));
@@ -462,8 +487,14 @@ export async function chargeCancellationFee(
 async function chargeStripePaymentMethod(trip: any, paymentMethod: any): Promise<PaymentResult> {
   const stripeClient = stripe();
   const paymentMethodToken = decryptPaymentToken(paymentMethod.token);
-  const amountDkk = typeof trip.captureAmount === 'number' ? trip.captureAmount : trip.price;
-  const safeAmountDkk = Math.max(0, Math.round(amountDkk));
+  // Recalculate price to prevent tampering
+  const recalculatedPrice = await computePrice(
+    trip.distanceKm || 0,
+    trip.durationMin || 0,
+    new Date(),
+    trip.vehicleTypeId,
+  );
+  const safeAmountDkk = Math.max(0, Math.round(recalculatedPrice));
   const amountOre = Math.round(safeAmountDkk * 100);
 
   console.log(`🔄 Processing Stripe payment for trip ${trip.id}, paymentMethod:`, {

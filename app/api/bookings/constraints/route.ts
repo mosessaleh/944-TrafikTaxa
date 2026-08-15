@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
 
 function normalizeBooleanFlag(value: unknown, fallback = true) {
   if (typeof value === 'boolean') return value;
@@ -12,10 +13,20 @@ function normalizeBooleanFlag(value: unknown, fallback = true) {
   return fallback;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  try {
+    await limitOrThrow('constraints:' + clientIpKey(request), { points: 30, durationSec: 60 });
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, error: 'Too many requests, try again later.' },
+      { status: error?.status || 429 }
+    );
+  }
+
   try {
     const [settings, bookingModeRows] = await Promise.all([
       prisma.settings.findUnique({ where: { id: 1 } }),
+      // SAFE: static query, no user input
       prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
         'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
       ).catch(() => []),

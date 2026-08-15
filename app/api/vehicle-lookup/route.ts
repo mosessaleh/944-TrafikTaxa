@@ -21,6 +21,10 @@ export async function POST(req: Request) {
     const motorApiToken = requireMotorApiToken('vehicle lookup route');
 
     try {
+      if (!motorApiToken) {
+        return NextResponse.json({ ok: false, error: 'Vehicle lookup is not available in development mode' }, { status: 503 });
+      }
+
       console.log('Calling MotorAPI for regNumber:', regNumber);
 
       const response = await fetch(

@@ -64,6 +64,7 @@ export async function POST(req: Request){
     const at = new Date(parsed.when);
     const isScheduled = Boolean(parsed.scheduled);
 
+    // SAFE: static query, no user input
     const bookingModeRows = await prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
       'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
     ).catch(() => []);

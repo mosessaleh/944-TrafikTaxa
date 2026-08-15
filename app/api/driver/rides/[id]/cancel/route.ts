@@ -198,9 +198,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
           {
             ...ride,
             savedPaymentMethod: ride.savedPaymentMethod
-          },
-          roundedCost,
-          originalPriceDkk
+          }
         )
       : null;
 

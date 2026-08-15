@@ -1,6 +1,8 @@
 import { LRUCache } from 'lru-cache';
 
 // Very simple in-memory rate limiter (per-process). For production, back with Redis.
+// TODO: For multi-instance production deployments, migrate to Redis-based rate limiting
+// Current in-memory LRU cache works for single-instance deployments only.
 // Usage: await limitOrThrow(key, { points:5, durationSec:60 })
 
 type Opts = { points: number; durationSec: number };

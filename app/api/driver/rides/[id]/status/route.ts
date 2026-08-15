@@ -46,7 +46,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     let driver;
     try {
-      const decoded: any = verify(token, JWT_SECRET);
+      const decoded: any = verify(token, JWT_SECRET, { algorithms: ['HS256'] });
 
       if (!decoded.driverId || decoded.type !== 'driver') {
         return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 });

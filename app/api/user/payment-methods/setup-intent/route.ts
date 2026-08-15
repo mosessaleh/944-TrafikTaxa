@@ -18,7 +18,7 @@ async function getUserFromBearerToken(request: NextRequest) {
   }
 
   try {
-    const decoded = verify(token, JWT_SECRET) as { id?: number; type?: string };
+    const decoded = verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { id?: number; type?: string };
     if (decoded?.type && decoded.type !== 'user') {
       return null;
     }

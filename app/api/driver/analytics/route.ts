@@ -27,7 +27,8 @@ export async function GET(request: NextRequest) {
     try {
       decoded = verify(
         token,
-        JWT_SECRET
+        JWT_SECRET,
+        { algorithms: ['HS256'] }
       ) as { driverId?: number; id?: number; type?: string; jti?: string };
     } catch (error) {
       if (error instanceof TokenExpiredError) {

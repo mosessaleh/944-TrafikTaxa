@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
@@ -33,10 +34,10 @@ export async function POST(req: Request){
     const data = parsed.data;
 
     const exists = await prisma.user.findUnique({ where: { email: data.email } });
-    if (exists) return NextResponse.json({ ok:false, error:'Email already registered' }, { status:409 });
+    if (exists) return NextResponse.json({ ok:false, error:'If this email is registered, you will receive a verification code' }, { status:200 });
 
     const hashedPassword = await hashPassword(data.password);
-    const code = Math.floor(100000 + Math.random()*900000).toString();
+    const code = crypto.randomInt(100000, 999999).toString();
     const expires = new Date(Date.now()+1000*60*60); // 1 hour expiry
 
     const { password, ...userData } = data;
@@ -62,6 +63,7 @@ export async function POST(req: Request){
 
     return res;
   }catch(e:any){
-    return NextResponse.json({ ok:false, error:e?.message||'Invalid' }, { status:400 });
+    const errorMessage = process.env.NODE_ENV === 'production' ? 'Registration failed' : (e?.message || 'Invalid');
+    return NextResponse.json({ ok:false, error: errorMessage }, { status:400 });
   }
 }

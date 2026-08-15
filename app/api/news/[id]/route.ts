@@ -8,16 +8,9 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
       return NextResponse.json({ ok: false, error: 'Invalid news id' }, { status: 400 });
     }
 
-    const rows = await prisma.$queryRawUnsafe(
-      `
-        SELECT id, slug, title, body, publishedAt, status, sortOrder, createdAt, updatedAt
-        FROM CompanyNews
-        WHERE id = ?
-        LIMIT 1
-      `,
-      id
-    );
-    const item = Array.isArray(rows) ? rows[0] : null;
+    const item = await prisma.companyNews.findUnique({
+      where: { id },
+    });
 
     if (!item) {
       return NextResponse.json({ ok: false, error: 'News item not found' }, { status: 404 });

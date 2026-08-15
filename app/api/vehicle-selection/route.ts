@@ -72,13 +72,16 @@ const ALLOWED_TYPES: Record<number, number[]> = {
 };
 
 function isInternalAuthorized(request: NextRequest) {
-  const expectedApiKey = String(process.env.INTERNAL_API_KEY || '').trim();
+  const expectedApiKey = process.env.INTERNAL_API_KEY;
   if (!expectedApiKey) {
-    return process.env.NODE_ENV !== 'production';
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('INTERNAL_API_KEY is required');
+    }
+    return request.headers.get('x-internal-api-key') === 'dev-internal-key';
   }
 
-  const providedApiKey = String(request.headers.get('x-internal-api-key') || '').trim();
-  return providedApiKey.length > 0 && providedApiKey === expectedApiKey;
+  const providedApiKey = request.headers.get('x-internal-api-key');
+  return providedApiKey === expectedApiKey;
 }
 
 function estimateEtaMinutes(distanceKm: number) {

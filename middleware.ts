@@ -163,7 +163,7 @@ export async function middleware(req: NextRequest) {
   if (driverOperationalEndpoints.some(endpoint => pathname.startsWith(endpoint))) {
     try {
       const clientKey = clientIpKey(req);
-      await limitOrThrow(`driver-op:${clientKey}`, { points: 60, durationSec: 60 }); // 60 req/min
+      await limitOrThrow(`driver-op:${clientKey}`, { points: 300, durationSec: 60 }); // 300 req/min for mobile app location updates + status checks
     } catch (error: any) {
       if (error.status === 429) {
         const retryRes = NextResponse.json(
@@ -232,6 +232,9 @@ export async function middleware(req: NextRequest) {
   res.headers.set('X-Permitted-Cross-Domain-Policies', 'none');
   res.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+
+  // TODO: Remove 'unsafe-inline' from script-src and style-src in production
+  // Requires refactoring all inline styles/scripts to use nonces or external files
 
   // Enhanced CSP with nonce-based policies
   const isDev = process.env.NODE_ENV === 'development';

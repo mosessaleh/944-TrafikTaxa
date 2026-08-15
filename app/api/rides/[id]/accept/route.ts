@@ -14,7 +14,7 @@ export async function POST(
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, requireAuthSecret('rides accept route')) as { driverId: number };
+    const decoded = jwt.verify(token, requireAuthSecret('rides accept route'), { algorithms: ['HS256'] }) as { driverId: number };
 
     const driver = await prisma.comDriver.findUnique({
       where: { id: decoded.driverId },

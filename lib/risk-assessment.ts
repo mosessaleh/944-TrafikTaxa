@@ -390,6 +390,7 @@ function assessDistanceRisk(distanceKm: number, price: number): { score: number;
   }
 
   // Price per km analysis
+  if (distanceKm <= 0) return { score: 0, factors };
   const pricePerKm = price / distanceKm;
   if (pricePerKm > 50) { // More than 50 DKK per km
     factors.push({

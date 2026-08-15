@@ -87,10 +87,10 @@ export async function createCheckoutSession(params: {
 export async function createWhatsAppPaymentSession(params: {
   bookingId: number;
   amount: number;
-  userPhone: string;
+  userId: number;
   baseUrl: string;
 }): Promise<{ url: string }> {
-  const { bookingId, amount, userPhone, baseUrl } = params;
+  const { bookingId, amount, userId, baseUrl } = params;
 
   const session = await createCheckoutSession({
     amount,
@@ -100,7 +100,7 @@ export async function createWhatsAppPaymentSession(params: {
     metadata: {
       bookingId: String(bookingId),
       source: 'whatsapp',
-      userPhone,
+      userId: String(userId),
     },
   });
 

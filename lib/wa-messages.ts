@@ -335,6 +335,14 @@ export const HIST_MSG = {
   },
 };
 
+export const CHAT_MSG = {
+  driverMessage: {
+    ar: (msg: string, rideId: number) => `💬 *رسالة من السائق:*\n\n"${msg}"\n\n📋 رقم الرحلة: ${rideId}\n\nيمكنك الرد على هذه الرسالة للتواصل مع السائق.`,
+    dk: (msg: string, rideId: number) => `💬 *Besked fra chauffør:*\n\n"${msg}"\n\n📋 Tur #${rideId}\n\nSvar på denne besked for at skrive til chaufføren.`,
+    en: (msg: string, rideId: number) => `💬 *Message from driver:*\n\n"${msg}"\n\n📋 Ride #${rideId}\n\nReply to this message to chat with the driver.`,
+  },
+};
+
 export const GREETING_WORDS: Record<string, string[]> = {
   ar: ['مرحبا', 'هلا', 'السلام عليكم', 'مراحب', 'اهلا', 'أهلا', 'صباح الخير', 'مساء الخير', 'سلام'],
   dk: ['hej', 'hejsa', 'halløj', 'goddag', 'godmorgen', 'godaften', 'davs'],

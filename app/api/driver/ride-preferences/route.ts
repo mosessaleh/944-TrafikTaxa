@@ -11,7 +11,7 @@ async function getDriverIdFromToken(request: NextRequest): Promise<number | null
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.substring(7);
   try {
-    const decoded = verify(token, JWT_SECRET) as any;
+    const decoded = verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     if (!Number.isFinite(driverId) || driverId <= 0 || decoded?.type !== 'driver') return null;
 

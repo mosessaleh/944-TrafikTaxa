@@ -554,6 +554,10 @@ export default function AccountClient() {
         credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
+          'x-csrf-token': await fetch('/api/csrf', { credentials: 'include' })
+            .then(r => r.json())
+            .then(d => d.csrfToken || '')
+            .catch(() => '')
         },
       });
 
@@ -772,7 +776,7 @@ export default function AccountClient() {
                   {!me.emailVerified && !isStaffRole(me.role) && (
                     <div className="grid gap-2 border rounded-xl p-4 bg-orange-50 border-orange-200 mb-6">
                       <div className="font-medium text-orange-800">{t('account.profile.unverified')}</div>
-                      <div className="text-sm text-orange-700" dangerouslySetInnerHTML={{ __html: t('account.profile.verifyEmail').replace('{email}', `<b>${me.email}</b>`) }} />
+                      <div className="text-sm text-orange-700" dangerouslySetInnerHTML={{ __html: t('account.profile.verifyEmail').replace('{email}', `<b>${me.email.replace(/[<>&"']/g, (c: string) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] || c)}</b>`) }} />
                       <Link href={`/verify?email=${encodeURIComponent(me.email)}`} className="px-4 py-2 rounded-xl border border-orange-300 bg-orange-600 text-white hover:bg-orange-700 transition-colors w-fit">{t('account.profile.sendVerification')}</Link>
                     </div>
                   )}
@@ -783,7 +787,7 @@ export default function AccountClient() {
                         <div className="text-sm text-gray-500">{t('account.profile.email')}</div>
                         <div className="font-semibold flex items-center gap-2">{me.email} <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${me.emailVerified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{me.emailVerified ? t('account.profile.verified') : t('account.profile.unverified')}</span></div>
                         {!me.emailVerified && !isStaffRole(me.role) && (
-                          <div className="text-sm text-gray-600" dangerouslySetInnerHTML={{ __html: t('account.profile.needVerification').replace('<Link>', `<a href="/verify?email=${encodeURIComponent(me.email)}" class="underline">`).replace('</Link>', '</a>') }} />
+                          <div className="text-sm text-gray-600" dangerouslySetInnerHTML={{ __html: t('account.profile.needVerification').replace('<Link>', `<a href="/verify?email=${encodeURIComponent(me.email.replace(/[<>&"']/g, (c: string) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] || c))}" class="underline">`).replace('</Link>', '</a>') }} />
                         )}
                       </div>
                     </div>

@@ -3,6 +3,59 @@ import { logWAError, logWAWarning } from '@/lib/wa-logger';
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v22.0';
 const PHONE_REGEX = /^\+?[1-9]\d{6,14}$/;
 
+const WA_RATE_LIMIT = parseInt(process.env.WHATSAPP_RATE_LIMIT || '50', 10);
+const WA_BURST = WA_RATE_LIMIT * 2;
+const WA_QUEUE_MAX = parseInt(process.env.WHATSAPP_QUEUE_MAX || '2000', 10);
+const WA_QUEUE_TIMEOUT_MS = parseInt(process.env.WHATSAPP_QUEUE_TIMEOUT || '30000', 10);
+
+type QueueItem = { send: () => Promise<boolean>; resolve: (ok: boolean) => void; enqueuedAt: number };
+
+const waQueue: QueueItem[] = [];
+let waQueueProcessing = false;
+let waTokens = WA_RATE_LIMIT;
+let waInterval: ReturnType<typeof setInterval> | null = null;
+
+function ensureWaInterval() {
+  if (waInterval) return;
+  waInterval = setInterval(() => {
+    waTokens = Math.min(waTokens + WA_RATE_LIMIT, WA_BURST);
+    processWaQueue();
+  }, 1000);
+}
+
+async function processWaQueue() {
+  if (waQueueProcessing) return;
+  waQueueProcessing = true;
+  const now = Date.now();
+  while (waQueue.length > 0) {
+    const expired = waQueue.findIndex(item => now - item.enqueuedAt > WA_QUEUE_TIMEOUT_MS);
+    if (expired >= 0) {
+      const removed = waQueue.splice(expired, 1);
+      removed.forEach(item => item.resolve(false));
+      continue;
+    }
+    if (waTokens <= 0) break;
+    const item = waQueue.shift()!;
+    waTokens--;
+    try {
+      const ok = await item.send();
+      item.resolve(ok);
+    } catch {
+      item.resolve(false);
+    }
+  }
+  waQueueProcessing = false;
+}
+
+function enqueueWa(send: () => Promise<boolean>): Promise<boolean> {
+  if (waQueue.length >= WA_QUEUE_MAX) return Promise.resolve(false);
+  ensureWaInterval();
+  return new Promise<boolean>(resolve => {
+    waQueue.push({ send, resolve, enqueuedAt: Date.now() });
+    processWaQueue();
+  });
+}
+
 function isValidPhone(to: string): boolean {
   return PHONE_REGEX.test(to.trim());
 }
@@ -101,18 +154,21 @@ async function waFetch(endpoint: string, body: Record<string, unknown>): Promise
   return false;
 }
 
-export async function sendWAText(to: string, text: string): Promise<boolean> {
+export async function sendWAText(to: string, text: string, skipQueue = false): Promise<boolean> {
   const phone = validatePhone(to);
   if (!phone) return false;
-  const ok = await waFetch('messages', {
-    messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to: phone,
-    type: 'text',
-    text: { preview_url: false, body: text },
-  });
-  logMessage({ phone: phone, direction: 'outbound', type: 'text', content: text, status: ok ? 'sent' : 'failed', errorMessage: ok ? undefined : 'send failed' });
-  return ok;
+  const send = async () => {
+    const ok = await waFetch('messages', {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'text',
+      text: { preview_url: false, body: text },
+    });
+    logMessage({ phone: phone, direction: 'outbound', type: 'text', content: text, status: ok ? 'sent' : 'failed', errorMessage: ok ? undefined : 'send failed' });
+    return ok;
+  };
+  return skipQueue ? send() : enqueueWa(send);
 }
 
 export async function sendWAButtons(
@@ -185,27 +241,31 @@ export async function sendWATemplate(
   templateName: string,
   languageCode: string,
   parameters: string[],
+  skipQueue = false,
 ): Promise<boolean> {
   const phone = validatePhone(to);
   if (!phone) return false;
-  const ok = await waFetch('messages', {
-    messaging_product: 'whatsapp',
-    recipient_type: 'individual',
-    to: phone,
-    type: 'template',
-    template: {
-      name: templateName,
-      language: { code: languageCode },
-      components: [
-        {
-          type: 'body',
-          parameters: parameters.map(text => ({ type: 'text', text })),
-        },
-      ],
-    },
-  });
-  logMessage({ phone: phone, direction: 'outbound', type: 'template', content: `[${templateName}] ${parameters.join(' | ')}`, status: ok ? 'sent' : 'failed' });
-  return ok;
+  const send = async () => {
+    const ok = await waFetch('messages', {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone,
+      type: 'template',
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: [
+          {
+            type: 'body',
+            parameters: parameters.map(text => ({ type: 'text', text })),
+          },
+        ],
+      },
+    });
+    logMessage({ phone: phone, direction: 'outbound', type: 'template', content: `[${templateName}] ${parameters.join(' | ')}`, status: ok ? 'sent' : 'failed' });
+    return ok;
+  };
+  return skipQueue ? send() : enqueueWa(send);
 }
 
 const MESSAGE_RETENTION_DAYS = parseInt(process.env.WA_MESSAGE_RETENTION_DAYS || '90', 10);

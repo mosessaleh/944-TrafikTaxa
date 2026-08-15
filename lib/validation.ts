@@ -84,7 +84,7 @@ export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>;
 // Reset Password Schema
 export const ResetPasswordSchema = z.object({
   token: z.string().min(1),
-  password: z.string().min(8)
+  password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Password must contain uppercase, lowercase, and a number')
 });
 
 export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>;
@@ -166,7 +166,7 @@ export const RegisterSchema = z.object({
   lastName: z.string().min(2),
   address: z.string().min(3),
   email: z.string().email(),
-  password: z.string().min(8),
+  password: z.string().min(8).regex(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, 'Password must contain uppercase, lowercase, and a number'),
   phone: z.string().min(6),
   // User must explicitly accept the site rules & terms
   acceptTerms: z.literal(true, {

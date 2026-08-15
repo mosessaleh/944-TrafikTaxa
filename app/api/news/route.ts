@@ -10,22 +10,26 @@ export async function GET(request: NextRequest) {
     const hasLimit = Number.isFinite(parsedLimit);
     const limit = hasLimit ? Math.max(1, Math.min(parsedLimit, 50)) : null;
 
-    const sql = includeEnded
-      ? `
-        SELECT id, slug, title, body, publishedAt, status, sortOrder, createdAt, updatedAt
-        FROM CompanyNews
-        ORDER BY sortOrder ASC, publishedAt DESC, id DESC
-        ${limit ? `LIMIT ${limit}` : ''}
-      `
-      : `
-        SELECT id, slug, title, body, publishedAt, status, sortOrder, createdAt, updatedAt
-        FROM CompanyNews
-        WHERE status = 'ACTIVE'
-        ORDER BY sortOrder ASC, publishedAt DESC, id DESC
-        ${limit ? `LIMIT ${limit}` : ''}
-      `;
-
-    const items = await prisma.$queryRawUnsafe(sql);
+    const items = await prisma.companyNews.findMany({
+      where: includeEnded ? {} : { status: 'ACTIVE' },
+      orderBy: [
+        { sortOrder: 'asc' },
+        { publishedAt: 'desc' },
+        { id: 'desc' },
+      ],
+      ...(limit ? { take: limit } : {}),
+      select: {
+        id: true,
+        slug: true,
+        title: true,
+        body: true,
+        publishedAt: true,
+        status: true,
+        sortOrder: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
     return NextResponse.json({ ok: true, items });
   } catch (error) {

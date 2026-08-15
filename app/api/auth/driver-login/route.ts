@@ -40,6 +40,7 @@ export async function POST(req: NextRequest){
 
     return NextResponse.json({ ok:true, message:'Logged in successfully' });
   }catch(e:any){
-    return NextResponse.json({ ok:false, error: e?.message||'Invalid' },{ status:400 });
+    const errorMessage = process.env.NODE_ENV === 'production' ? 'Login failed' : (e?.message || 'Invalid');
+    return NextResponse.json({ ok:false, error: errorMessage }, { status:400 });
   }
 }

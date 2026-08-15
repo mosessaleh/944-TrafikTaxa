@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     let decoded: any;
 
     try {
-      decoded = verify(token, JWT_SECRET) as any;
+      decoded = verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as any;
     } catch (error) {
       if (error instanceof TokenExpiredError) {
         return NextResponse.json({ error: 'Token expired' }, { status: 401 });

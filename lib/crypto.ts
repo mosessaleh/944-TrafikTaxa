@@ -59,11 +59,8 @@ import crypto from 'crypto';
 
 // CPR Encryption/Decryption using AES-256-GCM
 const CPR_ENCRYPTION_KEY = process.env.CPR_ENCRYPTION_KEY;
-const PAYMENT_TOKEN_ENCRYPTION_KEY =
-  process.env.PAYMENT_TOKEN_ENCRYPTION_KEY ||
-  process.env.AUTH_SECRET ||
-  process.env.JWT_SECRET ||
-  process.env.CPR_ENCRYPTION_KEY;
+const PAYMENT_TOKEN_ENCRYPTION_KEY = process.env.PAYMENT_TOKEN_ENCRYPTION_KEY;
+// Lazy check - only throw when payment token functions are actually called
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
 const IV_LENGTH = 16; // 128 bits
@@ -79,25 +76,20 @@ function requireCPREncryptionKey() {
 
 function requirePaymentTokenEncryptionKey() {
   if (!PAYMENT_TOKEN_ENCRYPTION_KEY) {
-    throw new Error(
-      'PAYMENT_TOKEN_ENCRYPTION_KEY or AUTH_SECRET/JWT_SECRET environment variable is required'
-    );
+    throw new Error('PAYMENT_TOKEN_ENCRYPTION_KEY is required');
   }
 }
 
-// Derive key from environment variable
-const getEncryptionKey = (): Buffer => {
-  requireCPREncryptionKey();
-  return crypto.scryptSync(CPR_ENCRYPTION_KEY!, 'salt', KEY_LENGTH);
-};
-
-const getPaymentTokenEncryptionKey = (): Buffer => {
-  requirePaymentTokenEncryptionKey();
-  return crypto.scryptSync(PAYMENT_TOKEN_ENCRYPTION_KEY!, 'payment-token-salt', KEY_LENGTH);
-};
+// NOTE: scryptSync blocks the event loop. Consider refactoring to use async crypto.scrypt
+// with a worker pool for production deployments with high encrypt/decrypt volume.
+function deriveKey(secret: string, salt: Buffer): Buffer {
+  return crypto.scryptSync(secret, salt, KEY_LENGTH);
+}
 
 export function encryptCPR(plainCPR: string): string {
-  const key = getEncryptionKey();
+  requireCPREncryptionKey();
+  const salt = crypto.randomBytes(16);
+  const key = deriveKey(CPR_ENCRYPTION_KEY!, salt);
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
@@ -106,22 +98,23 @@ export function encryptCPR(plainCPR: string): string {
 
   const authTag = cipher.getAuthTag();
 
-  // Format: iv:authTag:encryptedData
-  return iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
+  return salt.toString('hex') + ':' + iv.toString('hex') + ':' + authTag.toString('hex') + ':' + encrypted;
 }
 
 export function decryptCPR(encryptedCPR: string): string {
   try {
-    const key = getEncryptionKey();
+    requireCPREncryptionKey();
     const parts = encryptedCPR.split(':');
 
-    if (parts.length !== 3) {
+    if (parts.length !== 4) {
       throw new Error('Invalid encrypted CPR format');
     }
 
-    const iv = Buffer.from(parts[0], 'hex');
-    const authTag = Buffer.from(parts[1], 'hex');
-    const encrypted = parts[2];
+    const salt = Buffer.from(parts[0], 'hex');
+    const key = deriveKey(CPR_ENCRYPTION_KEY!, salt);
+    const iv = Buffer.from(parts[1], 'hex');
+    const authTag = Buffer.from(parts[2], 'hex');
+    const encrypted = parts[3];
 
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
@@ -136,7 +129,9 @@ export function decryptCPR(encryptedCPR: string): string {
   }
 }
 
-function encryptWithKey(value: string, key: Buffer): string {
+function encryptWithKey(value: string, secret: string): string {
+  const salt = crypto.randomBytes(16);
+  const key = deriveKey(secret, salt);
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
@@ -144,18 +139,20 @@ function encryptWithKey(value: string, key: Buffer): string {
   encrypted += cipher.final('hex');
 
   const authTag = cipher.getAuthTag();
-  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+  return `${salt.toString('hex')}:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
 }
 
-function decryptWithKey(value: string, key: Buffer): string {
+function decryptWithKey(value: string, secret: string): string {
   const parts = value.split(':');
-  if (parts.length !== 3) {
+  if (parts.length !== 4) {
     throw new Error('Invalid encrypted value format');
   }
 
-  const iv = Buffer.from(parts[0], 'hex');
-  const authTag = Buffer.from(parts[1], 'hex');
-  const encrypted = parts[2];
+  const salt = Buffer.from(parts[0], 'hex');
+  const key = deriveKey(secret, salt);
+  const iv = Buffer.from(parts[1], 'hex');
+  const authTag = Buffer.from(parts[2], 'hex');
+  const encrypted = parts[3];
 
   const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(authTag);
@@ -166,17 +163,18 @@ function decryptWithKey(value: string, key: Buffer): string {
 }
 
 export function encryptPaymentToken(token: string): string {
-  const encrypted = encryptWithKey(token, getPaymentTokenEncryptionKey());
+  const encrypted = encryptWithKey(token, PAYMENT_TOKEN_ENCRYPTION_KEY!);
   return `${PAYMENT_TOKEN_PREFIX}${encrypted}`;
 }
 
 export function decryptPaymentToken(token: string): string {
   if (!token.startsWith(PAYMENT_TOKEN_PREFIX)) {
+    console.warn('decryptPaymentToken: received unencrypted token');
     return token;
   }
 
   try {
-    return decryptWithKey(token.slice(PAYMENT_TOKEN_PREFIX.length), getPaymentTokenEncryptionKey());
+    return decryptWithKey(token.slice(PAYMENT_TOKEN_PREFIX.length), PAYMENT_TOKEN_ENCRYPTION_KEY!);
   } catch (error) {
     console.error('Payment token decryption failed:', error);
     throw new Error('Failed to decrypt payment token');

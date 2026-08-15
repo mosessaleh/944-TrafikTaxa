@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { createDriverSession, sendLoginNotificationEmail, getClientIp } from '@/lib/session-manager';
 
 const {

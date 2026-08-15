@@ -369,7 +369,7 @@ async function notifyRiderWhatsApp(rideId: number, driverId: number) {
     const driverName = driver ? `${driver.drFname} ${driver.drLname}`.trim() : 'Driver';
     const carInfo = driver?.car || 'N/A';
 
-    const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}\n📋 Ride #${ride.id}\n📍 ${ride.pickupAddress} → ${ride.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat. To end the chat, send "endchat".`;
+    const msg = `🚕 *Driver assigned!*\n\nDriver: ${driverName}\nCar: ${carInfo}\n📋 Ride #${ride.id}\n📍 ${ride.pickupAddress} → ${ride.dropoffAddress}\n\nThe driver is on the way.\n\n💬 *Chat with your driver / الدردشة مع السائق / Chat med chauffør:*\nYou can now send messages here — they will be forwarded to your driver. Simply reply to this chat.\nيمكنك الآن إرسال رسائل هنا وسيتم توجيهها إلى السائق. ما عليك سوى الرد على هذه المحادثة.\nDu kan nu sende beskeder her — de vil blive videresendt til din chauffør. Svar blot på denne chat.`;
 
     sendWAText(user.phone, msg).catch(() => {});
   } catch (e) {

@@ -27,17 +27,13 @@ async function buildUniqueSlug(title: string, currentId?: number) {
   let suffix = 1;
 
   while (true) {
-    const rows = currentId
-      ? await prisma.$queryRawUnsafe(
-          'SELECT id FROM CompanyNews WHERE slug = ? AND id <> ? LIMIT 1',
-          candidate,
-          currentId
-        )
-      : await prisma.$queryRawUnsafe(
-          'SELECT id FROM CompanyNews WHERE slug = ? LIMIT 1',
-          candidate
-        );
-    const existing = Array.isArray(rows) ? rows[0] : null;
+    const existing = await prisma.companyNews.findFirst({
+      where: {
+        slug: candidate,
+        ...(currentId ? { id: { not: currentId } } : {}),
+      },
+      select: { id: true },
+    });
 
     if (!existing) return candidate;
     suffix += 1;
@@ -52,6 +48,7 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: 'Forbidden' }, { status: 403 });
   }
 
+  // SAFE: static query, no user input
   const items = await prisma.$queryRawUnsafe(`
     SELECT id, slug, title, body, publishedAt, status, sortOrder, createdAt, updatedAt
     FROM CompanyNews
@@ -83,45 +80,30 @@ export async function POST(request: Request) {
     const slug = await buildUniqueSlug(data.title, data.id);
 
     if (data.id) {
-      await prisma.$executeRawUnsafe(
-        `
-          UPDATE CompanyNews
-          SET slug = ?, title = ?, body = ?, publishedAt = ?, status = ?, sortOrder = ?, updatedAt = NOW(3)
-          WHERE id = ?
-        `,
-        slug,
-        data.title,
-        data.body,
-        publishedAt,
-        data.status,
-        data.sortOrder,
-        data.id
-      );
-      const rows = await prisma.$queryRawUnsafe(
-        'SELECT id, slug, title, body, publishedAt, status, sortOrder, createdAt, updatedAt FROM CompanyNews WHERE id = ? LIMIT 1',
-        data.id
-      );
-      const item = Array.isArray(rows) ? rows[0] : null;
+      const item = await prisma.companyNews.update({
+        where: { id: data.id },
+        data: {
+          slug,
+          title: data.title,
+          body: data.body,
+          publishedAt,
+          status: data.status,
+          sortOrder: data.sortOrder,
+        },
+      });
       return NextResponse.json({ ok: true, item });
     }
 
-    await prisma.$executeRawUnsafe(
-      `
-        INSERT INTO CompanyNews (slug, title, body, publishedAt, status, sortOrder, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, NOW(3), NOW(3))
-      `,
-      slug,
-      data.title,
-      data.body,
-      publishedAt,
-      data.status,
-      data.sortOrder
-    );
-    const rows = await prisma.$queryRawUnsafe(
-      'SELECT id, slug, title, body, publishedAt, status, sortOrder, createdAt, updatedAt FROM CompanyNews WHERE slug = ? ORDER BY id DESC LIMIT 1',
-      slug
-    );
-    const item = Array.isArray(rows) ? rows[0] : null;
+    const item = await prisma.companyNews.create({
+      data: {
+        slug,
+        title: data.title,
+        body: data.body,
+        publishedAt,
+        status: data.status,
+        sortOrder: data.sortOrder,
+      },
+    });
     return NextResponse.json({ ok: true, item });
   } catch (error: any) {
     if (error?.issues) {
@@ -146,6 +128,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: false, error: 'Invalid news id' }, { status: 400 });
   }
 
+  // SAFE: uses ? parameterized values, no user-input concatenation
   await prisma.$executeRawUnsafe('DELETE FROM CompanyNews WHERE id = ?', id);
   return NextResponse.json({ ok: true });
 }

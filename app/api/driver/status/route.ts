@@ -21,7 +21,7 @@ function verifyDriverToken(authHeader: string | null): Promise<{ driverId?: numb
     const token = authHeader.substring(7);
 
     try {
-      const decoded = verify(token, JWT_SECRET) as { driverId?: number; id?: number; type?: string; jti?: string };
+      const decoded = verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { driverId?: number; id?: number; type?: string; jti?: string };
 
       // Check token blacklist
       const jti = decoded?.jti;

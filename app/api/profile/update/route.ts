@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
@@ -80,7 +81,7 @@ export async function POST(req: Request){
         return NextResponse.json({ ok:false, error:'Email already in use' }, { status:409 });
       }
 
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const code = crypto.randomInt(100000, 999999).toString();
       const expires = new Date(Date.now() + 1000 * 60 * 60); // 1 hour expiry
 
       await prisma.user.update({

@@ -94,8 +94,8 @@ export async function setSessionCookie(token: string){
 export async function clearSessionCookie(){
   const jar = await cookies();
   const isProd = process.env.NODE_ENV === 'production';
-  const envSecure = String(process.env.COOKIE_SECURE||'false').toLowerCase() === 'true';
-  const secure = isProd ? true : envSecure;
+
+  const sameSite = isProd ? 'strict' : 'lax';
 
   // Always clear both possible cookie names to avoid stale sessions
   const names = isProd ? ['__Host-session', 'session'] : ['session', '__Host-session'];
@@ -103,11 +103,11 @@ export async function clearSessionCookie(){
   for (const name of names) {
     jar.set(name, '', {
       httpOnly: true,
-      sameSite: 'lax',
-      secure,
+      sameSite,
+      secure: isProd,
       path: '/',
       maxAge: 0,
-      expires: new Date(0) // Explicitly expire the cookie
+      expires: new Date(0)
     });
   }
 }
@@ -122,7 +122,7 @@ export async function getUserFromCookie(){
   if (!token) return null;
 
   try{
-    const dec: any = verify(token, SECRET);
+    const dec: any = verify(token, SECRET, { algorithms: ['HS256'] });
 
     // Validate token payload structure
     if (!dec.id || typeof dec.id !== 'number') {
@@ -220,7 +220,9 @@ export async function getUserFromCookie(){
         return null;
       }
 
-      console.log('🔐 getUserFromCookie: Returning user object:', { id: user.id, type: 'user', email: user.email });
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('🔐 getUserFromCookie: Returning user object:', { id: user.id, type: 'user', email: user.email });
+      }
       return {
         ...user,
         type: 'user'
@@ -245,7 +247,7 @@ export async function getUserFromBearerToken(request: Request) {
   const token = authHeader.substring(7);
 
   try {
-    const decoded: any = verify(token, SECRET);
+    const decoded: any = verify(token, SECRET, { algorithms: ['HS256'] });
 
     if (!decoded?.id || decoded?.type !== 'user') {
       return null;
@@ -347,7 +349,7 @@ export async function requireDriverByJWT(req: Request){
 
   try {
     console.log('requireDriverByJWT - Verifying token');
-    const decoded: any = verify(token, SECRET);
+    const decoded: any = verify(token, SECRET, { algorithms: ['HS256'] });
     const driverId = Number(decoded?.driverId ?? decoded?.id);
     console.log('requireDriverByJWT - Token decoded:', {
       driverId,

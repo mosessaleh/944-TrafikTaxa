@@ -15,6 +15,7 @@ function normalizeBooleanFlag(value: unknown, fallback = true) {
 export async function GET(){
   const [settings, bookingModeRows] = await Promise.all([
     prisma.settings.findFirst(),
+    // SAFE: static query, no user input
     prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
       'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
     ).catch(() => [])

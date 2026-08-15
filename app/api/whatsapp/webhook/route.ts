@@ -4,7 +4,9 @@ import { prisma } from '@/lib/db';
 import { hashPassword, signToken } from '@/lib/auth';
 import { processMessage } from '@/lib/whatsapp-ai';
 import { createWhatsAppPaymentSession } from '@/lib/stripe';
-import { sendWAText as sendWA, sendWAButtons } from '@/lib/wa-client';
+import { sendWAText, sendWAButtons, sendWATemplate } from '@/lib/wa-client';
+
+const sendWA = (to: string, text: string) => sendWAText(to, text, true);
 import type { AIResponse } from '@/lib/whatsapp-ai';
 import type { BotSession } from '@/lib/wa-sessions';
 import { getUserSession, touchSession, resetSession, createSession } from '@/lib/wa-sessions';
@@ -154,7 +156,7 @@ async function doRegister(
     const exists = await prisma.user.findUnique({ where: { email: email.trim() } });
     if (exists) return { ok: false, error: msg[l].emailExists };
 
-    const hashed = await hashPassword(Math.random().toString(36).slice(2) + Date.now());
+    const hashed = await hashPassword(crypto.randomBytes(16).toString('hex'));
     const code = String(Math.floor(100000 + Math.random() * 900000));
 
     const user = await prisma.user.create({
@@ -224,13 +226,8 @@ async function geocodeGoogle(address: string): Promise<{ address: string; lat: n
 
     const result = data.results[0];
 
-    // REJECT if partial_match — Google didn't find exact match, used partial
-    if (result.partial_match === true) {
-      console.log(`[geocodeGoogle] Rejected partial_match: "${address}" → "${result.formatted_address}"`);
-      return null;
-    }
-
     // REJECT broad location types when user typed a street address
+    // partial_match is allowed for landmarks/POIs (stations, hospitals, etc.)
     const types: string[] = result.types || [];
     const isBroadType = types.every((t: string) =>
       ['locality','administrative_area_level_1','administrative_area_level_2','administrative_area_level_3',
@@ -294,6 +291,42 @@ async function geocodeNominatim(address: string): Promise<{ address: string; lat
     }
     return null;
   } catch { return null; }
+}
+
+async function geocodeGooglePlaces(address: string): Promise<{ address: string; lat: number; lon: number } | null> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=${encodeURIComponent(address)}&inputtype=textquery&fields=formatted_address,geometry&region=dk&key=${apiKey}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+
+    if (data.status === 'OK' && data.candidates?.[0]) {
+      const candidate = data.candidates[0];
+      if (candidate.formatted_address && candidate.geometry?.location) {
+        console.log(`[geocodeGooglePlaces] Found: "${address}" → "${candidate.formatted_address}"`);
+        return {
+          address: candidate.formatted_address,
+          lat: candidate.geometry.location.lat,
+          lon: candidate.geometry.location.lng,
+        };
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
+function isLandmarkAddress(address: string): boolean {
+  if (/^(none|no|nej|skip|لا|رفض|بدون|بدون محطة|بدون توقف|ingen|ingen stop|ingen mellemstop)$/i.test(address.trim())) return false;
+
+  const hasNumber = /\b\d{1,4}\b/.test(address);
+  if (hasNumber) return false;
+
+  const hasStreetTerm = /\b(vej|gade|stræde|alle|boulevard|plads|torv|road|street|avenue|lane|drive|court|way|close|park|plaats|شا|شارع|طريق|ساحة|weg|steeg|gracht|kade|singel|laan|hof|pad|dreef)\b/i.test(address);
+  if (hasStreetTerm) return false;
+
+  return true;
 }
 
 async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
@@ -590,6 +623,12 @@ async function handleRebook(phone: string, rideId: number) {
     return;
   }
 
+  const user = await findUserByPhone(phone);
+  if (!user || ride.userId !== user.id) {
+    await sendWA(phone, '❌ This is not your ride.');
+    return;
+  }
+
   const existing = await getUserSession(phone);
   const lang = (existing?.collected?.['_language'] as 'ar' | 'dk' | 'en') || 'en';
 
@@ -775,7 +814,7 @@ async function handleRideHistory(phone: string, msg: string) {
 async function computePriceEstimate(s: BotSession): Promise<{ price: number; distance: number; vtName: string; minimumApplied: boolean; originalPrice: number } | null> {
   const rawPickup = s.collected.pickupAddress || '';
   const rawDropoff = s.collected.dropoffAddress || '';
-  console.log('[WA estimate] pickup:', rawPickup, 'dropoff:', rawDropoff);
+
   if (!rawPickup || !rawDropoff) return null;
 
   const uid = s.userId!;
@@ -871,7 +910,7 @@ async function handleConfirmBooking(s: BotSession, phone: string, lang: 'ar' | '
 
     const lastBookingId = book.id!;
     const lastBookingTs = Date.now();
-    s.stage = 'menu'; s.collected = { _language: lang };
+    s.stage = 'menu'; s.collected = { _language: lang }; s.chatHistory = [];
     s.collected['_lastBookingId'] = String(lastBookingId);
     s.collected['_lastBookingTs'] = String(lastBookingTs);
     touchSession(s);
@@ -882,7 +921,7 @@ async function handleConfirmBooking(s: BotSession, phone: string, lang: 'ar' | '
       const { url } = await createWhatsAppPaymentSession({
         bookingId: book.id!,
         amount: book.price!,
-        userPhone: phone,
+        userId: s.userId!,
         baseUrl,
       });
 
@@ -914,7 +953,7 @@ async function handleConfirmBooking(s: BotSession, phone: string, lang: 'ar' | '
 
   const lastBookingId = book.id!;
   const lastBookingTs = Date.now();
-  s.stage = 'menu'; s.collected = { _language: lang };
+  s.stage = 'menu'; s.collected = { _language: lang }; s.chatHistory = [];
   s.collected['_lastBookingId'] = String(lastBookingId);
   s.collected['_lastBookingTs'] = String(lastBookingTs);
   touchSession(s);
@@ -1066,6 +1105,8 @@ async function resolveAddress(
   sessionLat?: string,
   sessionLon?: string
 ): Promise<ResolvedAddress | null> {
+  if (/^(none|no|nej|skip|لا|رفض|بدون|ingen)$/i.test(input.trim())) return null;
+
   // Use shared location coordinates directly if available
   if (sessionLat && sessionLon) {
     const lat = Number(sessionLat);
@@ -1119,7 +1160,11 @@ async function resolveAddress(
   }
 
   // ---- Geocode normally ----
-  const result = await geocodeGoogle(input) || await geocodeNominatim(input);
+  // Try standard geocoding first, then Google Places for landmarks, then Nominatim
+  const isLandmark = isLandmarkAddress(input);
+  const result = await geocodeGoogle(input)
+    || (isLandmark ? (await geocodeGooglePlaces(input)) : null)
+    || await geocodeNominatim(input);
   if (result) {
     return { address: result.address, lat: result.lat, lon: result.lon, source: 'geocoded' };
   }
@@ -1151,7 +1196,7 @@ async function doCreateBooking(
   } catch {}
 
   // Resolve addresses with coordinates
-  const rawStopAddr = (rawStop && rawStop !== 'none' && rawStop !== 'لا' && rawStop !== 'no') ? rawStop : null;
+  const rawStopAddr = (rawStop && !/^(none|no|nej|skip|لا|رفض|بدون|ingen)$/i.test(rawStop.trim())) ? rawStop.trim() : null;
 
   const [pickupResolved, dropoffResolved] = await Promise.all([
     resolveAddress(rawPickup, uid, userSavedAddress, session.collected['_sharedLat'], session.collected['_sharedLon']),
@@ -1232,7 +1277,7 @@ async function doCreateBooking(
     data: {
       userId: uid, riderName: session.firstName || 'User', passengers: 1,
       pickupAddress: pickupResolved.address, dropoffAddress: dropoffResolved.address,
-      stopAddress: stopResolved?.address || (rawStop && rawStop !== 'none' && rawStop !== 'لا' && rawStop !== 'no' ? rawStop : null),
+      stopAddress: stopResolved?.address || (rawStop && !/^(none|no|nej|skip|لا|رفض|بدون|ingen)$/i.test(rawStop.trim()) ? rawStop.trim() : null),
       startLatLon: { lat: pickupResolved.lat, lon: pickupResolved.lon },
       endLatLon: { lat: dropoffResolved.lat, lon: dropoffResolved.lon },
       stopLatLon: stopResolved ? { lat: stopResolved.lat, lon: stopResolved.lon } : null,
@@ -1377,7 +1422,11 @@ async function handleMessage(phone: string, text: string, contactName: string) {
   if (cancelLower === 'endchat' || cancelLower === 'إنهاء' || cancelLower === 'انهاء' || cancelLower === 'slut') {
     const existing = await getUserSession(phone);
     const lang = existing?.collected?.['_language'] || detectLanguage(msg);
-    if (existing?.collected?.['_chatRideId']) {
+    if (!existing) {
+      const sess = createSession(phone, { collected: { _language: lang, _chatDisabled: 'true' } });
+      touchSession(sess);
+    } else {
+      existing.collected['_chatDisabled'] = 'true';
       delete existing.collected['_chatRideId'];
       touchSession(existing);
     }
@@ -1470,6 +1519,10 @@ async function handleMessage(phone: string, text: string, contactName: string) {
   {
     const riderUser = await findUserByPhone(phone);
     if (riderUser) {
+      const existing = await getUserSession(phone);
+      if (existing?.collected?.['_chatDisabled'] === 'true') {
+        // Chat was explicitly ended by user - do not forward
+      } else {
       const activeRide = await (prisma as any).ride.findFirst({
         where: {
           userId: riderUser.id,
@@ -1488,8 +1541,8 @@ async function handleMessage(phone: string, text: string, contactName: string) {
         if (!isSpecialCmd) {
           const io = (global as any).io;
           if (io) {
-            io.to(`user:${riderUser.id}`).emit('riderMessage', {
-              rideId: activeRide.id,
+            io.to(`chat_${activeRide.id}`).emit('newMessage', {
+              bookingId: activeRide.id,
               message: msg,
               sender: 'rider',
               timestamp: new Date().toISOString(),
@@ -1502,6 +1555,7 @@ async function handleMessage(phone: string, text: string, contactName: string) {
           } catch {}
           return;
         }
+      }
       }
     }
   }
@@ -2132,8 +2186,8 @@ async function handleMessage(phone: string, text: string, contactName: string) {
         if (activeRide) {
           const io = (global as any).io;
           if (io && chatUser.id) {
-            io.to(`user:${chatUser.id}`).emit('riderMessage', {
-              rideId: activeRide.id,
+            io.to(`chat_${activeRide.id}`).emit('newMessage', {
+              bookingId: activeRide.id,
               message: msg,
               sender: 'rider',
               timestamp: new Date().toISOString(),
@@ -2166,6 +2220,18 @@ async function handleMessage(phone: string, text: string, contactName: string) {
   if (ai.collected) {
     for (const [k, v] of Object.entries(ai.collected)) {
       if (v) s.collected[k] = String(v);
+    }
+  }
+
+  // Resolve landmark addresses immediately (stations, hospitals, etc.)
+  for (const key of ['pickupAddress', 'dropoffAddress', 'stopAddress']) {
+    const addr = s.collected[key];
+    if (addr && isLandmarkAddress(addr)) {
+      const resolved = await geocodeGooglePlaces(addr);
+      if (resolved) {
+        s.collected[key] = resolved.address;
+        console.log(`[WA] Resolved landmark ${key}: "${addr}" → "${resolved.address}"`);
+      }
     }
   }
 
@@ -2286,7 +2352,8 @@ async function handleMessage(phone: string, text: string, contactName: string) {
       s.collected['_awaitingConfirm'] = 'true';
       touchSession(s);
 
-      console.log('[WA summary] collected:', JSON.stringify(s.collected));
+
+
       const estimate = await computePriceEstimate(s);
       let replyText = ai.reply;
       if (estimate) {

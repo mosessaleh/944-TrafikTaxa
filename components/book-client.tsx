@@ -1134,7 +1134,13 @@ export default function BookClient(){
 
       const response = await fetch('/api/bookings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-csrf-token': await fetch('/api/csrf', { credentials: 'include' })
+            .then(r => r.json())
+            .then(d => d.csrfToken || '')
+            .catch(() => '')
+        },
         credentials: 'include',
         body: JSON.stringify(bookingData)
       });

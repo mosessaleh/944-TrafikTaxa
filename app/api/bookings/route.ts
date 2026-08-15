@@ -4,7 +4,8 @@ import { prisma } from '@/lib/db';
 import { getUserFromCookie } from '@/lib/auth';
 import { safeEstimateDistance } from '@/lib/geocode-safe';
 import { computePrice } from '@/lib/price';
-import { clientIpKey, limitOrThrow } from '@/lib/rate-limit';
+import { validateCSRFMiddleware } from '@/lib/csrf';
+import { clientIpKey, limitOrThrow, limitCSRFValidationFailures } from '@/lib/rate-limit';
 import { sanitizeInput } from '@/lib/sanitize';
 import { assessBookingRisk, updateBookingRisk } from '@/lib/risk-assessment';
 import { calculateDistance } from '@/lib/distance';
@@ -50,6 +51,7 @@ type BookingHistoryRow = {
 };
 
 async function getRideHistoryColumns() {
+  // SAFE: static INFORMATION_SCHEMA query, no user input
   const rows = await prisma.$queryRawUnsafe<Array<{ COLUMN_NAME?: string; column_name?: string }>>(
     `
       SELECT COLUMN_NAME
@@ -94,6 +96,7 @@ function normalizeBooleanFlag(value: unknown, fallback = true) {
 async function getSettingsMinimumControls(): Promise<SettingsMinControls> {
   const [settings, bookingModeRows] = await Promise.all([
     prisma.settings.findUnique({ where: { id: 1 } }),
+    // SAFE: static query, no user input
     prisma.$queryRawUnsafe<Array<{ allowImmediateBooking?: unknown; allowScheduledBooking?: unknown }>>(
       'SELECT `allowImmediateBooking`, `allowScheduledBooking` FROM `Settings` WHERE `id` = 1 LIMIT 1'
     ).catch(() => [])
@@ -236,6 +239,7 @@ export async function GET(request: NextRequest) {
         ? `r.${columnName}`
         : `NULL AS ${columnName}`;
 
+    // SAFE: dynamically built column names come from INFORMATION_SCHEMA, user-id via ? parameter
     const bookings = await prisma.$queryRawUnsafe<BookingHistoryRow[]>(
       `
         SELECT
@@ -379,6 +383,21 @@ export async function POST(request: NextRequest) {
         { ok: false, error: 'Email verification required' },
         { status: 403 }
       );
+    }
+
+    // CSRF protection
+    const isValidCSRF = await validateCSRFMiddleware(request, user.id);
+    if (!isValidCSRF) {
+      const clientKey = clientIpKey(request);
+      try {
+        await limitCSRFValidationFailures(clientKey);
+      } catch (rateLimitError: any) {
+        return NextResponse.json(
+          { ok: false, error: 'Too many failed requests. Please try again later.' },
+          { status: 429, headers: { 'Retry-After': rateLimitError.retryAfter?.toString() || '900' } }
+        );
+      }
+      return NextResponse.json({ ok: false, error: 'Invalid CSRF token' }, { status: 403 });
     }
 
     // Parse and validate request body
@@ -692,7 +711,9 @@ export async function POST(request: NextRequest) {
           // Authorize the payment (reserve funds)
           const authResult = await authorizeCardPayment(booking, paymentMethodDetails);
 
-          console.log(`[DEBUG] Authorization result:`, authResult);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log(`[DEBUG] Authorization result:`, authResult);
+          }
 
           if (authResult.success) {
             // Update booking with payment capture and attempt تهيئة driverQueue لسائق تتابع مجدول
@@ -726,7 +747,7 @@ export async function POST(request: NextRequest) {
             ) {
               const startLatLon = rideAfterPayment.startLatLon as { lat: number; lon: number };
               try {
-                const vsResp = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/vehicle-selection`, {
+                const vsResp = await fetch(`http://localhost:3000/api/vehicle-selection`, {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',

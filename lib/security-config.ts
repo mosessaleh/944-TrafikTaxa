@@ -29,9 +29,12 @@ export function requireAuthSecret(context: string): string {
 
 export function requireMotorApiToken(context: string): string {
   if (!motorApiToken) {
-    throw new Error(
-      `Missing MOTORAPI_TOKEN environment variable. Required in ${context}.`
-    );
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        `Missing MOTORAPI_TOKEN environment variable. Required in ${context}.`
+      );
+    }
+    return '';
   }
 
   return motorApiToken;

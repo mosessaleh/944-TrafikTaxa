@@ -683,7 +683,13 @@ function WaitingForDriverContent() {
     try {
       const response = await fetch(`/api/bookings/${bookingId}/cancel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": await fetch('/api/csrf', { credentials: 'include' })
+            .then(r => r.json())
+            .then(d => d.csrfToken || '')
+            .catch(() => '')
+        },
         credentials: "include",
       });
 
@@ -704,7 +710,13 @@ function WaitingForDriverContent() {
     try {
       const response = await fetch(`/api/bookings/${bookingId}/cancel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": await fetch('/api/csrf', { credentials: 'include' })
+            .then(r => r.json())
+            .then(d => d.csrfToken || '')
+            .catch(() => '')
+        },
         credentials: "include",
       });
 
